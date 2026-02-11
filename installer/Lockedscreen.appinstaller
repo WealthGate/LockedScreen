@@ -4,7 +4,7 @@
   Version="1.0.0.0"
   xmlns="http://schemas.microsoft.com/appx/appinstaller/2018">
   <MainPackage
-    Name="Lockedscreen"
+    Name="Lockedscreen.App"
     Publisher="CN=WEALTHGATE"
     Version="1.0.0.0"
     Uri="https://github.com/WealthGate/LockedScreen/releases/download/v1.0.0/Lockedscreen.msix" />
