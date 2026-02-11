@@ -1,0 +1,43 @@
+<UserControl x:Class="Lockedscreen.App.Views.AnswerKeyView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Answer Key" Style="{DynamicResource SectionHeader}" />
+                <Button Content="Back" Command="{Binding BackCommand}" Style="{DynamicResource GhostButton}" Margin="16,4,0,0" />
+                <Button Content="Next: Publish" Command="{Binding NextCommand}" Style="{DynamicResource PrimaryButton}" Margin="8,4,0,0" />
+            </StackPanel>
+
+            <ItemsControl ItemsSource="{Binding Questions}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource SurfaceBrush}" Padding="12" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="{Binding PromptHtml}" FontWeight="SemiBold" />
+                                <ItemsControl ItemsSource="{Binding Choices}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                <Button Content="Set Correct" Command="{Binding DataContext.SetCorrectChoiceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" Style="{DynamicResource GhostButton}">
+                                                    <Button.CommandParameter>
+                                                        <MultiBinding Converter="{DynamicResource TupleConverter}">
+                                                            <Binding RelativeSource="{RelativeSource AncestorType=ItemsControl}" Path="DataContext" />
+                                                            <Binding />
+                                                        </MultiBinding>
+                                                    </Button.CommandParameter>
+                                                </Button>
+                                                <TextBlock Text="{Binding TextHtml}" Margin="12,4,0,0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="Correct choice set" Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

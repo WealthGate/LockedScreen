@@ -1,0 +1,13 @@
+﻿# Build outputs
+artifacts/
+
+# IDE / OS
+.vs/
+*.user
+*.suo
+*.cache
+*.log
+
+# NuGet / dotnet
+bin/
+obj/

@@ -1,0 +1,21 @@
+<UserControl x:Class="Lockedscreen.App.Views.StudentLoginView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Margin="24">
+        <TextBlock Text="Student Login" Style="{DynamicResource SectionHeader}" />
+        <Button Content="Refresh Exams" Command="{Binding RefreshCommand}" Style="{DynamicResource GhostButton}" Width="160" />
+
+        <TextBlock Text="Select Exam" Margin="0,16,0,4" />
+        <ComboBox ItemsSource="{Binding Exams}" SelectedItem="{Binding SelectedExam}" DisplayMemberPath="Name" Width="360" />
+
+        <TextBlock Text="Student Name" Margin="0,12,0,4" />
+        <TextBox Text="{Binding StudentName}" Width="360" />
+
+        <TextBlock Text="Student ID (if required)" Margin="0,12,0,4" />
+        <TextBox Text="{Binding StudentId}" Width="360" />
+
+        <TextBlock Text="{Binding Status}" Foreground="{DynamicResource DangerBrush}" Margin="0,12,0,0" />
+
+        <Button Content="Start Exam" Command="{Binding StartExamCommand}" Style="{DynamicResource PrimaryButton}" Width="160" Margin="0,16,0,0" />
+    </StackPanel>
+</UserControl>

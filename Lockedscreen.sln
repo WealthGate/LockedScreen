@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02F89B37-CAD4-412C-BEFC-C18087CFD1EF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lockedscreen.Core", "src\Lockedscreen.Core\Lockedscreen.Core.csproj", "{FC183E56-4DD9-41AF-9D85-33F16C41926B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lockedscreen.Import", "src\Lockedscreen.Import\Lockedscreen.Import.csproj", "{1C542CC1-A988-4D29-96EE-12017DB66163}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lockedscreen.Storage", "src\Lockedscreen.Storage\Lockedscreen.Storage.csproj", "{73A9EAB4-B5EF-4269-BF0F-1DF8A7E5D671}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lockedscreen.App", "src\Lockedscreen.App\Lockedscreen.App.csproj", "{058F3E54-0E45-45EC-B43B-EA9A4EB96233}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lockedscreen.KioskHelper", "src\Lockedscreen.KioskHelper\Lockedscreen.KioskHelper.csproj", "{7F116EC3-D197-4309-8CB2-8871A6E3FD8C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{95277B4D-C047-4613-9DD7-403724DF6DDC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lockedscreen.Tests", "tests\Lockedscreen.Tests\Lockedscreen.Tests.csproj", "{29DF1BC9-DDBA-433F-A5A5-23BBFBB2D03F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FC183E56-4DD9-41AF-9D85-33F16C41926B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC183E56-4DD9-41AF-9D85-33F16C41926B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC183E56-4DD9-41AF-9D85-33F16C41926B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC183E56-4DD9-41AF-9D85-33F16C41926B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C542CC1-A988-4D29-96EE-12017DB66163}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C542CC1-A988-4D29-96EE-12017DB66163}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C542CC1-A988-4D29-96EE-12017DB66163}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C542CC1-A988-4D29-96EE-12017DB66163}.Release|Any CPU.Build.0 = Release|Any CPU
+		{73A9EAB4-B5EF-4269-BF0F-1DF8A7E5D671}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{73A9EAB4-B5EF-4269-BF0F-1DF8A7E5D671}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{73A9EAB4-B5EF-4269-BF0F-1DF8A7E5D671}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{73A9EAB4-B5EF-4269-BF0F-1DF8A7E5D671}.Release|Any CPU.Build.0 = Release|Any CPU
+		{058F3E54-0E45-45EC-B43B-EA9A4EB96233}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{058F3E54-0E45-45EC-B43B-EA9A4EB96233}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{058F3E54-0E45-45EC-B43B-EA9A4EB96233}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{058F3E54-0E45-45EC-B43B-EA9A4EB96233}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7F116EC3-D197-4309-8CB2-8871A6E3FD8C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7F116EC3-D197-4309-8CB2-8871A6E3FD8C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7F116EC3-D197-4309-8CB2-8871A6E3FD8C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7F116EC3-D197-4309-8CB2-8871A6E3FD8C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{29DF1BC9-DDBA-433F-A5A5-23BBFBB2D03F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{29DF1BC9-DDBA-433F-A5A5-23BBFBB2D03F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{29DF1BC9-DDBA-433F-A5A5-23BBFBB2D03F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{29DF1BC9-DDBA-433F-A5A5-23BBFBB2D03F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FC183E56-4DD9-41AF-9D85-33F16C41926B} = {02F89B37-CAD4-412C-BEFC-C18087CFD1EF}
+		{1C542CC1-A988-4D29-96EE-12017DB66163} = {02F89B37-CAD4-412C-BEFC-C18087CFD1EF}
+		{73A9EAB4-B5EF-4269-BF0F-1DF8A7E5D671} = {02F89B37-CAD4-412C-BEFC-C18087CFD1EF}
+		{058F3E54-0E45-45EC-B43B-EA9A4EB96233} = {02F89B37-CAD4-412C-BEFC-C18087CFD1EF}
+		{7F116EC3-D197-4309-8CB2-8871A6E3FD8C} = {02F89B37-CAD4-412C-BEFC-C18087CFD1EF}
+		{29DF1BC9-DDBA-433F-A5A5-23BBFBB2D03F} = {95277B4D-C047-4613-9DD7-403724DF6DDC}
+	EndGlobalSection
+EndGlobal
