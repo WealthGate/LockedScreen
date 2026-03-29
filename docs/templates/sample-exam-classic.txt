@@ -1,0 +1,20 @@
+Q1. What is the chemical symbol for sodium?
+A. S
+B. Na
+C. So
+D. Sd
+ANS: B
+
+Q2. Simplify \sqrt{49}.
+A. 5
+B. 6
+C. 7
+D. 8
+ANS: C
+
+Q3. Which chemical formula represents water?
+A. HO
+B. H_2O
+C. H_2O_2
+D. O_2H
+ANS: B

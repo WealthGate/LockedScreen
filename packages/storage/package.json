@@ -1,0 +1,11 @@
+{
+  "name": "@lockedscreen/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@lockedscreen/exam-engine": "file:../exam-engine",
+    "@lockedscreen/shared-types": "file:../shared-types"
+  }
+}

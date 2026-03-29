@@ -1,0 +1,32 @@
+import * as React from "react";
+
+import { cn } from "../lib";
+
+const variants = {
+  primary: "bg-slate-900 text-white shadow-lg shadow-slate-900/20 hover:bg-slate-800",
+  secondary: "bg-white text-slate-900 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-slate-800",
+  ghost: "bg-transparent text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800",
+  danger: "bg-rose-600 text-white hover:bg-rose-500"
+} as const;
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: keyof typeof variants;
+}
+
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, variant = "primary", ...props },
+  ref
+) {
+  return (
+    <button
+      ref={ref}
+      type={props.type ?? "button"}
+      className={cn(
+        "inline-flex items-center justify-center gap-2 rounded-2xl border border-transparent px-4 py-2.5 text-sm font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-950",
+        variants[variant],
+        className
+      )}
+      {...props}
+    />
+  );
+});

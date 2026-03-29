@@ -1,0 +1,19 @@
+LOCKEDSCREEN Question Authoring Template
+
+Copy this pattern for each question. Keep one option per line.
+
+Question:
+<Type the question prompt here>
+
+A. <Option A>
+B. <Option B>
+C. <Option C>
+D. <Option D>
+
+Answer: <Single option key such as A, B, C, or D>
+
+Notes:
+- Use plain letters for options.
+- Keep the answer line exact and unambiguous.
+- If you draft in Word, remove bullets and smart numbering before export if they alter the option keys.
+- Save as plain text before import when possible.

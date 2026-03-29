@@ -1,0 +1,21 @@
+{
+  "name": "lockedscreen",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@10.8.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "cmd /c npm run dev --workspace @lockedscreen/desktop",
+    "build:desktop": "cmd /c npm run build --workspace @lockedscreen/desktop",
+    "build:native": "dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Service\\Lockedscreen.Security.Service.csproj -c Release && dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Client\\Lockedscreen.Security.Client.csproj -c Release && dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Agent\\Lockedscreen.Security.Agent.csproj -c Release",
+    "build": "cmd /c npm run build:native && cmd /c npm run build:desktop",
+    "typecheck": "cmd /c npm run typecheck --workspace @lockedscreen/desktop",
+    "dist": "cmd /c npm run dist --workspace @lockedscreen/desktop"
+  },
+  "devDependencies": {
+    "electron": "36.0.0"
+  }
+}

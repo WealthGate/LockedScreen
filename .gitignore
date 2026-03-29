@@ -1,13 +1,12 @@
-﻿# Build outputs
-artifacts/
+node_modules/
+_github_publish/
+out/
 
-# IDE / OS
-.vs/
-*.user
-*.suo
-*.cache
+apps/desktop/dist/
+apps/desktop/out/
+
+apps/windows-lockdown/**/bin/
+apps/windows-lockdown/**/obj/
+
+*.tmp
 *.log
-
-# NuGet / dotnet
-bin/
-obj/
