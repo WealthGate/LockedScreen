@@ -1,0 +1,12 @@
+node_modules/
+_github_publish/
+out/
+
+apps/desktop/dist/
+apps/desktop/out/
+
+apps/windows-lockdown/**/bin/
+apps/windows-lockdown/**/obj/
+
+*.tmp
+*.log

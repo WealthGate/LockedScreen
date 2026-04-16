@@ -1,0 +1,5387 @@
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Clock3,
+  Download,
+  FileInput,
+  Flag,
+  LayoutDashboard,
+  Lock,
+  Moon,
+  Plus,
+  Save,
+  Settings,
+  ShieldCheck,
+  Sun,
+  Trash2
+} from "lucide-react";
+import { MemoryRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+
+import { calculateCompletion, createSession, getRemainingSeconds, updateResponse } from "@lockedscreen/exam-engine";
+import type {
+  Candidate,
+  AppSettings,
+  AppStateSnapshot,
+  BrowserDisplayMode,
+  ExamConfigPackage,
+  Exam,
+  ExamAppearance,
+  ExamSession,
+  ImportPreview,
+  ImportedExamMetadata,
+  ImportedQuestionDraft,
+  LaunchContext,
+  LmsConnection,
+  LmsCourse,
+  LmsCourseWork,
+  LmsProviderType,
+  PackageUrlRule,
+  Question,
+  ResultDestination,
+  ResultDestinationType,
+  ResultSyncAuthMode,
+  ResultSyncStatus,
+  SecurityOverview,
+  SecurityProfile,
+  StudentLmsBinding,
+  StudentLmsProviderType,
+  ThemePreference,
+  SubmissionResult,
+  ValidationItem,
+  VerificationStatus
+} from "@lockedscreen/shared-types";
+import { Badge, Button, Card, CardDescription, CardTitle, Input, Textarea } from "@lockedscreen/ui";
+
+import { RichContent } from "./components/rich-content";
+import { useLockedscreenStore } from "./lib/store";
+
+const teacherNavItems = [
+  { to: "/teacher", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/teacher/builder/new", label: "Create Exam", icon: Plus },
+  { to: "/teacher/import", label: "Import", icon: FileInput },
+  { to: "/teacher/results", label: "Results", icon: Download },
+  { to: "/teacher/settings", label: "Admin Console", icon: Settings }
+];
+
+const animation = {
+  initial: { opacity: 0, y: 18 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -12 }
+};
+
+const blankAppearance = (): ExamAppearance => ({
+  theme: "system",
+  headerLayout: "split",
+  fontScale: 1,
+  density: "comfortable"
+});
+
+const blankExam = (mode: Exam["mode"] = "app"): Exam => {
+  const now = new Date().toISOString();
+
+  return {
+    id: crypto.randomUUID(),
+    mode,
+    title: "",
+    subject: "",
+    className: "",
+    form: "",
+    instructions: "Read each question carefully. Stay inside the secure environment until the invigilator ends the session.",
+    durationMinutes: 45,
+    branding: {
+      schoolName: "",
+      accentColor: "#0f766e"
+    },
+    appearance: blankAppearance(),
+    questions: [],
+    linkConfig: mode === "link" ? { url: "", allowedDomains: [] } : undefined,
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const blankQuestion = (): Question => {
+  const options = [
+    { id: crypto.randomUUID(), label: "A", content: "" },
+    { id: crypto.randomUUID(), label: "B", content: "" },
+    { id: crypto.randomUUID(), label: "C", content: "" },
+    { id: crypto.randomUUID(), label: "D", content: "" }
+  ];
+  const firstOption = options.at(0);
+
+  return {
+    id: crypto.randomUUID(),
+    type: "multiple-choice",
+    prompt: "",
+    points: 1,
+    options,
+    correctOptionId: firstOption ? firstOption.id : ""
+  };
+};
+
+const blankResultDestination = (): ResultDestination => {
+  const now = new Date().toISOString();
+
+  return {
+    id: crypto.randomUUID(),
+    label: "New destination",
+    type: "google-sheets",
+    enabled: true,
+    trigger: "manual",
+    endpointUrl: "",
+    authMode: "none",
+    authToken: "",
+    apiKeyHeader: "x-api-key",
+    className: "",
+    courseId: "",
+    sheetName: "",
+    examIds: [],
+    includeResponses: true,
+    notes: "",
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const defaultLmsScope = (provider: LmsProviderType): string =>
+  provider === "google-classroom"
+    ? [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/classroom.courses",
+        "https://www.googleapis.com/auth/classroom.coursework.students",
+        "https://www.googleapis.com/auth/classroom.rosters.readonly",
+        "https://www.googleapis.com/auth/drive.file"
+      ].join(" ")
+    : provider === "microsoft-365"
+      ? [
+          "offline_access",
+          "openid",
+          "profile",
+          "User.Read",
+          "EduRoster.ReadBasic",
+          "EduAssignments.ReadWriteBasic",
+          "Files.ReadWrite"
+        ].join(" ")
+      : "openid profile email";
+
+const blankLmsConnection = (provider: LmsProviderType = "google-classroom"): LmsConnection => {
+  const now = new Date().toISOString();
+
+  return {
+    id: crypto.randomUUID(),
+    label: providerLabel(provider),
+    provider,
+    status: "disconnected",
+    clientId: "",
+    tenantId: provider === "microsoft-365" ? "common" : "",
+    authorizeUrl: "",
+    tokenUrl: "",
+    scope: defaultLmsScope(provider),
+    accountEmail: "",
+    accountName: "",
+    lastConnectedAt: undefined,
+    lastError: undefined,
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const defaultStudentLmsScope = (provider: StudentLmsProviderType): string =>
+  provider === "google-classroom"
+    ? [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/classroom.coursework.me",
+        "https://www.googleapis.com/auth/drive.file"
+      ].join(" ")
+    : ["offline_access", "openid", "profile", "User.Read", "EduAssignments.ReadWrite", "Files.ReadWrite"].join(" ");
+
+const blankStudentLmsBinding = (provider: StudentLmsProviderType = "google-classroom"): StudentLmsBinding => ({
+  enabled: false,
+  provider,
+  connectionId: "",
+  clientId: "",
+  tenantId: provider === "microsoft-365" ? "common" : "",
+  scope: defaultStudentLmsScope(provider),
+  courseId: "",
+  courseLabel: "",
+  assignmentId: "",
+  assignmentLabel: ""
+});
+
+const formatTime = (seconds: number): string => {
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60)
+    .toString()
+    .padStart(2, "0");
+  const remainder = (safe % 60).toString().padStart(2, "0");
+  return `${minutes}:${remainder}`;
+};
+
+const themeClass = (theme: ThemePreference): string => {
+  if (theme === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "";
+  }
+
+  return theme === "dark" ? "dark" : "";
+};
+
+const usesOfficialKiosk = (profile: SecurityProfile): boolean =>
+  profile.kioskMode === "assigned-access" || profile.kioskMode === "shell-launcher" || profile.kioskMode === "hybrid";
+
+const usesNativeCompanion = (profile: SecurityProfile): boolean =>
+  profile.kioskMode === "windows-native-companion" || profile.kioskMode === "hybrid";
+
+const isSecureSessionReady = (snapshot: AppStateSnapshot): boolean => {
+  const officialKioskReady =
+    snapshot.securityProfile.kioskConfigured &&
+    snapshot.securityProfile.dedicatedExamAccount &&
+    usesOfficialKiosk(snapshot.securityProfile);
+  const nativeReady =
+    snapshot.securityProfile.nativeCompanionVerified &&
+    usesNativeCompanion(snapshot.securityProfile) &&
+    snapshot.runtime?.nativeLockdown.lockdownCapable === true;
+
+  return officialKioskReady || nativeReady;
+};
+
+const canUseTestingMode = (snapshot: AppStateSnapshot): boolean =>
+  snapshot.settings.allowNonKioskTestingMode || snapshot.runtime?.canOnlyUseTestingMode === true;
+
+const testingModeCopy = (snapshot: AppStateSnapshot): string =>
+  snapshot.runtime?.canOnlyUseTestingMode
+    ? "will run in Windows Home testing mode because no verified native Windows lockdown companion is active on this device. The app stays full-screen and keeps the exam workflow contained, but the Windows key, task switching, and taskbar surfaces remain under OS control. This is not a secure exam deployment."
+    : "can run in testing mode on unmanaged devices, but the strongest lockdown still requires a verified native Windows companion or official Windows kiosk deployment. This is not a secure exam deployment.";
+
+const testingModeLabel = (snapshot: AppStateSnapshot): string =>
+  snapshot.runtime?.canOnlyUseTestingMode ? "Windows Home testing mode" : "Testing mode";
+
+const getConfigPackageForExam = (snapshot: AppStateSnapshot | null, examId: string): ExamConfigPackage | null => {
+  if (!snapshot) {
+    return null;
+  }
+
+  return (
+    snapshot.configPackages.find((candidate) => candidate.examId === examId && candidate.status !== "archived") ??
+    snapshot.configPackages.find((candidate) => candidate.examId === examId) ??
+    null
+  );
+};
+
+const isNativeFullKioskExam = (snapshot: AppStateSnapshot, examId: string): boolean => {
+  const configPackage = getConfigPackageForExam(snapshot, examId);
+  return (
+    configPackage?.securityMode === "full-kiosk" &&
+    snapshot.securityProfile.nativeCompanionVerified &&
+    usesNativeCompanion(snapshot.securityProfile)
+  );
+};
+
+const requiresInvigilatorExitAfterSubmit = (configPackage: ExamConfigPackage | null): boolean =>
+  Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
+
+const defaultCandidate = (): Candidate => ({
+  id: `candidate-${Date.now()}`,
+  name: "Candidate",
+  className: ""
+});
+
+const createCandidateId = (name: string, candidateId: string): string => {
+  const trimmedId = candidateId.trim();
+  if (trimmedId.length > 0) {
+    return trimmedId;
+  }
+
+  const derived = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return derived || `candidate-${Date.now()}`;
+};
+
+const normalizeCandidate = (name: string, candidateId: string, className = ""): Candidate => {
+  const trimmedName = name.trim();
+  return {
+    name: trimmedName || "Candidate",
+    id: createCandidateId(trimmedName, candidateId),
+    className: className.trim()
+  };
+};
+
+const buildExamRoute = (exam: Exam, candidate: Candidate): string => {
+  const path = exam.mode === "link" ? `/link/${exam.id}` : `/session/${exam.id}`;
+  const params = new URLSearchParams({
+    candidateName: candidate.name,
+    candidateId: candidate.id
+  });
+  if (candidate.className?.trim()) {
+    params.set("candidateClassName", candidate.className.trim());
+  }
+  return `${path}?${params.toString()}`;
+};
+
+const parseCandidateFromSearch = (search: string): Candidate | null => {
+  const params = new URLSearchParams(search);
+  const name = params.get("candidateName")?.trim() ?? "";
+  const id = params.get("candidateId")?.trim() ?? "";
+  const className = params.get("candidateClassName")?.trim() ?? "";
+  if (!name && !id) {
+    return null;
+  }
+
+  return normalizeCandidate(name, id, className);
+};
+
+const splitCommaList = (value: string): string[] =>
+  value
+    .split(/[,\r\n]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const serializeCommaList = (values: string[]): string => values.join(", ");
+
+const hasReachedAvailabilityStart = (availableFrom?: string): boolean => {
+  const now = Date.now();
+  const startsAt = availableFrom ? new Date(availableFrom).getTime() : Number.NaN;
+
+  if (!Number.isNaN(startsAt) && now < startsAt) {
+    return false;
+  }
+
+  return true;
+};
+
+const isPastAvailabilityEnd = (availableUntil?: string): boolean => {
+  const now = Date.now();
+  const endsAt = availableUntil ? new Date(availableUntil).getTime() : Number.NaN;
+
+  if (!Number.isNaN(endsAt) && now > endsAt) {
+    return true;
+  }
+
+  return false;
+};
+
+const formatDateTime = (value?: string): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return null;
+  }
+
+  return timestamp.toLocaleString();
+};
+
+const splitLines = (value: string): string[] =>
+  value
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const serializeUrlRules = (rules: PackageUrlRule[]): string =>
+  rules
+    .map((rule) => [rule.label, rule.kind, rule.role, rule.pattern, rule.allowSubdomains ? "subdomains" : "exact"].join("|"))
+    .join("\n");
+
+const parseUrlRules = (value: string): PackageUrlRule[] =>
+  splitLines(value).map((line) => {
+    const [label, kind, role, pattern, mode] = line.split("|").map((entry) => entry.trim());
+    return {
+      id: crypto.randomUUID(),
+      label: label || "Rule",
+      kind: kind === "prefix" ? "prefix" : "domain",
+      role:
+        role === "start" || role === "resource" || role === "help" || role === "exit"
+          ? role
+          : "exam",
+      pattern: pattern || "",
+      allowSubdomains: mode === "subdomains"
+    };
+  });
+
+const serializeAllowedApps = (configPackage: ExamConfigPackage): string =>
+  configPackage.allowedApplications
+    .map((entry) => [entry.label, entry.executablePath, entry.args.join(" "), entry.supervision, entry.notes ?? ""].join("|"))
+    .join("\n");
+
+const parseAllowedApps = (value: string): ExamConfigPackage["allowedApplications"] =>
+  splitLines(value).map((line) => {
+    const [label, executablePath, argString, supervision, notes] = line.split("|").map((entry) => entry.trim());
+    return {
+      id: crypto.randomUUID(),
+      label: label || "Approved application",
+      executablePath: executablePath || "",
+      args: argString ? argString.split(/\s+/).filter(Boolean) : [],
+      supervision: supervision === "monitor-only" ? "monitor-only" : "launch-and-monitor",
+      notes: notes || undefined
+    };
+  });
+
+const findImportedPackage = (
+  previousPackages: Map<string, string>,
+  nextPackages: ExamConfigPackage[]
+): ExamConfigPackage | null =>
+  nextPackages.find((candidate) => previousPackages.get(candidate.id) !== `${candidate.updatedAt}|${candidate.integrity.checksum}`) ??
+  nextPackages[0] ??
+  null;
+
+const findImportedExam = (previousExams: Map<string, string>, nextExams: Exam[]): Exam | null =>
+  nextExams.find((candidate) => previousExams.get(candidate.id) !== candidate.updatedAt) ?? nextExams[0] ?? null;
+
+const buildDashboardLaunchRoute = (examId: string): string => `/student?launchExamId=${encodeURIComponent(examId)}`;
+
+const cloneImportMetadata = (metadata: ImportedExamMetadata): ImportedExamMetadata => ({ ...metadata });
+
+const cloneImportQuestions = (questions: ImportedQuestionDraft[]): ImportedQuestionDraft[] =>
+  questions.map((question) => ({
+    ...question,
+    options: question.options.map((option) => ({ ...option }))
+  }));
+
+const hydrateImportReview = (preview: ImportPreview | null): { metadata: ImportedExamMetadata | null; questions: ImportedQuestionDraft[] } => ({
+  metadata: preview ? cloneImportMetadata(preview.metadata) : null,
+  questions: preview ? cloneImportQuestions(preview.questions) : []
+});
+
+const statusTone = (status: VerificationStatus): string =>
+  status === "pass"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/60 dark:text-emerald-100"
+    : status === "warn"
+      ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/60 dark:text-amber-100"
+      : status === "fail"
+        ? "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/60 dark:text-rose-100"
+        : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
+
+const feedbackTone = (tone: "success" | "error" | "info"): string =>
+  tone === "success"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/60 dark:text-emerald-100"
+    : tone === "error"
+      ? "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/60 dark:text-rose-100"
+      : "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/70 dark:bg-blue-950/60 dark:text-blue-100";
+
+const selectClassName =
+  "h-11 rounded-2xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/25 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-offset-slate-950";
+
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    return !target.readOnly && !target.disabled;
+  }
+
+  if (target instanceof HTMLSelectElement) {
+    return !target.disabled;
+  }
+
+  return target.isContentEditable;
+};
+
+type AdminActionState =
+  | "refresh-diagnostics"
+  | "save-posture"
+  | "save-package"
+  | "save-settings"
+  | "save-destination"
+  | "delete-destination"
+  | "save-lms-connection"
+  | "delete-lms-connection"
+  | "connect-lms"
+  | "load-lms-courses"
+  | "load-lms-coursework"
+  | "duplicate-package"
+  | "delete-package"
+  | "export-package"
+  | "import-package";
+
+interface ActionFeedback {
+  tone: "success" | "error" | "info";
+  text: string;
+}
+
+const resultSyncTone = (status: ResultSyncStatus): string =>
+  status === "success"
+    ? "bg-emerald-100 text-emerald-900"
+    : status === "failed"
+      ? "bg-rose-100 text-rose-900"
+      : status === "pending"
+        ? "bg-amber-100 text-amber-900"
+        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200";
+
+const studentTurnInTone = (status?: "pending" | "success" | "failed" | "skipped"): string =>
+  status === "success"
+    ? "bg-emerald-100 text-emerald-900"
+    : status === "failed"
+      ? "bg-rose-100 text-rose-900"
+      : status === "pending"
+        ? "bg-amber-100 text-amber-900"
+        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200";
+
+const providerLabel = (type: ResultDestinationType | LmsProviderType): string =>
+  type === "google-classroom"
+    ? "Google Classroom"
+    : type === "microsoft-teams"
+      ? "Microsoft Teams"
+      : type === "microsoft-365"
+        ? "Microsoft 365"
+      : type === "google-sheets"
+        ? "Google Sheets"
+        : type === "generic-oauth-lms"
+          ? "Generic OAuth LMS"
+          : "Generic LMS";
+
+const AppFrame = () => {
+  const location = useLocation();
+  const { snapshot, loading, error, load } = useLockedscreenStore();
+  const [launchContext, setLaunchContext] = useState<LaunchContext | null>(null);
+  const isStudentRoute =
+    location.pathname.startsWith("/student") ||
+    location.pathname.startsWith("/session/") ||
+    location.pathname.startsWith("/link/");
+
+  useEffect(() => {
+    void load();
+    void window.lockedscreenApi.getLaunchContext().then(setLaunchContext);
+    const unsubscribe = window.lockedscreenApi.onLaunchContextChanged(setLaunchContext);
+    return unsubscribe;
+  }, [load]);
+
+  useEffect(() => {
+    document.documentElement.className = themeClass(snapshot?.settings.defaultTheme ?? "system");
+  }, [snapshot?.settings.defaultTheme]);
+
+  if (loading && !snapshot) {
+    return <div className="flex min-h-screen items-center justify-center text-sm text-slate-600 dark:text-slate-300">Loading workspace...</div>;
+  }
+
+  if (!snapshot) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-rose-600">
+        {error ?? "Unable to load application state."}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-4 sm:p-6"}`}>
+      <Routes>
+        <Route path="/" element={<ProfileSelectPage launchContext={launchContext} />} />
+        <Route path="/student" element={<StudentPortalPage />} />
+        <Route path="/session/:examId" element={<StudentExamPage />} />
+        <Route path="/link/:examId" element={<LinkExamPage />} />
+        <Route path="/teacher/*" element={<TeacherShell launchContext={launchContext} />} />
+        <Route path="*" element={<ProfileSelectPage launchContext={launchContext} />} />
+      </Routes>
+      {launchContext?.route ? (
+        <LaunchContextNavigator
+          route={launchContext.route}
+          navigationKey={launchContext.packageImport?.filePath ?? launchContext.route}
+        />
+      ) : null}
+    </div>
+  );
+};
+
+const LaunchContextNavigator = ({ route, navigationKey }: { route: string; navigationKey: string }) => {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    navigate(route, { replace: true });
+  }, [navigate, navigationKey, route]);
+
+  return null;
+};
+
+const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }) => {
+  const { error } = useLockedscreenStore();
+  const navigate = useNavigate();
+
+  return (
+    <div className="grid min-h-[calc(100vh-2rem)] gap-6 lg:grid-cols-[280px_1fr]">
+      <aside className="rounded-[32px] border border-white/60 bg-slate-950/90 p-6 text-white shadow-2xl shadow-slate-900/30">
+        <div className="mb-10 flex items-center gap-3">
+          <div className="rounded-2xl bg-teal-500/20 p-3 text-teal-200">
+            <ShieldCheck className="size-6" />
+          </div>
+          <div>
+            <div className="text-sm uppercase tracking-[0.3em] text-slate-400">LOCKEDSCREEN</div>
+            <div className="text-xl font-semibold">Exam Control</div>
+          </div>
+        </div>
+
+        <nav className="space-y-2">
+          {teacherNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition ${
+                    isActive ? "bg-white text-slate-950 shadow-glow" : "text-slate-300 hover:bg-white/10 hover:text-white"
+                  }`
+                }
+              >
+                <Icon className="size-4" />
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+
+        <Card className="mt-10 border-none bg-white/10 p-5 text-white">
+          <CardTitle className="text-white">Deployment note</CardTitle>
+          <CardDescription className="mt-2 text-slate-300">
+            Real lockdown depends on a verified native Windows lockdown companion or official Windows kiosk deployment. The in-app window assist only reinforces the active exam window.
+          </CardDescription>
+        </Card>
+      </aside>
+
+      <main className="overflow-hidden rounded-[36px] border border-white/80 bg-white/78 p-6 shadow-[0_50px_100px_-48px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/60">
+        {error ? (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+        ) : null}
+
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-slate-200 bg-white/90 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/70">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">Teacher / School</div>
+            <div className="text-sm text-slate-600 dark:text-slate-300">Use Back, Forward, or Dashboard to move around the admin workspace.</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => navigate(-1)}>
+              <ArrowLeft className="size-4" />
+              Back
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(1)}>
+              <ArrowRight className="size-4" />
+              Forward
+            </Button>
+            <Button variant="secondary" onClick={() => navigate("/teacher")}>
+              <LayoutDashboard className="size-4" />
+              Dashboard
+            </Button>
+          </div>
+        </div>
+
+        <AnimatePresence mode="wait">
+          <Routes>
+            <Route index element={<DashboardPage />} />
+            <Route path="builder/:examId" element={<BuilderPage />} />
+            <Route path="import" element={<ImportPage />} />
+            <Route path="package-import" element={<PackageImportPage launchContext={launchContext} />} />
+            <Route path="results" element={<ResultsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Routes>
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+};
+
+const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | null }) => {
+  const navigate = useNavigate();
+  const { snapshot } = useLockedscreenStore();
+  const readyExams = snapshot?.exams ?? [];
+
+  return (
+    <motion.div key="profile-select" {...animation} className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl items-center">
+      <div className="grid w-full gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <Card className="relative overflow-hidden bg-slate-950 p-8 text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.35),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.25),transparent_30%)]" />
+          <div className="relative space-y-6">
+            <Badge className="bg-white/10 text-white">LOCKEDSCREEN</Badge>
+            <div className="space-y-3">
+              <h1 className="text-4xl font-semibold tracking-tight">Choose how you are using the exam app.</h1>
+              <p className="max-w-2xl text-sm leading-7 text-slate-300">
+                Students only see exam information, sign in with their details, and start the exam. Teachers and schools get the full setup and administration workspace.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/student")}>
+                <Lock className="size-4" />
+                Student
+              </Button>
+              <Button variant="secondary" className="border-white/20 bg-white/10 text-white hover:bg-white/20" onClick={() => navigate("/teacher")}>
+                <Settings className="size-4" />
+                Teacher / School
+              </Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatCard label="Available exams" value={String(readyExams.length)} />
+              <StatCard label="Submissions" value={String(snapshot?.submissions.length ?? 0)} />
+              <StatCard label="Launch mode" value={launchContext?.nativeHosted ? "Native host" : "Desktop app"} />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="space-y-4 bg-gradient-to-b from-white to-slate-50">
+          <CardTitle>Quick start</CardTitle>
+          <div className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              Students: open <span className="font-semibold">Student</span>, enter your name, candidate ID, and class, then start your assigned exam.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              Teachers: open <span className="font-semibold">Teacher / School</span> to create exams, import papers, configure packages, and review results.
+            </div>
+            {launchContext?.packageImport ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+                An exam package is waiting to be opened. Use the Teacher / School profile to unlock and import it.
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+    </motion.div>
+  );
+};
+
+const StudentPortalPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { snapshot, launchAlternateDesktopSession, hideExamForStudent } = useLockedscreenStore();
+  const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [candidateName, setCandidateName] = useState("");
+  const [candidateId, setCandidateId] = useState("");
+  const [candidateClassName, setCandidateClassName] = useState("");
+  const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
+  const identifiedCandidate =
+    candidateName.trim().length > 0 ? normalizeCandidate(candidateName, candidateId, candidateClassName) : null;
+  const normalizedCandidateId = identifiedCandidate?.id ?? createCandidateId(candidateName, candidateId);
+  const normalizedCandidateClass = candidateClassName.trim().toLowerCase();
+
+  useEffect(() => {
+    if (!snapshot) {
+      return;
+    }
+
+    const examId = new URLSearchParams(location.search).get("launchExamId");
+    if (!examId) {
+      return;
+    }
+
+    const exam = snapshot.exams.find((candidate) => candidate.id === examId) ?? null;
+    setSelectedExam(exam);
+    setLaunchFeedback(null);
+    navigate("/student", { replace: true });
+  }, [location.search, navigate, snapshot]);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const launchExam = async (exam: Exam, candidate: Candidate) => {
+    setLaunchFeedback(null);
+
+    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
+      setLaunchFeedback({
+        tone: "error",
+        text: "This device is not ready for the exam yet. Ask the teacher or invigilator to prepare the exam workstation before starting."
+      });
+      return;
+    }
+
+    if (isNativeFullKioskExam(snapshot, exam.id)) {
+      try {
+        const handedOff = await launchAlternateDesktopSession({ examId: exam.id, candidate });
+        if (handedOff) {
+          return;
+        }
+      } catch (error) {
+        setLaunchFeedback({
+          tone: "info",
+          text:
+            error instanceof Error
+              ? `${error.message} Starting the exam in this Lockedscreen window instead.`
+              : "Alternate desktop launch failed. Starting the exam in this Lockedscreen window instead."
+        });
+      }
+    }
+
+    navigate(buildExamRoute(exam, candidate));
+  };
+
+  const assignedExamCards = !snapshot || !identifiedCandidate
+    ? []
+    : snapshot.exams
+        .map((exam) => {
+          const configPackage = getConfigPackageForExam(snapshot, exam.id);
+          if (!configPackage || configPackage.status === "archived") {
+            return null;
+          }
+
+          const policy = configPackage.studentAccessPolicy;
+          const assignedClasses = policy.assignedClassNames.map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+          const assignedCandidateIds = policy.assignedCandidateIds.map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+          const assignedToStudent =
+            (assignedClasses.length === 0 && assignedCandidateIds.length === 0) ||
+            assignedClasses.includes(normalizedCandidateClass) ||
+            assignedCandidateIds.includes(normalizedCandidateId.trim().toLowerCase());
+          const hiddenByStudent = snapshot.studentExamStates.some(
+            (entry) => entry.examId === exam.id && entry.candidateId === normalizedCandidateId
+          );
+          const completedSubmission = snapshot.submissions.find(
+            (submission) => submission.examId === exam.id && submission.candidateId === normalizedCandidateId
+          );
+          const canStartNow = hasReachedAvailabilityStart(policy.availableFrom) && !isPastAvailabilityEnd(policy.availableUntil);
+          const expiredByTeacher = isPastAvailabilityEnd(policy.availableUntil);
+
+          if (!assignedToStudent || hiddenByStudent || expiredByTeacher) {
+            return null;
+          }
+
+          return {
+            exam,
+            completedSubmission,
+            policy,
+            canStartNow
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+  return (
+    <motion.div key="student-portal" {...animation} className="mx-auto max-w-6xl space-y-6">
+      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="relative overflow-hidden bg-slate-950 text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(20,184,166,0.35),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(14,165,233,0.24),transparent_26%)]" />
+          <div className="relative space-y-5">
+            <Badge className="bg-white/10 text-white">Student profile</Badge>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight">Find the exams assigned to you, then begin.</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+                Only exam information assigned to your class or student ID is shown here. Completed exams remain visible but cannot be started again.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/")}>
+                <ArrowLeft className="size-4" />
+                Change profile
+              </Button>
+              <Badge className="bg-teal-100 text-teal-950">{snapshot.exams.length} exam(s) available</Badge>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="space-y-4 bg-gradient-to-b from-white to-teal-50">
+          <CardTitle>Before you start</CardTitle>
+          <div className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">Enter your name, candidate ID, and class exactly as assigned by your teacher or school.</div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">Only matching exams will appear. If you already completed one, it will be grayed out and locked.</div>
+            {!isSecureSessionReady(snapshot) ? (
+              <div className={`rounded-2xl border px-4 py-3 ${canUseTestingMode(snapshot) ? "border-amber-200 bg-amber-50 text-amber-950" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
+                {canUseTestingMode(snapshot)
+                  ? `${testingModeLabel(snapshot)} is active on this device. Your invigilator may still allow the session to proceed.`
+                  : "This workstation still needs teacher setup before a secure exam can begin."}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+                This workstation is ready for secure exam launch.
+              </div>
+            )}
+          </div>
+        </Card>
+      </section>
+
+      {launchFeedback ? (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(launchFeedback.tone)}`}>{launchFeedback.text}</div>
+      ) : null}
+
+      <Card className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Student details</CardTitle>
+            <CardDescription>Use these details to load the exams assigned to this student or class.</CardDescription>
+          </div>
+          <Badge className={identifiedCandidate ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}>
+            {identifiedCandidate ? `${assignedExamCards.length} assigned exam(s)` : "Enter details to continue"}
+          </Badge>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <LabelledField label="Student name">
+            <Input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} />
+          </LabelledField>
+          <LabelledField label="Candidate ID">
+            <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
+          </LabelledField>
+          <LabelledField label="Class">
+            <Input value={candidateClassName} onChange={(event) => setCandidateClassName(event.target.value)} />
+          </LabelledField>
+        </div>
+      </Card>
+
+      <section className="grid gap-4">
+        {!identifiedCandidate ? (
+          <Card className="space-y-3">
+            <CardTitle>Enter student details first</CardTitle>
+            <CardDescription>The student portal only shows exams assigned to the current student or class.</CardDescription>
+          </Card>
+        ) : assignedExamCards.length === 0 ? (
+          <Card className="space-y-3">
+            <CardTitle>No assigned exams found</CardTitle>
+            <CardDescription>There are no active exams assigned to this student or class right now.</CardDescription>
+          </Card>
+        ) : (
+          assignedExamCards.map(({ exam, completedSubmission, policy, canStartNow }) => (
+            <Card
+              key={exam.id}
+              className={`grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center ${
+                completedSubmission || !canStartNow ? "border-slate-300 bg-slate-100/80 opacity-75" : ""
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle>{exam.title || "Untitled exam"}</CardTitle>
+                  <Badge className={exam.mode === "link" ? "bg-blue-100 text-blue-700" : "bg-teal-100 text-teal-700"}>
+                    {exam.mode === "link" ? "Hosted exam" : "App exam"}
+                  </Badge>
+                  {completedSubmission ? <Badge className="bg-slate-800 text-white">Completed</Badge> : null}
+                </div>
+                <CardDescription>
+                  {[
+                    exam.branding.schoolName || "School not set",
+                    exam.subject || "Subject not set",
+                    exam.className || "Class not set",
+                    exam.form ? `Form ${exam.form}` : null,
+                    `${exam.durationMinutes} minutes`
+                  ]
+                    .filter(Boolean)
+                    .join(" - ")}
+                </CardDescription>
+                {exam.instructions ? (
+                  <div className="text-sm text-slate-600 dark:text-slate-300">{exam.instructions}</div>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {policy.assignedClassNames.length > 0 ? (
+                    <Badge className="bg-slate-100 text-slate-800">Classes: {policy.assignedClassNames.join(", ")}</Badge>
+                  ) : null}
+                  {policy.assignedCandidateIds.length > 0 ? (
+                    <Badge className="bg-slate-100 text-slate-800">Assigned IDs: {policy.assignedCandidateIds.join(", ")}</Badge>
+                  ) : null}
+                  {formatDateTime(policy.availableUntil) ? (
+                    <Badge className="bg-amber-100 text-amber-900">Visible until {formatDateTime(policy.availableUntil)}</Badge>
+                  ) : null}
+                  {!canStartNow && formatDateTime(policy.availableFrom) ? (
+                    <Badge className="bg-blue-100 text-blue-900">Available from {formatDateTime(policy.availableFrom)}</Badge>
+                  ) : null}
+                </div>
+                {completedSubmission ? (
+                  <div className="rounded-2xl border border-slate-300 bg-white/80 px-4 py-3 text-sm text-slate-700">
+                    Submitted on {new Date(completedSubmission.submittedAt).toLocaleString()}. This exam cannot be started again.
+                  </div>
+                ) : !canStartNow ? (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                    This exam has been assigned to you, but it cannot be started until {formatDateTime(policy.availableFrom) ?? "the scheduled release time"}.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={() => {
+                    setSelectedExam(exam);
+                    setLaunchFeedback(null);
+                  }}
+                  disabled={Boolean(completedSubmission) || !canStartNow}
+                >
+                  {completedSubmission ? "Already completed" : !canStartNow ? "Not yet available" : "Log in and start"}
+                </Button>
+                {completedSubmission && policy.allowStudentDeletionAfterCompletion ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      void hideExamForStudent({ examId: exam.id, candidateId: normalizedCandidateId });
+                    }}
+                  >
+                    Remove from my list
+                  </Button>
+                ) : null}
+              </div>
+            </Card>
+          ))
+        )}
+      </section>
+
+      {selectedExam && identifiedCandidate ? (
+        <Card className="border-slate-200 bg-white text-slate-950 dark:border-slate-200 dark:bg-white dark:text-slate-950">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-2">
+              <CardTitle className="text-slate-950 dark:text-slate-950">Student login</CardTitle>
+              <CardDescription className="max-w-2xl text-slate-700 dark:text-slate-700">
+                Confirm your details to begin <span className="font-semibold">{selectedExam.title || "this exam"}</span>.
+              </CardDescription>
+            </div>
+            <div className="grid w-full gap-4 md:max-w-3xl md:grid-cols-3">
+              <LabelledField label="Student name" labelClassName="text-slate-800 dark:text-slate-800">
+                <Input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} />
+              </LabelledField>
+              <LabelledField label="Candidate ID" labelClassName="text-slate-800 dark:text-slate-800">
+                <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
+              </LabelledField>
+              <LabelledField label="Class" labelClassName="text-slate-800 dark:text-slate-800">
+                <Input value={candidateClassName} onChange={(event) => setCandidateClassName(event.target.value)} />
+              </LabelledField>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => setSelectedExam(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  const candidate = normalizeCandidate(candidateName, candidateId, candidateClassName || selectedExam.className);
+                  void launchExam(selectedExam, candidate);
+                  setSelectedExam(null);
+                }}
+                disabled={candidateName.trim().length === 0}
+              >
+                Start exam
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+    </motion.div>
+  );
+};
+
+const DashboardPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { snapshot, deleteExam, launchAlternateDesktopSession } = useLockedscreenStore();
+  const [launchReviewExam, setLaunchReviewExam] = useState<Exam | null>(null);
+  const [launchCandidateExam, setLaunchCandidateExam] = useState<Exam | null>(null);
+  const [candidateName, setCandidateName] = useState("");
+  const [candidateId, setCandidateId] = useState("");
+  const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const openCandidatePrompt = (exam: Exam) => {
+    setLaunchCandidateExam(exam);
+    setCandidateName("");
+    setCandidateId("");
+    setLaunchReviewExam(null);
+    setLaunchFeedback(null);
+  };
+
+  useEffect(() => {
+    const examId = new URLSearchParams(location.search).get("launchExamId");
+    if (!examId) {
+      return;
+    }
+
+    const exam = snapshot.exams.find((candidate) => candidate.id === examId);
+    if (exam) {
+      openCandidatePrompt(exam);
+    }
+
+    navigate("/teacher", { replace: true });
+  }, [location.search, navigate, snapshot]);
+
+  const launchExam = async (exam: Exam, candidate: Candidate) => {
+    setLaunchFeedback(null);
+
+    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
+      setLaunchReviewExam(exam);
+      return;
+    }
+
+    if (isNativeFullKioskExam(snapshot, exam.id)) {
+      try {
+        const handedOff = await launchAlternateDesktopSession({ examId: exam.id, candidate });
+        if (handedOff) {
+          return;
+        }
+      } catch (error) {
+        setLaunchFeedback({
+          tone: "info",
+          text:
+            error instanceof Error
+              ? `${error.message} Starting the exam in the current Lockedscreen window instead.`
+              : "Alternate desktop launch failed. Starting the exam in the current Lockedscreen window instead."
+        });
+      }
+    }
+
+    navigate(buildExamRoute(exam, candidate));
+  };
+
+  return (
+    <motion.div key="dashboard" {...animation} className="space-y-6">
+      <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+        <Card className="relative overflow-hidden bg-slate-950 text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.35),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.25),transparent_24%)]" />
+          <div className="relative space-y-6">
+            <Badge className="bg-white/10 text-white">Teacher Dashboard</Badge>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight">Secure examinations, prepared for real deployment.</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+                Build app-based exams, supervise linked LMS sessions, export results, and document the Windows kiosk posture for each device.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/teacher/builder/new")}>
+                <Plus className="size-4" />
+                New exam
+              </Button>
+              <Button variant="ghost" className="bg-white/10 text-white hover:bg-white/20" onClick={() => navigate("/teacher/import")}>
+                <FileInput className="size-4" />
+                Import questions
+              </Button>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="bg-gradient-to-b from-white to-teal-50">
+          <CardTitle>Workspace summary</CardTitle>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <StatCard label="Saved exams" value={String(snapshot.exams.length)} />
+            <StatCard label="Submissions" value={String(snapshot.submissions.length)} />
+            <StatCard label="Approved domains" value={String(snapshot.settings.approvedDomains.length)} />
+            <StatCard
+              label="Kiosk posture"
+              value={
+                isSecureSessionReady(snapshot)
+                  ? "Configured"
+                  : snapshot.runtime?.canOnlyUseTestingMode
+                    ? "Home testing only"
+                    : "Needs setup"
+              }
+            />
+          </div>
+        </Card>
+      </section>
+
+      {launchFeedback ? (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(launchFeedback.tone)}`}>{launchFeedback.text}</div>
+      ) : null}
+
+      <section className="grid gap-4">
+        {snapshot.exams.map((exam) => (
+          <Card key={exam.id} className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>{exam.title || "Untitled exam"}</CardTitle>
+                <Badge className={exam.mode === "link" ? "bg-blue-100 text-blue-700" : "bg-teal-100 text-teal-700"}>
+                  {exam.mode === "link" ? "Link-based" : "App-based"}
+                </Badge>
+              </div>
+              <CardDescription>
+                {[
+                  exam.branding.schoolName || "School pending",
+                  exam.subject || "Subject pending",
+                  exam.className || "Class pending",
+                  exam.form ? `Form ${exam.form}` : null,
+                  `${exam.durationMinutes} minutes`
+                ]
+                  .filter(Boolean)
+                  .join(" - ")}
+              </CardDescription>
+              <div className="text-sm text-slate-600 dark:text-slate-300">
+                {exam.mode === "app"
+                  ? `${exam.questions.length} questions ready for auto-grading`
+                  : exam.linkConfig?.url || "External exam URL not set"}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Button variant="secondary" onClick={() => navigate(`/teacher/builder/${exam.id}`)}>
+                Edit
+              </Button>
+              <Button onClick={() => openCandidatePrompt(exam)}>
+                {isSecureSessionReady(snapshot)
+                  ? "Launch secure session"
+                  : canUseTestingMode(snapshot)
+                    ? "Launch testing session"
+                    : "Launch secure session"}
+              </Button>
+              <Button variant="ghost" className="text-rose-700 hover:bg-rose-50" onClick={() => void deleteExam(exam.id)}>
+                <Trash2 className="size-4" />
+                Delete
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </section>
+
+      {launchReviewExam ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex gap-3">
+              <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                <AlertTriangle className="size-5" />
+              </div>
+              <div className="space-y-2">
+                <CardTitle>{canUseTestingMode(snapshot) ? "Non-kiosk launch warning" : "Secure launch blocked"}</CardTitle>
+                <CardDescription className="max-w-3xl text-amber-900">
+                  {launchReviewExam.title || "This exam"}{" "}
+                  {canUseTestingMode(snapshot)
+                    ? testingModeCopy(snapshot)
+                    : "cannot start until the device is configured with a verified native Windows lockdown companion or official Windows kiosk deployment. The app will not pretend to suppress the Windows key or system task switching on its own."}
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              {canUseTestingMode(snapshot) ? (
+                <Button
+                  onClick={() => openCandidatePrompt(launchReviewExam)}
+                >
+                  {snapshot.runtime?.canOnlyUseTestingMode ? "Launch Windows Home session" : "Launch testing session"}
+                </Button>
+              ) : null}
+              <Button variant="secondary" onClick={() => navigate("/teacher/settings")}>
+                Review settings
+              </Button>
+              <Button variant="ghost" className="text-amber-800 hover:bg-amber-100" onClick={() => setLaunchReviewExam(null)}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {launchCandidateExam ? (
+        <Card className="border-slate-200 bg-white text-slate-950 dark:border-slate-200 dark:bg-white dark:text-slate-950">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-2">
+              <CardTitle className="text-slate-950 dark:text-slate-950">Candidate details</CardTitle>
+              <CardDescription className="max-w-2xl text-slate-700 dark:text-slate-700">
+                Enter the student name and optional candidate ID before launching{" "}
+                {launchCandidateExam.title || "this exam"}.
+              </CardDescription>
+            </div>
+            <div className="grid w-full gap-4 md:max-w-xl md:grid-cols-2">
+              <LabelledField label="Student name" labelClassName="text-slate-800 dark:text-slate-800">
+                <Input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} />
+              </LabelledField>
+              <LabelledField label="Candidate ID" labelClassName="text-slate-800 dark:text-slate-800">
+                <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
+              </LabelledField>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => setLaunchCandidateExam(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  const candidate = normalizeCandidate(candidateName, candidateId, launchCandidateExam.className);
+                  void launchExam(launchCandidateExam, candidate);
+                  setLaunchCandidateExam(null);
+                }}
+                disabled={candidateName.trim().length === 0}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+    </motion.div>
+  );
+};
+
+const BuilderPage = () => {
+  const navigate = useNavigate();
+  const { examId } = useParams();
+  const { snapshot, saveExam } = useLockedscreenStore();
+  const existing = snapshot?.exams.find((exam) => exam.id === examId);
+  const [draft, setDraft] = useState<Exam>(() => existing ?? blankExam());
+
+  useEffect(() => {
+    setDraft(existing ?? blankExam());
+  }, [existing, examId]);
+
+  const updateDraft = (patch: Partial<Exam>) => setDraft((current) => ({ ...current, ...patch }));
+
+  const saveCurrent = async () => {
+    await saveExam({ ...draft, updatedAt: new Date().toISOString() });
+    navigate("/teacher");
+  };
+
+  return (
+    <motion.div key={`builder-${examId}`} {...animation} className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">{existing ? "Edit exam" : "Create exam"}</h1>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            Configure teacher settings, compose questions, and preview the student-facing environment.
+          </p>
+        </div>
+        <Button onClick={() => void saveCurrent()}>
+          <Save className="size-4" />
+          Save exam
+        </Button>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Exam title">
+              <Input value={draft.title} onChange={(event) => updateDraft({ title: event.target.value })} />
+            </LabelledField>
+            <LabelledField label="Mode">
+              <select
+                className={selectClassName}
+                value={draft.mode}
+                onChange={(event) =>
+                  updateDraft({
+                    mode: event.target.value === "link" ? "link" : "app",
+                    linkConfig:
+                      event.target.value === "link"
+                        ? draft.linkConfig ?? { url: "", allowedDomains: [] }
+                        : undefined
+                  })
+                }
+              >
+                <option value="app">App-based exam</option>
+                <option value="link">Link-based exam</option>
+              </select>
+            </LabelledField>
+            <LabelledField label="Subject">
+              <Input value={draft.subject} onChange={(event) => updateDraft({ subject: event.target.value })} />
+            </LabelledField>
+            <LabelledField label="Class">
+              <Input value={draft.className} onChange={(event) => updateDraft({ className: event.target.value })} />
+            </LabelledField>
+            <LabelledField label="Form">
+              <Input value={draft.form} onChange={(event) => updateDraft({ form: event.target.value })} />
+            </LabelledField>
+            <LabelledField label="School">
+              <Input
+                value={draft.branding.schoolName}
+                onChange={(event) =>
+                  updateDraft({
+                    branding: { ...draft.branding, schoolName: event.target.value }
+                  })
+                }
+              />
+            </LabelledField>
+            <LabelledField label="Duration (minutes)">
+              <Input
+                type="number"
+                min={5}
+                value={draft.durationMinutes}
+                onChange={(event) => updateDraft({ durationMinutes: Number(event.target.value) || 0 })}
+              />
+            </LabelledField>
+            <LabelledField label="Accent color">
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  className="h-11 w-14 rounded-2xl border border-slate-200 bg-white p-1"
+                  value={draft.branding.accentColor}
+                  onChange={(event) =>
+                    updateDraft({
+                      branding: { ...draft.branding, accentColor: event.target.value }
+                    })
+                  }
+                />
+                <Input
+                  value={draft.branding.accentColor}
+                  onChange={(event) =>
+                    updateDraft({
+                      branding: { ...draft.branding, accentColor: event.target.value }
+                    })
+                  }
+                />
+              </div>
+            </LabelledField>
+            <LabelledField label="Theme">
+              <div className="grid grid-cols-3 gap-2">
+                {(["light", "dark", "system"] as const).map((theme) => (
+                  <Button
+                    key={theme}
+                    variant={draft.appearance.theme === theme ? "primary" : "secondary"}
+                    className="capitalize"
+                    onClick={() => updateDraft({ appearance: { ...draft.appearance, theme } })}
+                  >
+                    {theme === "light" ? (
+                      <Sun className="size-4" />
+                    ) : theme === "dark" ? (
+                      <Moon className="size-4" />
+                    ) : (
+                      <Settings className="size-4" />
+                    )}
+                    {theme}
+                  </Button>
+                ))}
+              </div>
+            </LabelledField>
+            <LabelledField label="Layout density">
+              <select
+                className={selectClassName}
+                value={draft.appearance.density}
+                onChange={(event) =>
+                  updateDraft({
+                    appearance: {
+                      ...draft.appearance,
+                      density: event.target.value === "compact" ? "compact" : "comfortable"
+                    }
+                  })
+                }
+              >
+                <option value="comfortable">Comfortable</option>
+                <option value="compact">Compact</option>
+              </select>
+            </LabelledField>
+          </div>
+
+          <LabelledField label="Instructions">
+            <Textarea value={draft.instructions} onChange={(event) => updateDraft({ instructions: event.target.value })} />
+          </LabelledField>
+
+          {draft.mode === "link" ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <LabelledField label="Exam URL">
+                <Input
+                  placeholder="https://docs.google.com/forms/..."
+                  value={draft.linkConfig?.url ?? ""}
+                  onChange={(event) =>
+                    updateDraft({
+                      linkConfig: {
+                        url: event.target.value,
+                        allowedDomains: draft.linkConfig?.allowedDomains ?? []
+                      }
+                    })
+                  }
+                />
+              </LabelledField>
+              <LabelledField label="Allowed domains">
+                <Textarea
+                  className="min-h-[96px]"
+                  placeholder={"docs.google.com\nclassroom.google.com"}
+                  value={(draft.linkConfig?.allowedDomains ?? []).join("\n")}
+                  onChange={(event) =>
+                    updateDraft({
+                      linkConfig: {
+                        url: draft.linkConfig?.url ?? "",
+                        allowedDomains: event.target.value
+                          .split(/\r?\n/)
+                          .map((domain) => domain.trim())
+                          .filter(Boolean)
+                      }
+                    })
+                  }
+                />
+              </LabelledField>
+            </div>
+          ) : null}
+        </Card>
+
+        <div className="space-y-6">
+          {draft.mode === "app" ? <QuestionBuilder draft={draft} setDraft={setDraft} /> : null}
+          <ExamPreviewCard exam={draft} />
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+const QuestionBuilder = ({
+  draft,
+  setDraft
+}: {
+  draft: Exam;
+  setDraft: Dispatch<SetStateAction<Exam>>;
+}) => {
+  const addQuestion = () => setDraft((current) => ({ ...current, questions: [...current.questions, blankQuestion()] }));
+
+  return (
+    <Card className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <CardTitle>Question builder</CardTitle>
+          <CardDescription>Formatting helpers insert safe HTML tags or display math blocks using `$$...$$`.</CardDescription>
+        </div>
+        <Button onClick={addQuestion}>
+          <Plus className="size-4" />
+          Add question
+        </Button>
+      </div>
+
+      <div className="space-y-4">
+        {draft.questions.map((question, index) => (
+          <QuestionEditor
+            key={question.id}
+            question={question}
+            index={index}
+            total={draft.questions.length}
+            onChange={(nextQuestion) =>
+              setDraft((current) => ({
+                ...current,
+                questions: current.questions.map((candidate) => (candidate.id === question.id ? nextQuestion : candidate))
+              }))
+            }
+            onDelete={() =>
+              setDraft((current) => ({
+                ...current,
+                questions: current.questions.filter((candidate) => candidate.id !== question.id)
+              }))
+            }
+            onMove={(direction) => {
+              setDraft((current) => {
+                const clone = [...current.questions];
+                const from = index;
+                const to = direction === "up" ? index - 1 : index + 1;
+                if (to < 0 || to >= clone.length) {
+                  return current;
+                }
+
+                const [item] = clone.splice(from, 1);
+                if (!item) {
+                  return current;
+                }
+
+                clone.splice(to, 0, item);
+                return {
+                  ...current,
+                  questions: clone
+                };
+              });
+            }}
+            onDuplicate={() =>
+              setDraft((current) => {
+                const nextOptions = question.options.map((option) => ({ ...option, id: crypto.randomUUID() }));
+                const correctLabel =
+                  question.options.find((option) => option.id === question.correctOptionId)?.label ?? question.options[0]?.label;
+                const firstNextOption = nextOptions.at(0);
+                if (!firstNextOption) {
+                  return current;
+                }
+
+                const duplicated = {
+                  ...question,
+                  id: crypto.randomUUID(),
+                  options: nextOptions,
+                  correctOptionId: nextOptions.find((option) => option.label === correctLabel)?.id ?? firstNextOption.id
+                };
+
+                return {
+                  ...current,
+                  questions: [
+                    ...current.questions.slice(0, index + 1),
+                    duplicated,
+                    ...current.questions.slice(index + 1)
+                  ]
+                };
+              })
+            }
+          />
+        ))}
+      </div>
+    </Card>
+  );
+};
+
+const QuestionEditor = ({
+  question,
+  index,
+  total,
+  onChange,
+  onDelete,
+  onMove,
+  onDuplicate
+}: {
+  question: Question;
+  index: number;
+  total: number;
+  onChange: (nextQuestion: Question) => void;
+  onDelete: () => void;
+  onMove: (direction: "up" | "down") => void;
+  onDuplicate: () => void;
+}) => {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const insertMarkup = (before: string, after = before) => {
+    const node = textareaRef.current;
+    if (!node) {
+      return;
+    }
+
+    const start = node.selectionStart ?? question.prompt.length;
+    const end = node.selectionEnd ?? question.prompt.length;
+    const selected = question.prompt.slice(start, end);
+    const next = `${question.prompt.slice(0, start)}${before}${selected}${after}${question.prompt.slice(end)}`;
+    onChange({ ...question, prompt: next });
+  };
+
+  return (
+    <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Badge>Question {index + 1}</Badge>
+          <span className="text-sm text-slate-500">{total} total</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => onMove("up")} disabled={index === 0}>
+            Up
+          </Button>
+          <Button variant="secondary" onClick={() => onMove("down")} disabled={index === total - 1}>
+            Down
+          </Button>
+          <Button variant="secondary" onClick={onDuplicate}>
+            Duplicate
+          </Button>
+          <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" onClick={onDelete}>
+            Delete
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        {[
+          { label: "Bold", before: "<strong>", after: "</strong>" },
+          { label: "Italic", before: "<em>", after: "</em>" },
+          { label: "Underline", before: "<u>", after: "</u>" },
+          { label: "Sub", before: "<sub>", after: "</sub>" },
+          { label: "Sup", before: "<sup>", after: "</sup>" },
+          { label: "Bullets", before: "<ul><li>", after: "</li></ul>" },
+          { label: "Math", before: "$$", after: "$$" }
+        ].map((action) => (
+          <Button key={action.label} variant="secondary" onClick={() => insertMarkup(action.before, action.after)}>
+            {action.label}
+          </Button>
+        ))}
+      </div>
+
+      <div className="space-y-4">
+        <Textarea
+          ref={textareaRef}
+          value={question.prompt}
+          onChange={(event) => onChange({ ...question, prompt: event.target.value })}
+          placeholder="Write the prompt. Use HTML tags for formatting and $$...$$ for equations."
+        />
+        <div className="grid gap-3 md:grid-cols-2">
+          {question.options.map((option) => (
+            <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Option {option.label}</span>
+                <input
+                  type="radio"
+                  name={`correct-${question.id}`}
+                  checked={question.correctOptionId === option.id}
+                  onChange={() => onChange({ ...question, correctOptionId: option.id })}
+                />
+              </div>
+              <Input
+                value={option.content}
+                onChange={(event) =>
+                  onChange({
+                    ...question,
+                    options: question.options.map((candidate) =>
+                      candidate.id === option.id ? { ...candidate, content: event.target.value } : candidate
+                    )
+                  })
+                }
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+const ImportPage = () => {
+  const navigate = useNavigate();
+  const { snapshot, activeImport, importQuestions, saveExam } = useLockedscreenStore();
+  const [targetExamId, setTargetExamId] = useState<string>("new");
+  const [reviewMetadata, setReviewMetadata] = useState<ImportedExamMetadata | null>(null);
+  const [reviewQuestions, setReviewQuestions] = useState<ImportedQuestionDraft[]>([]);
+
+  useEffect(() => {
+    const nextReview = hydrateImportReview(activeImport);
+    setReviewMetadata(nextReview.metadata);
+    setReviewQuestions(nextReview.questions);
+  }, [activeImport]);
+
+  const unresolvedAnswerCount = reviewQuestions.filter((question) => !question.selectedCorrectOptionId).length;
+  const canApplyImport = Boolean(reviewMetadata && reviewQuestions.length > 0 && unresolvedAnswerCount === 0);
+
+  const updateMetadata = (patch: Partial<ImportedExamMetadata>) => {
+    setReviewMetadata((current) => (current ? { ...current, ...patch } : current));
+  };
+
+  const updateQuestion = (questionId: string, updater: (question: ImportedQuestionDraft) => ImportedQuestionDraft) => {
+    setReviewQuestions((current) =>
+      current.map((question) => (question.id === questionId ? updater(question) : question))
+    );
+  };
+
+  const applyImport = async () => {
+    if (!reviewMetadata || reviewQuestions.length === 0 || unresolvedAnswerCount > 0) {
+      return;
+    }
+
+    const importedQuestions: Question[] = reviewQuestions.map((question) => ({
+      id: question.id,
+      type: "multiple-choice",
+      prompt: question.prompt.trim(),
+      points: question.points,
+      options: question.options.map((option) => ({ ...option })),
+      correctOptionId: question.selectedCorrectOptionId ?? ""
+    }));
+
+    if (targetExamId === "new") {
+      const exam = blankExam("app");
+      exam.title = reviewMetadata.title.trim() || "Imported exam";
+      exam.subject = reviewMetadata.subject.trim();
+      exam.className = reviewMetadata.className.trim();
+      exam.form = reviewMetadata.form.trim();
+      exam.instructions = reviewMetadata.instructions.trim() || exam.instructions;
+      exam.durationMinutes = reviewMetadata.durationMinutes ?? 45;
+      exam.branding = {
+        ...exam.branding,
+        schoolName: reviewMetadata.schoolName.trim()
+      };
+      exam.questions = importedQuestions;
+      await saveExam(exam);
+      navigate(`/teacher/builder/${exam.id}`);
+      return;
+    }
+
+    const target = snapshot?.exams.find((exam) => exam.id === targetExamId);
+    if (!target) {
+      return;
+    }
+
+    await saveExam({ ...target, questions: [...target.questions, ...importedQuestions] });
+    navigate(`/teacher/builder/${target.id}`);
+  };
+
+  return (
+    <motion.div key="import" {...animation} className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Import questions</h1>
+        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          Upload `.doc`, `.docx`, `.pdf`, or `.txt` exam papers, review the extracted heading and metadata, then select the correct option for each question before saving.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={() => void importQuestions()}>
+          <FileInput className="size-4" />
+          Choose import file
+        </Button>
+        <select
+          className={selectClassName}
+          value={targetExamId}
+          onChange={(event) => setTargetExamId(event.target.value)}
+        >
+          <option value="new">Create new exam</option>
+          {snapshot?.exams
+            .filter((exam) => exam.mode === "app")
+            .map((exam) => (
+              <option key={exam.id} value={exam.id}>
+                Append to {exam.title || "Untitled exam"}
+              </option>
+            ))}
+        </select>
+        <Button variant="secondary" onClick={() => void applyImport()} disabled={!canApplyImport}>
+          {unresolvedAnswerCount > 0 ? `Select ${unresolvedAnswerCount} answer${unresolvedAnswerCount === 1 ? "" : "s"}` : "Save import"}
+        </Button>
+      </div>
+
+      {activeImport && reviewMetadata ? (
+        <div className="grid gap-6 xl:grid-cols-[0.82fr_1.18fr]">
+          <div className="space-y-6">
+            <Card className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle>Exam details</CardTitle>
+                  <CardDescription>
+                    Review the extracted heading, subject, class, form, and timing before saving.
+                  </CardDescription>
+                </div>
+                <Badge>{activeImport.sourceFileName}</Badge>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <LabelledField label="Heading">
+                  <Input value={reviewMetadata.title} onChange={(event) => updateMetadata({ title: event.target.value })} />
+                </LabelledField>
+                <LabelledField label="Subject">
+                  <Input value={reviewMetadata.subject} onChange={(event) => updateMetadata({ subject: event.target.value })} />
+                </LabelledField>
+                <LabelledField label="Class">
+                  <Input value={reviewMetadata.className} onChange={(event) => updateMetadata({ className: event.target.value })} />
+                </LabelledField>
+                <LabelledField label="Form">
+                  <Input value={reviewMetadata.form} onChange={(event) => updateMetadata({ form: event.target.value })} />
+                </LabelledField>
+                <LabelledField label="Teacher">
+                  <Input
+                    value={reviewMetadata.teacherName}
+                    onChange={(event) => updateMetadata({ teacherName: event.target.value })}
+                  />
+                </LabelledField>
+                <LabelledField label="School">
+                  <Input
+                    value={reviewMetadata.schoolName}
+                    onChange={(event) => updateMetadata({ schoolName: event.target.value })}
+                  />
+                </LabelledField>
+                <LabelledField label="Detected time">
+                  <Input
+                    value={reviewMetadata.durationText}
+                    onChange={(event) => updateMetadata({ durationText: event.target.value })}
+                    placeholder="e.g. 1 hour 30 minutes"
+                  />
+                </LabelledField>
+                <LabelledField label="Duration (minutes)">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={reviewMetadata.durationMinutes ?? 45}
+                    onChange={(event) =>
+                      updateMetadata({
+                        durationMinutes: Number(event.target.value) || 45
+                      })
+                    }
+                  />
+                </LabelledField>
+              </div>
+
+              <LabelledField label="Instructions">
+                <Textarea
+                  className="min-h-[120px]"
+                  value={reviewMetadata.instructions}
+                  onChange={(event) => updateMetadata({ instructions: event.target.value })}
+                  placeholder="Any instructions extracted from the uploaded document appear here."
+                />
+              </LabelledField>
+            </Card>
+
+            <Card className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>Import notes</CardTitle>
+                <Badge>{reviewQuestions.length} questions</Badge>
+              </div>
+              <div className="space-y-3">
+                {activeImport.issues.length === 0 ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                    The document structure was extracted cleanly.
+                  </div>
+                ) : (
+                  activeImport.issues.map((issue, index) => (
+                    <div
+                      key={`${issue.message}-${index}`}
+                      className={`rounded-2xl border px-4 py-3 text-sm ${
+                        issue.severity === "error"
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : "border-amber-200 bg-amber-50 text-amber-800"
+                      }`}
+                    >
+                      {issue.message}
+                    </div>
+                  ))
+                )}
+                {unresolvedAnswerCount > 0 ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Select the correct option for every imported question before saving this exam.
+                  </div>
+                ) : null}
+              </div>
+            </Card>
+          </div>
+
+          <Card className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>Question review</CardTitle>
+                <CardDescription>
+                  Edit any extracted text that needs cleanup and choose the correct answer for each question.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge>{reviewQuestions.length} items</Badge>
+                <Badge className={unresolvedAnswerCount > 0 ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}>
+                  {unresolvedAnswerCount > 0 ? `${unresolvedAnswerCount} pending answers` : "Ready to save"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {reviewQuestions.map((question, index) => (
+                <ImportedQuestionReviewCard
+                  key={question.id}
+                  question={question}
+                  index={index}
+                  onChange={(nextQuestion) => updateQuestion(question.id, () => nextQuestion)}
+                  onDelete={() =>
+                    setReviewQuestions((current) => current.filter((candidate) => candidate.id !== question.id))
+                  }
+                />
+              ))}
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <Card className="space-y-3">
+          <CardTitle>Ready to import</CardTitle>
+          <CardDescription>
+            Choose an exam document to extract the heading, class, subject, form, time, questions, and answer options into a review screen.
+          </CardDescription>
+        </Card>
+      )}
+    </motion.div>
+  );
+};
+
+const ImportedQuestionReviewCard = ({
+  question,
+  index,
+  onChange,
+  onDelete
+}: {
+  question: ImportedQuestionDraft;
+  index: number;
+  onChange: (question: ImportedQuestionDraft) => void;
+  onDelete: () => void;
+}) => {
+  const detectedOption = question.detectedAnswerLabel
+    ? question.options.find((option) => option.label === question.detectedAnswerLabel)
+    : null;
+
+  return (
+    <div className="rounded-[28px] border border-slate-200 bg-slate-50/90 p-5 dark:border-slate-700 dark:bg-slate-900/70">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge>Question {index + 1}</Badge>
+          {detectedOption ? (
+            <Badge className="bg-blue-100 text-blue-900">Detected answer {detectedOption.label}</Badge>
+          ) : (
+            <Badge className="bg-amber-100 text-amber-900">Teacher answer required</Badge>
+          )}
+        </div>
+        <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" onClick={onDelete}>
+          Remove
+        </Button>
+      </div>
+
+      <div className="space-y-4">
+        <LabelledField label="Prompt">
+          <Textarea
+            className="min-h-[120px]"
+            value={question.prompt}
+            onChange={(event) => onChange({ ...question, prompt: event.target.value })}
+          />
+        </LabelledField>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {question.options.map((option) => (
+            <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Option {option.label}</span>
+                <input
+                  type="radio"
+                  name={`import-correct-${question.id}`}
+                  checked={question.selectedCorrectOptionId === option.id}
+                  onChange={() => onChange({ ...question, selectedCorrectOptionId: option.id })}
+                />
+              </div>
+              <Input
+                value={option.content}
+                onChange={(event) =>
+                  onChange({
+                    ...question,
+                    options: question.options.map((candidate) =>
+                      candidate.id === option.id ? { ...candidate, content: event.target.value } : candidate
+                    )
+                  })
+                }
+              />
+            </div>
+          ))}
+        </div>
+
+        {!question.selectedCorrectOptionId ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Select the correct option for this question before saving the imported exam.
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | null }) => {
+  const navigate = useNavigate();
+  const { snapshot: currentSnapshot, importConfigPackage } = useLockedscreenStore();
+  const packageImport = launchContext?.packageImport ?? null;
+  const [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false);
+  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
+  const [importedExam, setImportedExam] = useState<Exam | null>(null);
+
+  useEffect(() => {
+    setPassword("");
+    setFeedback(null);
+    setImportedExam(null);
+  }, [packageImport?.filePath]);
+
+  const handleImport = async () => {
+    if (!packageImport) {
+      return;
+    }
+
+    setPending(true);
+    setFeedback(null);
+
+    try {
+      const previousExams = new Map((currentSnapshot?.exams ?? []).map((candidate) => [candidate.id, candidate.updatedAt]));
+      const importedSnapshot = await importConfigPackage({
+        password,
+        filePath: packageImport.filePath
+      });
+
+      if (!importedSnapshot) {
+        setFeedback({
+          tone: "error",
+          text: "Import failed. Check the password and try again."
+        });
+        return;
+      }
+
+      const nextExam = findImportedExam(previousExams, importedSnapshot.exams);
+      setImportedExam(nextExam);
+      setFeedback({
+        tone: "success",
+        text: nextExam
+          ? `Imported "${nextExam.title || "Uploaded exam"}". You can start it now.`
+          : "Exam package imported successfully."
+      });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <motion.div key="package-import" {...animation} className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Open exam package</h1>
+        <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+          Double-clicked Lockedscreen packages open here. Enter the package password to import the exam onto this device.
+        </p>
+      </div>
+
+      <Card className="space-y-5">
+        {packageImport ? (
+          <>
+            <div className="space-y-3">
+              <div>
+                <CardTitle>{packageImport.label}</CardTitle>
+                <CardDescription>
+                  {packageImport.examTitle
+                    ? `This package contains the exam "${packageImport.examTitle}".`
+                    : "This package was exported from Lockedscreen and requires a password before import."}
+                </CardDescription>
+              </div>
+              {packageImport.passwordHint ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Password hint: {packageImport.passwordHint}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid gap-4 md:max-w-xl">
+              <LabelledField label="Package password">
+                <Input
+                  type="password"
+                  autoFocus
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && password.trim().length > 0 && !pending) {
+                      event.preventDefault();
+                      void handleImport();
+                    }
+                  }}
+                />
+              </LabelledField>
+            </div>
+
+            {feedback ? (
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(feedback.tone)}`}>{feedback.text}</div>
+            ) : null}
+
+            {importedExam ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                Uploaded exam ready: <span className="font-semibold">{importedExam.title || "Untitled exam"}</span>
+              </div>
+            ) : null}
+
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => navigate("/teacher")}>
+                Return to dashboard
+              </Button>
+              {importedExam ? (
+                <Button onClick={() => navigate(buildDashboardLaunchRoute(importedExam.id), { replace: true })}>
+                  Start uploaded exam
+                </Button>
+              ) : (
+                <Button onClick={() => void handleImport()} disabled={password.trim().length === 0 || pending}>
+                  {pending ? "Importing..." : "Unlock and import exam"}
+                </Button>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <CardTitle>No exam package is waiting to be opened</CardTitle>
+            <CardDescription>
+              Open a `.lscp` file from File Explorer or use the admin console to import a package manually.
+            </CardDescription>
+            <div>
+              <Button onClick={() => navigate("/teacher")}>Return to dashboard</Button>
+            </div>
+          </>
+        )}
+      </Card>
+    </motion.div>
+  );
+};
+
+const ResultsPage = () => {
+  const { snapshot, exportResultsCsv, syncPendingResults, syncSubmissionResults } = useLockedscreenStore();
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const hasPendingSync = snapshot.submissions.some((submission) =>
+    submission.syncStates.some((state) => state.status === "pending" || state.status === "failed")
+  );
+
+  return (
+    <motion.div key="results" {...animation} className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Results</h1>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            App-based exams auto-grade locally first, then can sync safely to Google Classroom, Microsoft Teams, Google Sheets, or another LMS endpoint from the admin side.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => void syncPendingResults()} disabled={!hasPendingSync}>
+            <ShieldCheck className="size-4" />
+            Sync pending
+          </Button>
+          <Button variant="secondary" onClick={() => void exportResultsCsv()}>
+            <Download className="size-4" />
+            Export CSV
+          </Button>
+        </div>
+      </div>
+
+      <Card className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Configured destinations</CardTitle>
+            <CardDescription>
+              Destinations are configured in the admin console. Local submissions remain stored even if remote sync fails.
+            </CardDescription>
+          </div>
+          <Badge>{snapshot.resultDestinations.length} destination(s)</Badge>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {snapshot.resultDestinations.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              No LMS or sheet destination configured yet.
+            </div>
+          ) : (
+            snapshot.resultDestinations.map((destination) => (
+              <div key={destination.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-50">{destination.label}</span>
+                  <Badge>{providerLabel(destination.type)}</Badge>
+                  <Badge className={destination.enabled ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-700"}>
+                    {destination.enabled ? destination.trigger : "disabled"}
+                  </Badge>
+                </div>
+                <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                  {destination.className || "All classes"} / {destination.endpointUrl || "Endpoint pending"}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+
+      <Card className="space-y-4">
+        <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 border-b border-slate-200 px-1 pb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+          <span>Candidate</span>
+          <span>Exam</span>
+          <span>Score</span>
+          <span>Percent</span>
+          <span>Submitted</span>
+          <span>Action</span>
+        </div>
+        {snapshot.submissions.length === 0 ? (
+          <div className="py-10 text-sm text-slate-500 dark:text-slate-400">No submissions yet.</div>
+        ) : (
+          snapshot.submissions.map((result) => (
+            <div key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 text-sm text-slate-700 dark:text-slate-200">
+                <span>{result.candidateName}</span>
+                <span>{result.examTitle}</span>
+                <span>
+                  {result.score}/{result.totalPoints}
+                </span>
+                <span>{result.percentage}%</span>
+                <span>{new Date(result.submittedAt).toLocaleString()}</span>
+                <Button variant="secondary" className="px-3 py-2" onClick={() => void syncSubmissionResults(result.id)}>
+                  Sync
+                </Button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {result.syncStates.length === 0 ? (
+                  <Badge className="bg-slate-100 text-slate-700">No destinations</Badge>
+                ) : (
+                  result.syncStates.map((state) => (
+                    <Badge key={`${result.id}-${state.destinationId}`} className={resultSyncTone(state.status)}>
+                      {state.destinationLabel}: {state.status}
+                    </Badge>
+                  ))
+                )}
+                {result.studentLmsTurnIn ? (
+                  <Badge className={studentTurnInTone(result.studentLmsTurnIn.status)}>
+                    {providerLabel(result.studentLmsTurnIn.provider)}: {result.studentLmsTurnIn.status}
+                  </Badge>
+                ) : null}
+              </div>
+              {result.syncStates.some((state) => state.lastError) ? (
+                <div className="mt-3 grid gap-2">
+                  {result.syncStates
+                    .filter((state) => state.lastError)
+                    .map((state) => (
+                      <div
+                        key={`${result.id}-${state.destinationId}-error`}
+                        className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                      >
+                        {state.destinationLabel}: {state.lastError}
+                      </div>
+                    ))}
+                </div>
+              ) : null}
+              {result.studentLmsTurnIn?.lastError ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {providerLabel(result.studentLmsTurnIn.provider)}: {result.studentLmsTurnIn.lastError}
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </Card>
+    </motion.div>
+  );
+};
+
+const SettingsPage = () => {
+  const {
+    snapshot,
+    saveSettings,
+    saveSecurityProfile,
+    saveConfigPackage,
+    saveResultDestination,
+    saveLmsConnection,
+    deleteLmsConnection,
+    connectLmsConnection,
+    listLmsCourses,
+    listLmsCourseWork,
+    deleteResultDestination,
+    deleteConfigPackage,
+    duplicateConfigPackage,
+    exportConfigPackage,
+    importConfigPackage,
+    refreshSecurityOverview
+  } = useLockedscreenStore();
+  const [settings, setSettings] = useState<AppSettings | null>(snapshot?.settings ?? null);
+  const [security, setSecurity] = useState<SecurityProfile | null>(snapshot?.securityProfile ?? null);
+  const [selectedPackageId, setSelectedPackageId] = useState(snapshot?.configPackages[0]?.id ?? "");
+  const [packageDraft, setPackageDraft] = useState<ExamConfigPackage | null>(snapshot?.configPackages[0] ?? null);
+  const [exportPassword, setExportPassword] = useState("");
+  const [packagePasswordHint, setPackagePasswordHint] = useState("");
+  const [importPassword, setImportPassword] = useState("");
+  const [urlRulesText, setUrlRulesText] = useState("");
+  const [allowedAppsText, setAllowedAppsText] = useState("");
+  const [pendingAction, setPendingAction] = useState<AdminActionState | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [securityDirty, setSecurityDirty] = useState(false);
+  const [packageDirty, setPackageDirty] = useState(false);
+  const [selectedDestinationId, setSelectedDestinationId] = useState(snapshot?.resultDestinations[0]?.id ?? "");
+  const [destinationDraft, setDestinationDraft] = useState<ResultDestination | null>(snapshot?.resultDestinations[0] ?? null);
+  const [destinationDirty, setDestinationDirty] = useState(false);
+  const [selectedConnectionId, setSelectedConnectionId] = useState(snapshot?.lmsConnections[0]?.id ?? "");
+  const [connectionDraft, setConnectionDraft] = useState<LmsConnection | null>(snapshot?.lmsConnections[0] ?? null);
+  const [connectionDirty, setConnectionDirty] = useState(false);
+  const [connectionCourses, setConnectionCourses] = useState<LmsCourse[]>([]);
+  const [bindingCourseWork, setBindingCourseWork] = useState<LmsCourseWork[]>([]);
+  const autoTestingMode = snapshot?.runtime?.canOnlyUseTestingMode === true;
+
+  useEffect(() => {
+    if (!snapshot) {
+      setSettings(null);
+      setSecurity(null);
+      setSelectedPackageId("");
+      setPackageDraft(null);
+      setSelectedDestinationId("");
+      setDestinationDraft(null);
+      setSelectedConnectionId("");
+      setConnectionDraft(null);
+      setConnectionCourses([]);
+      setBindingCourseWork([]);
+      setUrlRulesText("");
+      setAllowedAppsText("");
+      setPackagePasswordHint("");
+      return;
+    }
+
+    if (!settingsDirty) {
+      setSettings(snapshot.settings);
+    }
+
+    if (!securityDirty) {
+      setSecurity(snapshot.securityProfile);
+    }
+
+    if (snapshot.configPackages.length === 0) {
+      setSelectedPackageId("");
+      setPackageDraft(null);
+      setUrlRulesText("");
+      setAllowedAppsText("");
+      setPackagePasswordHint("");
+      return;
+    }
+
+    const selected =
+      snapshot.configPackages.find((candidate) => candidate.id === selectedPackageId) ?? snapshot.configPackages[0];
+
+    if (!packageDirty || packageDraft?.id !== selected?.id) {
+      setSelectedPackageId(selected?.id ?? "");
+      setPackageDraft(selected ?? null);
+      setUrlRulesText(selected ? serializeUrlRules(selected.browserPolicy.urlRules) : "");
+      setAllowedAppsText(selected ? serializeAllowedApps(selected) : "");
+      setPackagePasswordHint(selected?.passwordHint ?? "");
+    }
+
+    if (snapshot.resultDestinations.length === 0) {
+      if (!destinationDirty) {
+        setSelectedDestinationId("");
+        setDestinationDraft(blankResultDestination());
+      }
+    } else {
+      const selectedDestination =
+        snapshot.resultDestinations.find((candidate) => candidate.id === selectedDestinationId) ?? snapshot.resultDestinations[0];
+
+      if (!destinationDirty || destinationDraft?.id !== selectedDestination?.id) {
+        setSelectedDestinationId(selectedDestination?.id ?? "");
+        setDestinationDraft(selectedDestination ?? null);
+      }
+    }
+
+    if (snapshot.lmsConnections.length === 0) {
+      if (!connectionDirty) {
+        setSelectedConnectionId("");
+        setConnectionDraft(blankLmsConnection());
+        setConnectionCourses([]);
+        setBindingCourseWork([]);
+      }
+    } else {
+      const selectedConnection =
+        snapshot.lmsConnections.find((candidate) => candidate.id === selectedConnectionId) ?? snapshot.lmsConnections[0];
+
+      if (!connectionDirty || connectionDraft?.id !== selectedConnection?.id) {
+        setSelectedConnectionId(selectedConnection?.id ?? "");
+        setConnectionDraft(selectedConnection ?? null);
+        setConnectionCourses([]);
+        setBindingCourseWork([]);
+      }
+    }
+  }, [
+    connectionDirty,
+    connectionDraft?.id,
+    destinationDirty,
+    destinationDraft?.id,
+    packageDirty,
+    packageDraft?.id,
+    securityDirty,
+    selectedDestinationId,
+    selectedConnectionId,
+    selectedPackageId,
+    settingsDirty,
+    snapshot
+  ]);
+
+  if (!settings || !security || !packageDraft || !destinationDraft || !connectionDraft || !snapshot) {
+    return null;
+  }
+
+  const securityOverview = snapshot.securityOverview;
+  const packageOptions = snapshot.configPackages;
+  const selectedExam = snapshot.exams.find((exam) => exam.id === packageDraft.examId);
+  const bindingConnections = snapshot.lmsConnections.filter(
+    (connection) => connection.provider === packageDraft.studentLmsBinding.provider && connection.status === "connected"
+  );
+  const updateSettings = (updater: (current: AppSettings) => AppSettings) => {
+    setSettingsDirty(true);
+    setSettings((current) => (current ? updater(current) : current));
+  };
+  const updateSecurity = (updater: (current: SecurityProfile) => SecurityProfile) => {
+    setSecurityDirty(true);
+    setSecurity((current) => (current ? updater(current) : current));
+  };
+  const updatePackage = (updater: (current: ExamConfigPackage) => ExamConfigPackage) => {
+    setPackageDirty(true);
+    setPackageDraft((current) => (current ? updater(current) : current));
+  };
+  const updateDestination = (updater: (current: ResultDestination) => ResultDestination) => {
+    setDestinationDirty(true);
+    setDestinationDraft((current) => (current ? updater(current) : current));
+  };
+  const updateConnection = (updater: (current: LmsConnection) => LmsConnection) => {
+    setConnectionDirty(true);
+    setConnectionDraft((current) => (current ? updater(current) : current));
+  };
+  const adminBusy = pendingAction !== null;
+  const isPending = (action: AdminActionState): boolean => pendingAction === action;
+
+  const syncStructuredEditors = (nextPackage: ExamConfigPackage | null) => {
+    setPackageDraft(nextPackage);
+    setUrlRulesText(nextPackage ? serializeUrlRules(nextPackage.browserPolicy.urlRules) : "");
+    setAllowedAppsText(nextPackage ? serializeAllowedApps(nextPackage) : "");
+    setPackagePasswordHint(nextPackage?.passwordHint ?? "");
+  };
+
+  const selectPackage = (nextPackage: ExamConfigPackage | null) => {
+    setSelectedPackageId(nextPackage?.id ?? "");
+    syncStructuredEditors(nextPackage);
+    setPackageDirty(false);
+  };
+
+  const selectDestination = (nextDestination: ResultDestination | null) => {
+    setSelectedDestinationId(nextDestination?.id ?? "");
+    setDestinationDraft(nextDestination ?? blankResultDestination());
+    setDestinationDirty(false);
+  };
+
+  const selectConnection = (nextConnection: LmsConnection | null) => {
+    setSelectedConnectionId(nextConnection?.id ?? "");
+    setConnectionDraft(nextConnection ?? blankLmsConnection());
+    setConnectionDirty(false);
+    setConnectionCourses([]);
+  };
+
+  const buildPackageDraft = (): ExamConfigPackage => ({
+    ...packageDraft,
+    passwordHint: packagePasswordHint || undefined,
+    browserPolicy: {
+      ...packageDraft.browserPolicy,
+      urlRules: parseUrlRules(urlRulesText)
+    },
+    allowedApplications: parseAllowedApps(allowedAppsText),
+    studentAccessPolicy: {
+      ...packageDraft.studentAccessPolicy,
+      assignedClassNames: packageDraft.studentAccessPolicy.assignedClassNames.map((entry) => entry.trim()).filter(Boolean),
+      assignedCandidateIds: packageDraft.studentAccessPolicy.assignedCandidateIds.map((entry) => entry.trim()).filter(Boolean),
+      availableFrom: packageDraft.studentAccessPolicy.availableFrom?.trim() || undefined,
+      availableUntil: packageDraft.studentAccessPolicy.availableUntil?.trim() || undefined
+    },
+    studentLmsBinding: {
+      ...packageDraft.studentLmsBinding,
+      connectionId: packageDraft.studentLmsBinding.connectionId?.trim() || undefined,
+      clientId: packageDraft.studentLmsBinding.clientId.trim(),
+      tenantId: packageDraft.studentLmsBinding.provider === "microsoft-365"
+        ? packageDraft.studentLmsBinding.tenantId?.trim() || "common"
+        : undefined,
+      scope: packageDraft.studentLmsBinding.scope.trim() || defaultStudentLmsScope(packageDraft.studentLmsBinding.provider),
+      courseId: packageDraft.studentLmsBinding.courseId.trim(),
+      courseLabel: packageDraft.studentLmsBinding.courseLabel?.trim() || undefined,
+      assignmentId: packageDraft.studentLmsBinding.assignmentId.trim(),
+      assignmentLabel: packageDraft.studentLmsBinding.assignmentLabel?.trim() || undefined
+    }
+  });
+
+  const runAdminAction = async <T,>(
+    action: AdminActionState,
+    operation: () => Promise<T | null>,
+    options: {
+      success: string | ((result: T) => string);
+      empty: string;
+      onSuccess?: (result: T) => void;
+    }
+  ) => {
+    setPendingAction(action);
+    setActionFeedback({
+      tone: "info",
+      text:
+        action === "refresh-diagnostics"
+          ? "Refreshing diagnostics..."
+          : action === "save-posture"
+            ? "Saving security posture..."
+            : action === "save-package"
+              ? "Saving package..."
+              : action === "save-settings"
+                ? "Saving application settings..."
+                : action === "save-destination"
+                  ? "Saving result destination..."
+                  : action === "delete-destination"
+                    ? "Deleting result destination..."
+                    : action === "save-lms-connection"
+                      ? "Saving LMS connection..."
+                      : action === "delete-lms-connection"
+                        ? "Deleting LMS connection..."
+                    : action === "connect-lms"
+                      ? "Connecting LMS account..."
+                      : action === "load-lms-courses"
+                        ? "Loading classes..."
+                        : action === "load-lms-coursework"
+                          ? "Loading assignments..."
+                : action === "duplicate-package"
+                  ? "Duplicating package..."
+                  : action === "delete-package"
+                    ? "Deleting package..."
+                    : action === "export-package"
+                      ? "Exporting package..."
+                      : "Importing package..."
+    });
+
+    try {
+      const result = await operation();
+      if (result === null) {
+        setActionFeedback({ tone: "error", text: options.empty });
+        return;
+      }
+
+      options.onSuccess?.(result);
+      setActionFeedback({
+        tone: "success",
+        text: typeof options.success === "function" ? options.success(result) : options.success
+      });
+    } catch (error) {
+      setActionFeedback({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Unexpected error."
+      });
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const handleRefreshDiagnostics = async () =>
+    runAdminAction("refresh-diagnostics", refreshSecurityOverview, {
+      success: "Diagnostics refreshed.",
+      empty: "Diagnostics refresh did not complete."
+    });
+
+  const handleSaveSecurityPosture = async () =>
+    runAdminAction("save-posture", () => saveSecurityProfile(security), {
+      success: "Security posture saved.",
+      empty: "Security posture was not saved.",
+      onSuccess: () => setSecurityDirty(false)
+    });
+
+  const handleSavePackage = async () => {
+    const nextPackage = buildPackageDraft();
+    await runAdminAction("save-package", () => saveConfigPackage(nextPackage), {
+      success: `Saved package "${nextPackage.label}".`,
+      empty: "Package changes were not saved.",
+      onSuccess: () => setPackageDirty(false)
+    });
+  };
+
+  const handleSaveSettings = async () =>
+    runAdminAction("save-settings", () => saveSettings(settings), {
+      success: "Application settings saved.",
+      empty: "Application settings were not saved.",
+      onSuccess: () => setSettingsDirty(false)
+    });
+
+  const handleSaveDestination = async () => {
+    const nextDestination = {
+      ...destinationDraft,
+      label: destinationDraft.label.trim() || providerLabel(destinationDraft.type),
+      endpointUrl: destinationDraft.endpointUrl.trim(),
+      className: destinationDraft.className?.trim() || undefined,
+      courseId: destinationDraft.courseId?.trim() || undefined,
+      sheetName: destinationDraft.sheetName?.trim() || undefined,
+      authToken: destinationDraft.authToken?.trim() || undefined,
+      apiKeyHeader: destinationDraft.apiKeyHeader?.trim() || undefined,
+      notes: destinationDraft.notes?.trim() || undefined
+    };
+
+    await runAdminAction("save-destination", () => saveResultDestination(nextDestination), {
+      success: `Saved result destination "${nextDestination.label}".`,
+      empty: "Result destination was not saved.",
+      onSuccess: (nextSnapshot) => {
+        const saved =
+          nextSnapshot.resultDestinations.find((candidate) => candidate.id === nextDestination.id) ??
+          nextSnapshot.resultDestinations[0] ??
+          nextDestination;
+        selectDestination(saved);
+      }
+    });
+  };
+
+  const handleDeleteDestination = async () =>
+    runAdminAction("delete-destination", () => deleteResultDestination(destinationDraft.id), {
+      success: "Result destination deleted.",
+      empty: "Result destination deletion did not complete.",
+      onSuccess: (nextSnapshot) => {
+        selectDestination(nextSnapshot.resultDestinations[0] ?? blankResultDestination());
+      }
+    });
+
+  const handleSaveConnection = async () => {
+    const nextConnection = {
+      ...connectionDraft,
+      label: connectionDraft.label.trim() || providerLabel(connectionDraft.provider),
+      clientId: connectionDraft.clientId.trim(),
+      tenantId: connectionDraft.tenantId?.trim() || undefined,
+      authorizeUrl: connectionDraft.authorizeUrl?.trim() || undefined,
+      tokenUrl: connectionDraft.tokenUrl?.trim() || undefined,
+      scope: connectionDraft.scope.trim() || defaultLmsScope(connectionDraft.provider)
+    };
+
+    await runAdminAction("save-lms-connection", () => saveLmsConnection(nextConnection), {
+      success: `Saved LMS connection "${nextConnection.label}".`,
+      empty: "LMS connection was not saved.",
+      onSuccess: (nextSnapshot) => {
+        const saved =
+          nextSnapshot.lmsConnections.find((candidate) => candidate.id === nextConnection.id) ??
+          nextSnapshot.lmsConnections[0] ??
+          nextConnection;
+        selectConnection(saved);
+      }
+    });
+  };
+
+  const handleDeleteConnection = async () =>
+    runAdminAction("delete-lms-connection", () => deleteLmsConnection(connectionDraft.id), {
+      success: "LMS connection deleted.",
+      empty: "LMS connection deletion did not complete.",
+      onSuccess: (nextSnapshot) => {
+        selectConnection(nextSnapshot.lmsConnections[0] ?? blankLmsConnection());
+      }
+    });
+
+  const handleConnectLms = async () =>
+    runAdminAction("connect-lms", () => connectLmsConnection(connectionDraft.id), {
+      success: "LMS account connected.",
+      empty: "LMS connection did not complete.",
+      onSuccess: (nextSnapshot) => {
+        const connected =
+          nextSnapshot.lmsConnections.find((candidate) => candidate.id === connectionDraft.id) ??
+          nextSnapshot.lmsConnections[0];
+        if (connected) {
+          selectConnection(connected);
+        }
+      }
+    });
+
+  const handleLoadCourses = async (connectionId: string = connectionDraft.id) =>
+    runAdminAction("load-lms-courses", () => listLmsCourses(connectionId), {
+      success: (courses) => `Loaded ${courses.length} class${courses.length === 1 ? "" : "es"}.`,
+      empty: "No classes were returned for this LMS connection.",
+      onSuccess: (courses) => setConnectionCourses(courses)
+    });
+
+  const handleLoadBindingCourseWork = async () => {
+    const binding = packageDraft.studentLmsBinding;
+    const connectionId = binding.connectionId?.trim();
+    if (!connectionId || !binding.courseId.trim()) {
+      setActionFeedback({
+        tone: "error",
+        text: "Choose a connected LMS account and class before loading assignments."
+      });
+      return;
+    }
+
+    await runAdminAction(
+      "load-lms-coursework",
+      () =>
+        listLmsCourseWork({
+          connectionId,
+          courseId: binding.courseId
+        }),
+      {
+        success: (items) => `Loaded ${items.length} assignment${items.length === 1 ? "" : "s"}.`,
+        empty: "No assignments were returned for this class.",
+        onSuccess: (items) => setBindingCourseWork(items)
+      }
+    );
+  };
+
+  const handleDuplicatePackage = async () => {
+    const previousIds = new Set(snapshot.configPackages.map((candidate) => candidate.id));
+    await runAdminAction("duplicate-package", () => duplicateConfigPackage(packageDraft.id), {
+      success: "Configuration package duplicated.",
+      empty: "Package duplication did not complete.",
+      onSuccess: (nextSnapshot) => {
+        const duplicated =
+          nextSnapshot.configPackages.find((candidate) => !previousIds.has(candidate.id)) ?? nextSnapshot.configPackages[0];
+        if (duplicated) {
+          selectPackage(duplicated);
+        }
+      }
+    });
+  };
+
+  const handleDeletePackage = async () =>
+    runAdminAction("delete-package", () => deleteConfigPackage(packageDraft.id), {
+      success: "Configuration package deleted.",
+      empty: "Package deletion did not complete.",
+      onSuccess: () => setPackageDirty(false)
+    });
+
+  const handleExportPackage = async () =>
+    runAdminAction(
+      "export-package",
+      () =>
+        exportConfigPackage({
+          packageId: packageDraft.id,
+          password: exportPassword,
+          passwordHint: packagePasswordHint || undefined
+        }),
+      {
+        success: (filePath) => `Package exported to ${filePath}`,
+        empty: "Package export was cancelled or did not complete."
+      }
+    );
+
+  const handleImportPackage = async () => {
+    const previousPackages = new Map(
+      snapshot.configPackages.map((candidate) => [candidate.id, `${candidate.updatedAt}|${candidate.integrity.checksum}`])
+    );
+    await runAdminAction(
+      "import-package",
+      () =>
+        importConfigPackage({
+          password: importPassword,
+          passwordHint: packagePasswordHint || undefined
+        }),
+      {
+        success: "Configuration package imported.",
+        empty: "Package import was cancelled or did not complete.",
+        onSuccess: (nextSnapshot) => {
+          const imported = findImportedPackage(previousPackages, nextSnapshot.configPackages);
+          if (imported) {
+            selectPackage(imported);
+          }
+        }
+      }
+    );
+  };
+
+  return (
+    <motion.div key="settings" {...animation} className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Admin Console</h1>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            Manage the Lockedscreen kiosk component, exam runtime packages, diagnostics, and Windows deployment posture from one workflow.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => void handleRefreshDiagnostics()} disabled={adminBusy}>
+            <ShieldCheck className="size-4" />
+            {isPending("refresh-diagnostics") ? "Refreshing..." : "Refresh diagnostics"}
+          </Button>
+          <Button variant="secondary" onClick={() => void handleSaveSecurityPosture()} disabled={adminBusy}>
+            <ShieldCheck className="size-4" />
+            {isPending("save-posture") ? "Saving..." : "Save posture"}
+          </Button>
+          <Button variant="secondary" onClick={() => void handleSavePackage()} disabled={adminBusy}>
+            <Save className="size-4" />
+            {isPending("save-package") ? "Saving..." : "Save package"}
+          </Button>
+          <Button onClick={() => void handleSaveSettings()} disabled={adminBusy}>
+            <Save className="size-4" />
+            {isPending("save-settings") ? "Saving..." : "Save settings"}
+          </Button>
+        </div>
+      </div>
+
+      {actionFeedback ? (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(actionFeedback.tone)}`}>{actionFeedback.text}</div>
+      ) : null}
+
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Configuration packages</CardTitle>
+              <CardDescription className="mt-2">
+                Protected exam packages separate teacher/admin policy from student runtime data. Use one active package per exam delivery profile.
+              </CardDescription>
+            </div>
+            <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">{snapshot.configPackages.length} package(s)</Badge>
+          </div>
+          <LabelledField label="Active package">
+            <select
+              className={selectClassName}
+              value={selectedPackageId}
+              onChange={(event) => {
+                const selected = packageOptions.find((candidate) => candidate.id === event.target.value);
+                selectPackage(selected ?? null);
+              }}
+            >
+              {packageOptions.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.label}
+                </option>
+              ))}
+            </select>
+          </LabelledField>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Button variant="secondary" onClick={() => void handleDuplicatePackage()} disabled={adminBusy}>
+              {isPending("duplicate-package") ? "Duplicating..." : "Duplicate"}
+            </Button>
+            <Button variant="secondary" onClick={() => void handleDeletePackage()} disabled={adminBusy}>
+              {isPending("delete-package") ? "Deleting..." : "Delete"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleExportPackage()}
+              disabled={exportPassword.length === 0 || adminBusy}
+            >
+              {isPending("export-package") ? "Exporting..." : "Export"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleImportPackage()}
+              disabled={importPassword.length === 0 || adminBusy}
+            >
+              {isPending("import-package") ? "Importing..." : "Import"}
+            </Button>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Export password">
+              <Input type="password" value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} />
+            </LabelledField>
+            <LabelledField label="Import password">
+              <Input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} />
+            </LabelledField>
+          </div>
+          <LabelledField label="Password hint">
+            <Input
+              value={packagePasswordHint}
+              onChange={(event) => {
+                setPackageDirty(true);
+                setPackagePasswordHint(event.target.value);
+              }}
+            />
+          </LabelledField>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Integrity summary</CardTitle>
+          <CardDescription>
+            The kiosk component validates package checksums locally. Stronger Windows lock still depends on a verified native Windows companion or official kiosk deployment.
+          </CardDescription>
+          <div className="grid gap-3">
+            {securityOverview?.validationItems.map((item) => (
+              <ValidationCard key={item.id} item={item} />
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>LMS connections</CardTitle>
+              <CardDescription className="mt-2">
+                Connect teacher accounts directly with Google Classroom, Microsoft 365, or another OAuth-based LMS. Tokens stay in the main process and are not exposed to the renderer.
+              </CardDescription>
+            </div>
+            <Badge>{snapshot.lmsConnections.length} connection(s)</Badge>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <LabelledField label="Selected connection">
+              <select
+                className={selectClassName}
+                value={snapshot.lmsConnections.some((candidate) => candidate.id === selectedConnectionId) ? selectedConnectionId : "__new__"}
+                onChange={(event) => {
+                  if (event.target.value === "__new__") {
+                    selectConnection(blankLmsConnection());
+                    return;
+                  }
+
+                  const selected = snapshot.lmsConnections.find((candidate) => candidate.id === event.target.value);
+                  selectConnection(selected ?? null);
+                }}
+              >
+                <option value="__new__">New connection</option>
+                {snapshot.lmsConnections.map((connection) => (
+                  <option key={connection.id} value={connection.id}>
+                    {connection.label}
+                  </option>
+                ))}
+              </select>
+            </LabelledField>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Button variant="secondary" onClick={() => void handleSaveConnection()} disabled={adminBusy}>
+                {isPending("save-lms-connection") ? "Saving..." : "Save connection"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => void handleDeleteConnection()}
+                disabled={adminBusy || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+              >
+                {isPending("delete-lms-connection") ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Provider">
+              <select
+                className={selectClassName}
+                value={connectionDraft.provider}
+                onChange={(event) => {
+                  const provider = event.target.value as LmsProviderType;
+                  updateConnection((current) => ({
+                    ...current,
+                    provider,
+                    label:
+                      current.label === providerLabel(current.provider) || current.label.trim().length === 0
+                        ? providerLabel(provider)
+                        : current.label,
+                    scope: defaultLmsScope(provider),
+                    tenantId: provider === "microsoft-365" ? current.tenantId || "common" : "",
+                    authorizeUrl: provider === "generic-oauth-lms" ? current.authorizeUrl : "",
+                    tokenUrl: provider === "generic-oauth-lms" ? current.tokenUrl : ""
+                  }));
+                }}
+              >
+                <option value="google-classroom">Google Classroom</option>
+                <option value="microsoft-365">Microsoft 365</option>
+                <option value="generic-oauth-lms">Generic OAuth LMS</option>
+              </select>
+            </LabelledField>
+            <LabelledField label="Label">
+              <Input
+                value={connectionDraft.label}
+                onChange={(event) => updateConnection((current) => ({ ...current, label: event.target.value }))}
+              />
+            </LabelledField>
+            <LabelledField label="Client ID">
+              <Input
+                value={connectionDraft.clientId}
+                onChange={(event) => updateConnection((current) => ({ ...current, clientId: event.target.value }))}
+              />
+            </LabelledField>
+            {connectionDraft.provider === "microsoft-365" ? (
+              <LabelledField label="Tenant ID">
+                <Input
+                  value={connectionDraft.tenantId ?? ""}
+                  onChange={(event) => updateConnection((current) => ({ ...current, tenantId: event.target.value }))}
+                />
+              </LabelledField>
+            ) : null}
+            {connectionDraft.provider === "generic-oauth-lms" ? (
+              <LabelledField label="Authorize URL">
+                <Input
+                  value={connectionDraft.authorizeUrl ?? ""}
+                  onChange={(event) => updateConnection((current) => ({ ...current, authorizeUrl: event.target.value }))}
+                />
+              </LabelledField>
+            ) : null}
+            {connectionDraft.provider === "generic-oauth-lms" ? (
+              <LabelledField label="Token URL">
+                <Input
+                  value={connectionDraft.tokenUrl ?? ""}
+                  onChange={(event) => updateConnection((current) => ({ ...current, tokenUrl: event.target.value }))}
+                />
+              </LabelledField>
+            ) : null}
+          </div>
+
+          <LabelledField label="OAuth scopes">
+            <Textarea
+              className="min-h-[110px] font-mono text-xs"
+              value={connectionDraft.scope}
+              onChange={(event) => updateConnection((current) => ({ ...current, scope: event.target.value }))}
+            />
+          </LabelledField>
+
+          <div className="flex flex-wrap gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => void handleConnectLms()}
+              disabled={adminBusy || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+            >
+              {isPending("connect-lms") ? "Connecting..." : connectionDraft.status === "connected" ? "Reconnect" : "Connect account"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleLoadCourses()}
+              disabled={adminBusy || connectionDraft.status !== "connected" || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+            >
+              {isPending("load-lms-courses") ? "Loading..." : "Load classes"}
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Connection status</CardTitle>
+          <div className="grid gap-3">
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(connectionDraft.status === "connected" ? "success" : connectionDraft.status === "error" ? "error" : "info")}`}>
+              {connectionDraft.status === "connected"
+                ? `Connected as ${connectionDraft.accountName || connectionDraft.accountEmail || connectionDraft.label}.`
+                : connectionDraft.status === "error"
+                  ? connectionDraft.lastError || "Connection failed."
+                  : "Save the connection first, then complete OAuth in the system browser."}
+            </div>
+            {connectionDraft.accountEmail ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                Account: {connectionDraft.accountName || "Connected user"} / {connectionDraft.accountEmail}
+              </div>
+            ) : null}
+            {connectionCourses.length > 0 ? (
+              <div className="grid gap-2">
+                {connectionCourses.map((course) => (
+                  <div key={course.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800">
+                    <div className="font-semibold text-slate-900 dark:text-slate-50">{course.name}</div>
+                    <div className="mt-1 text-slate-600 dark:text-slate-300">{course.section || course.id}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <CardDescription>
+                After connecting, load classes to verify the teacher account can see Classroom courses or Microsoft education classes.
+              </CardDescription>
+            )}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Security constraint: teacher OAuth tokens are kept only on the admin device. They are not packed into `.lscp` files sent to students.
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Student LMS turn-in</CardTitle>
+              <CardDescription className="mt-2">
+                Bind this package to a Google Classroom or Microsoft 365 assignment so the student can sign in after local submission and turn in directly from the app.
+              </CardDescription>
+            </div>
+            <Badge>{packageDraft.studentLmsBinding.enabled ? "Enabled" : "Disabled"}</Badge>
+          </div>
+
+          <ToggleField
+            label="Enable post-submit student LMS turn-in"
+            checked={packageDraft.studentLmsBinding.enabled}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                studentLmsBinding: {
+                  ...current.studentLmsBinding,
+                  enabled: checked
+                }
+              }))
+            }
+          />
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Provider">
+              <select
+                className={selectClassName}
+                value={packageDraft.studentLmsBinding.provider}
+                onChange={(event) => {
+                  const provider = event.target.value as StudentLmsProviderType;
+                  setBindingCourseWork([]);
+                  setConnectionCourses([]);
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...blankStudentLmsBinding(provider),
+                      enabled: current.studentLmsBinding.enabled
+                    }
+                  }));
+                }}
+              >
+                <option value="google-classroom">Google Classroom</option>
+                <option value="microsoft-365">Microsoft 365</option>
+              </select>
+            </LabelledField>
+            <LabelledField label="Connected teacher account">
+              <select
+                className={selectClassName}
+                value={packageDraft.studentLmsBinding.connectionId ?? ""}
+                onChange={(event) => {
+                  const selectedConnection = snapshot.lmsConnections.find((candidate) => candidate.id === event.target.value) ?? null;
+                  setBindingCourseWork([]);
+                  if (selectedConnection) {
+                    selectConnection(selectedConnection);
+                  }
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...current.studentLmsBinding,
+                      connectionId: selectedConnection?.id ?? "",
+                      provider: selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom",
+                      clientId: selectedConnection?.clientId ?? current.studentLmsBinding.clientId,
+                      tenantId:
+                        selectedConnection?.provider === "microsoft-365"
+                          ? (selectedConnection.tenantId ?? "common")
+                          : "",
+                      scope:
+                        selectedConnection?.scope?.trim() ||
+                        defaultStudentLmsScope(
+                          selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom"
+                        )
+                    }
+                  }));
+                }}
+              >
+                <option value="">Manual package setup</option>
+                {bindingConnections.map((connection) => (
+                  <option key={connection.id} value={connection.id}>
+                    {connection.label}
+                  </option>
+                ))}
+              </select>
+            </LabelledField>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <LabelledField label="Class / course">
+              <select
+                className={selectClassName}
+                value={packageDraft.studentLmsBinding.courseId}
+                onChange={(event) => {
+                  const selectedCourse = connectionCourses.find((course) => course.id === event.target.value);
+                  setBindingCourseWork([]);
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...current.studentLmsBinding,
+                      courseId: event.target.value,
+                      courseLabel: selectedCourse?.name ?? current.studentLmsBinding.courseLabel,
+                      assignmentId: "",
+                      assignmentLabel: ""
+                    }
+                  }));
+                }}
+              >
+                <option value="">Enter manually or load classes</option>
+                {connectionCourses.map((course) => (
+                  <option key={course.id} value={course.id}>
+                    {course.name}
+                  </option>
+                ))}
+              </select>
+            </LabelledField>
+            <Button
+              variant="secondary"
+              onClick={() => void handleLoadCourses(packageDraft.studentLmsBinding.connectionId ?? "")}
+              disabled={
+                adminBusy ||
+                !packageDraft.studentLmsBinding.connectionId ||
+                !snapshot.lmsConnections.some((candidate) => candidate.id === packageDraft.studentLmsBinding.connectionId)
+              }
+            >
+              {isPending("load-lms-courses") ? "Loading..." : "Load classes"}
+            </Button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <LabelledField label="Assignment">
+              <select
+                className={selectClassName}
+                value={packageDraft.studentLmsBinding.assignmentId}
+                onChange={(event) => {
+                  const selectedAssignment = bindingCourseWork.find((item) => item.id === event.target.value);
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...current.studentLmsBinding,
+                      assignmentId: event.target.value,
+                      assignmentLabel: selectedAssignment?.title ?? current.studentLmsBinding.assignmentLabel
+                    }
+                  }));
+                }}
+              >
+                <option value="">Enter manually or load assignments</option>
+                {bindingCourseWork.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </LabelledField>
+            <Button
+              variant="secondary"
+              onClick={() => void handleLoadBindingCourseWork()}
+              disabled={adminBusy || !packageDraft.studentLmsBinding.connectionId || !packageDraft.studentLmsBinding.courseId}
+            >
+              {isPending("load-lms-coursework") ? "Loading..." : "Load assignments"}
+            </Button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="OAuth client ID">
+              <Input
+                value={packageDraft.studentLmsBinding.clientId}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...current.studentLmsBinding,
+                      clientId: event.target.value
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+            {packageDraft.studentLmsBinding.provider === "microsoft-365" ? (
+              <LabelledField label="Tenant ID">
+                <Input
+                  value={packageDraft.studentLmsBinding.tenantId ?? ""}
+                  onChange={(event) =>
+                    updatePackage((current) => ({
+                      ...current,
+                      studentLmsBinding: {
+                        ...current.studentLmsBinding,
+                        tenantId: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </LabelledField>
+            ) : null}
+            <LabelledField label="Class / course ID">
+              <Input
+                value={packageDraft.studentLmsBinding.courseId}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...current.studentLmsBinding,
+                      courseId: event.target.value
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+            <LabelledField label="Assignment ID">
+              <Input
+                value={packageDraft.studentLmsBinding.assignmentId}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    studentLmsBinding: {
+                      ...current.studentLmsBinding,
+                      assignmentId: event.target.value
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+          </div>
+
+          <LabelledField label="Student OAuth scopes">
+            <Textarea
+              className="min-h-[110px] font-mono text-xs"
+              value={packageDraft.studentLmsBinding.scope}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  studentLmsBinding: {
+                    ...current.studentLmsBinding,
+                    scope: event.target.value
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Turn-in notes</CardTitle>
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Exported packages carry only public LMS app settings plus the class and assignment IDs. Teacher access tokens never leave the admin device.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              The student signs in only after Lockedscreen has already recorded the local submission. LMS delivery is additive and can be retried from the post-submit screen.
+            </div>
+            {packageDraft.studentLmsBinding.courseLabel ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                Selected class: {packageDraft.studentLmsBinding.courseLabel}
+              </div>
+            ) : null}
+            {packageDraft.studentLmsBinding.assignmentLabel ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                Selected assignment: {packageDraft.studentLmsBinding.assignmentLabel}
+              </div>
+            ) : null}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Google Classroom turn-in must use the same Google Cloud OAuth client project that the class assignment expects. Microsoft 365 turn-in requires Microsoft Graph education assignment permissions for student delegated sign-in.
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Result destinations</CardTitle>
+              <CardDescription className="mt-2">
+                Configure post-submission sync targets. Local results always remain stored in Lockedscreen first; remote delivery is additive and does not change the lockdown runtime.
+              </CardDescription>
+            </div>
+            <Badge>{snapshot.resultDestinations.length} destination(s)</Badge>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <LabelledField label="Selected destination">
+              <select
+                className={selectClassName}
+                value={snapshot.resultDestinations.some((candidate) => candidate.id === selectedDestinationId) ? selectedDestinationId : "__new__"}
+                onChange={(event) => {
+                  if (event.target.value === "__new__") {
+                    selectDestination(blankResultDestination());
+                    return;
+                  }
+
+                  const selected = snapshot.resultDestinations.find((candidate) => candidate.id === event.target.value);
+                  selectDestination(selected ?? null);
+                }}
+              >
+                <option value="__new__">New destination</option>
+                {snapshot.resultDestinations.map((destination) => (
+                  <option key={destination.id} value={destination.id}>
+                    {destination.label}
+                  </option>
+                ))}
+              </select>
+            </LabelledField>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Button variant="secondary" onClick={() => void handleSaveDestination()} disabled={adminBusy}>
+                {isPending("save-destination") ? "Saving..." : "Save destination"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => void handleDeleteDestination()}
+                disabled={adminBusy || !snapshot.resultDestinations.some((candidate) => candidate.id === destinationDraft.id)}
+              >
+                {isPending("delete-destination") ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Provider">
+              <select
+                className={selectClassName}
+                value={destinationDraft.type}
+                onChange={(event) =>
+                  updateDestination((current) => ({
+                    ...current,
+                    type: event.target.value as ResultDestinationType,
+                    label:
+                      current.label === "New destination" ||
+                      current.label === providerLabel(current.type)
+                        ? providerLabel(event.target.value as ResultDestinationType)
+                        : current.label
+                  }))
+                }
+              >
+                <option value="google-classroom">Google Classroom</option>
+                <option value="microsoft-teams">Microsoft Teams</option>
+                <option value="google-sheets">Google Sheets</option>
+                <option value="generic-lms">Generic LMS</option>
+              </select>
+            </LabelledField>
+            <LabelledField label="Label">
+              <Input
+                value={destinationDraft.label}
+                onChange={(event) => updateDestination((current) => ({ ...current, label: event.target.value }))}
+              />
+            </LabelledField>
+            <LabelledField label="Trigger">
+              <select
+                className={selectClassName}
+                value={destinationDraft.trigger}
+                onChange={(event) =>
+                  updateDestination((current) => ({
+                    ...current,
+                    trigger: event.target.value === "auto-on-submit" ? "auto-on-submit" : "manual"
+                  }))
+                }
+              >
+                <option value="manual">Manual sync from Results</option>
+                <option value="auto-on-submit">Auto sync after submission</option>
+              </select>
+            </LabelledField>
+            <ToggleField
+              label="Destination enabled"
+              checked={destinationDraft.enabled}
+              onChange={(checked) => updateDestination((current) => ({ ...current, enabled: checked }))}
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Endpoint URL">
+              <Input
+                placeholder="https://..."
+                value={destinationDraft.endpointUrl}
+                onChange={(event) => updateDestination((current) => ({ ...current, endpointUrl: event.target.value }))}
+              />
+            </LabelledField>
+            <LabelledField label="Auth mode">
+              <select
+                className={selectClassName}
+                value={destinationDraft.authMode}
+                onChange={(event) =>
+                  updateDestination((current) => ({
+                    ...current,
+                    authMode: event.target.value as ResultSyncAuthMode
+                  }))
+                }
+              >
+                <option value="none">No auth</option>
+                <option value="bearer">Bearer token</option>
+                <option value="api-key">API key header</option>
+              </select>
+            </LabelledField>
+            {destinationDraft.authMode !== "none" ? (
+              <LabelledField label="Token / API key">
+                <Input
+                  type="password"
+                  value={destinationDraft.authToken ?? ""}
+                  onChange={(event) => updateDestination((current) => ({ ...current, authToken: event.target.value }))}
+                />
+              </LabelledField>
+            ) : null}
+            {destinationDraft.authMode === "api-key" ? (
+              <LabelledField label="API key header">
+                <Input
+                  value={destinationDraft.apiKeyHeader ?? ""}
+                  onChange={(event) => updateDestination((current) => ({ ...current, apiKeyHeader: event.target.value }))}
+                />
+              </LabelledField>
+            ) : null}
+            <LabelledField label="Class filter">
+              <Input
+                placeholder="Leave blank for all classes"
+                value={destinationDraft.className ?? ""}
+                onChange={(event) => updateDestination((current) => ({ ...current, className: event.target.value }))}
+              />
+            </LabelledField>
+            <LabelledField label="Provider reference">
+              <Input
+                placeholder={destinationDraft.type === "google-sheets" ? "Sheet name" : "Course / channel / LMS id"}
+                value={destinationDraft.type === "google-sheets" ? destinationDraft.sheetName ?? "" : destinationDraft.courseId ?? ""}
+                onChange={(event) =>
+                  updateDestination((current) => ({
+                    ...current,
+                    sheetName: current.type === "google-sheets" ? event.target.value : current.sheetName,
+                    courseId: current.type === "google-sheets" ? current.courseId : event.target.value
+                  }))
+                }
+              />
+            </LabelledField>
+          </div>
+
+          <LabelledField label="Exam scope">
+            <div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+              {snapshot.exams.map((exam) => (
+                <label key={exam.id} className="flex items-center gap-3 text-sm text-slate-800 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                    checked={destinationDraft.examIds.includes(exam.id)}
+                    onChange={(event) =>
+                      updateDestination((current) => ({
+                        ...current,
+                        examIds: event.target.checked
+                          ? [...current.examIds, exam.id]
+                          : current.examIds.filter((candidate) => candidate !== exam.id)
+                      }))
+                    }
+                  />
+                  {exam.title || "Untitled exam"}
+                </label>
+              ))}
+            </div>
+          </LabelledField>
+
+          <ToggleField
+            label="Include per-question responses in sync payload"
+            checked={destinationDraft.includeResponses}
+            onChange={(checked) => updateDestination((current) => ({ ...current, includeResponses: checked }))}
+          />
+
+          <LabelledField label="Notes">
+            <Textarea
+              className="min-h-[110px]"
+              value={destinationDraft.notes ?? ""}
+              onChange={(event) => updateDestination((current) => ({ ...current, notes: event.target.value }))}
+            />
+          </LabelledField>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Integration guidance</CardTitle>
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Google Sheets: point the endpoint URL to an Apps Script web app or another sheet-ingest service.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Google Classroom and Microsoft Teams: use a school-owned middleware endpoint, webhook, or automation flow that receives Lockedscreen results and pushes them into the LMS.
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Security boundary: destination sync runs after submission from the teacher/admin side. It does not weaken the secure student session or change kiosk restrictions.
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="space-y-5">
+          <CardTitle>General</CardTitle>
+          <LabelledField label="Package label">
+            <Input value={packageDraft.label} onChange={(event) => updatePackage((current) => ({ ...current, label: event.target.value }))} />
+          </LabelledField>
+          <LabelledField label="Description">
+            <Textarea
+              className="min-h-[110px]"
+              value={packageDraft.description}
+              onChange={(event) => updatePackage((current) => ({ ...current, description: event.target.value }))}
+            />
+          </LabelledField>
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Security level">
+              <select
+                className={selectClassName}
+                value={packageDraft.securityMode}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    securityMode: event.target.value === "full-kiosk" ? "full-kiosk" : "restricted-app"
+                  }))
+                }
+              >
+                <option value="restricted-app">Restricted App Mode</option>
+                <option value="full-kiosk">Full Kiosk Mode</option>
+              </select>
+            </LabelledField>
+            <LabelledField label="Package status">
+              <select
+                className={selectClassName}
+                value={packageDraft.status}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    status:
+                      event.target.value === "archived"
+                        ? "archived"
+                        : event.target.value === "draft"
+                          ? "draft"
+                          : "active"
+                  }))
+                }
+              >
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="archived">Archived</option>
+              </select>
+            </LabelledField>
+          </div>
+          <LabelledField label="Exam assignment">
+            <select
+              className={selectClassName}
+              value={packageDraft.examId}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  examId: event.target.value,
+                  sourceMode: snapshot.exams.find((candidate) => candidate.id === event.target.value)?.mode ?? current.sourceMode
+                }))
+              }
+            >
+              {snapshot.exams.map((exam) => (
+                <option key={exam.id} value={exam.id}>
+                  {exam.title}
+                </option>
+              ))}
+            </select>
+          </LabelledField>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            Package checksum: <span className="font-mono text-xs">{packageDraft.integrity.checksum}</span>
+          </div>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Exam Source / Start URL</CardTitle>
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Runtime mode">
+              <select
+                className={selectClassName}
+                value={packageDraft.sourceMode}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    sourceMode: event.target.value === "link" ? "link" : "app"
+                  }))
+                }
+              >
+                <option value="app">Lockedscreen native exam</option>
+                <option value="link">Hosted controlled exam</option>
+              </select>
+            </LabelledField>
+            <LabelledField label="Browser display mode">
+              <select
+                className={selectClassName}
+                value={packageDraft.browserPolicy.displayMode}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    browserPolicy: {
+                      ...current.browserPolicy,
+                      displayMode: event.target.value as BrowserDisplayMode
+                    }
+                  }))
+                }
+              >
+                <option value="minimal">Minimal</option>
+                <option value="focus">Focus</option>
+                <option value="immersive">Immersive</option>
+              </select>
+            </LabelledField>
+          </div>
+          <LabelledField label="Configured start URL">
+            <Input
+              value={packageDraft.browserPolicy.startUrl ?? ""}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  browserPolicy: {
+                    ...current.browserPolicy,
+                    startUrl: event.target.value
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="Support message">
+            <Input
+              value={packageDraft.teacherOptions.supportMessage ?? ""}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  teacherOptions: {
+                    ...current.teacherOptions,
+                    supportMessage: event.target.value
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <div className="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+            Assigned exam: {selectedExam?.title ?? "None selected"}.
+            Full Kiosk Mode is recommended when the package will be used for high-stakes delivery.
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="space-y-5">
+          <CardTitle>Student Assignment</CardTitle>
+          <CardDescription>
+            Limit this package to specific classes or student IDs. Leave both assignment lists blank to keep the exam visible to all students on the device.
+          </CardDescription>
+          <LabelledField label="Assigned classes">
+            <Input
+              placeholder="Year 10, Form 2A"
+              value={serializeCommaList(packageDraft.studentAccessPolicy.assignedClassNames)}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  studentAccessPolicy: {
+                    ...current.studentAccessPolicy,
+                    assignedClassNames: splitCommaList(event.target.value)
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="Assigned student IDs">
+            <Textarea
+              className="min-h-[110px]"
+              placeholder="stu-001, stu-002"
+              value={serializeCommaList(packageDraft.studentAccessPolicy.assignedCandidateIds)}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  studentAccessPolicy: {
+                    ...current.studentAccessPolicy,
+                    assignedCandidateIds: splitCommaList(event.target.value)
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabelledField label="Available from">
+              <Input
+                type="datetime-local"
+                value={packageDraft.studentAccessPolicy.availableFrom ?? ""}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    studentAccessPolicy: {
+                      ...current.studentAccessPolicy,
+                      availableFrom: event.target.value
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+            <LabelledField label="Hide after">
+              <Input
+                type="datetime-local"
+                value={packageDraft.studentAccessPolicy.availableUntil ?? ""}
+                onChange={(event) =>
+                  updatePackage((current) => ({
+                    ...current,
+                    studentAccessPolicy: {
+                      ...current.studentAccessPolicy,
+                      availableUntil: event.target.value
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+          </div>
+          <ToggleField
+            label="Allow students to remove completed exams from their own list"
+            checked={packageDraft.studentAccessPolicy.allowStudentDeletionAfterCompletion}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                studentAccessPolicy: {
+                  ...current.studentAccessPolicy,
+                  allowStudentDeletionAfterCompletion: checked
+                }
+              }))
+            }
+          />
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Assignment Notes</CardTitle>
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Matching rule: a student sees the exam when their class matches an assigned class, or their candidate ID matches an assigned student ID.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Completed exams stay visible but locked so the student cannot restart them.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              If you set a hide date, the exam disappears from the student portal after that time.
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="space-y-5">
+          <CardTitle>Student Interface</CardTitle>
+          <ToggleField
+            label="Show school branding"
+            checked={packageDraft.teacherOptions.showSchoolBranding}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                teacherOptions: {
+                  ...current.teacherOptions,
+                  showSchoolBranding: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Show candidate identity"
+            checked={packageDraft.teacherOptions.showCandidateId}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                teacherOptions: {
+                  ...current.teacherOptions,
+                  showCandidateId: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Show countdown timer"
+            checked={packageDraft.teacherOptions.showTimer}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                teacherOptions: {
+                  ...current.teacherOptions,
+                  showTimer: checked
+                }
+              }))
+            }
+          />
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Browser / Runtime</CardTitle>
+          <ToggleField
+            label="Hide general browser chrome"
+            checked={packageDraft.browserPolicy.restrictNavigationChrome}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                browserPolicy: {
+                  ...current.browserPolicy,
+                  restrictNavigationChrome: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Show back-to-start control"
+            checked={packageDraft.browserPolicy.showBackToStartButton}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                browserPolicy: {
+                  ...current.browserPolicy,
+                  showBackToStartButton: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Protect back-to-start"
+            checked={packageDraft.browserPolicy.protectedBackToStart}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                browserPolicy: {
+                  ...current.browserPolicy,
+                  protectedBackToStart: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Allow context menu"
+            checked={packageDraft.browserPolicy.allowContextMenu}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                browserPolicy: {
+                  ...current.browserPolicy,
+                  allowContextMenu: checked
+                }
+              }))
+            }
+          />
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Session Handling</CardTitle>
+          <ToggleField
+            label="Clear browser session on start"
+            checked={packageDraft.sessionPolicy.clearSessionOnStart}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                sessionPolicy: {
+                  ...current.sessionPolicy,
+                  clearSessionOnStart: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Clear browser session on end"
+            checked={packageDraft.sessionPolicy.clearSessionOnEnd}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                sessionPolicy: {
+                  ...current.sessionPolicy,
+                  clearSessionOnEnd: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Ask before quit"
+            checked={packageDraft.sessionPolicy.askBeforeQuit}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                sessionPolicy: {
+                  ...current.sessionPolicy,
+                  askBeforeQuit: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Allow student exit immediately after submit"
+            checked={packageDraft.sessionPolicy.allowExitAfterSubmit}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                sessionPolicy: {
+                  ...current.sessionPolicy,
+                  allowExitAfterSubmit: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Require invigilator PIN to leave after submit"
+            checked={packageDraft.quitUnlockPolicy.requireInvigilatorPin}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                quitUnlockPolicy: {
+                  ...current.quitUnlockPolicy,
+                  requireInvigilatorPin: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Restart session instead of quit"
+            checked={packageDraft.sessionPolicy.restartInsteadOfQuit}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                sessionPolicy: {
+                  ...current.sessionPolicy,
+                  restartInsteadOfQuit: checked
+                }
+              }))
+            }
+          />
+          <LabelledField label="Exit URL after exam">
+            <Input
+              value={packageDraft.sessionPolicy.exitUrl ?? ""}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  sessionPolicy: {
+                    ...current.sessionPolicy,
+                    exitUrl: event.target.value || undefined
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="space-y-5">
+          <CardTitle>Applications</CardTitle>
+          <CardDescription>
+            One approved app per line in the format `Label|Path|args|launch-and-monitor|Notes`.
+          </CardDescription>
+          <Textarea
+            className="min-h-[180px] font-mono text-xs"
+            value={allowedAppsText}
+            onChange={(event) => {
+              setPackageDirty(true);
+              setAllowedAppsText(event.target.value);
+            }}
+          />
+          <LabelledField label="Allowed process names">
+            <Textarea
+              className="min-h-[120px]"
+              value={packageDraft.processPolicy.allowedProcessNames.join("\n")}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  processPolicy: {
+                    ...current.processPolicy,
+                    allowedProcessNames: splitLines(event.target.value)
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="Disallowed process names">
+            <Textarea
+              className="min-h-[120px]"
+              value={packageDraft.processPolicy.disallowedProcessNames.join("\n")}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  processPolicy: {
+                    ...current.processPolicy,
+                    disallowedProcessNames: splitLines(event.target.value)
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Network / URL Filter</CardTitle>
+          <LabelledField label="Allowed domains">
+            <Textarea
+              className="min-h-[120px]"
+              value={packageDraft.browserPolicy.allowedDomains.join("\n")}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  browserPolicy: {
+                    ...current.browserPolicy,
+                    allowedDomains: splitLines(event.target.value)
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="URL rules">
+            <Textarea
+              className="min-h-[180px] font-mono text-xs"
+              value={urlRulesText}
+              onChange={(event) => {
+                setPackageDirty(true);
+                setUrlRulesText(event.target.value);
+              }}
+            />
+          </LabelledField>
+          <ToggleField
+            label="Preserve query parameters when returning to start URL"
+            checked={packageDraft.browserPolicy.preserveQueryParameters}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                browserPolicy: {
+                  ...current.browserPolicy,
+                  preserveQueryParameters: checked
+                }
+              }))
+            }
+          />
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="space-y-5">
+          <CardTitle>Clipboard / Capture / Printing</CardTitle>
+          <PolicySelect
+            label="Clipboard policy"
+            value={packageDraft.clipboardPolicy.mode}
+            options={["allow", "block-copy", "block-all"]}
+            onChange={(value) =>
+              updatePackage((current) => ({
+                ...current,
+                clipboardPolicy: {
+                  ...current.clipboardPolicy,
+                  mode: value as ExamConfigPackage["clipboardPolicy"]["mode"]
+                }
+              }))
+            }
+          />
+          <PolicySelect
+            label="Screen capture policy"
+            value={packageDraft.capturePolicy.mode}
+            options={["allow-in-app-only", "block-shortcuts", "advisory-only"]}
+            onChange={(value) =>
+              updatePackage((current) => ({
+                ...current,
+                capturePolicy: {
+                  ...current.capturePolicy,
+                  mode: value as ExamConfigPackage["capturePolicy"]["mode"]
+                }
+              }))
+            }
+          />
+          <PolicySelect
+            label="Printing policy"
+            value={packageDraft.printPolicy.mode}
+            options={["allow", "block"]}
+            onChange={(value) =>
+              updatePackage((current) => ({
+                ...current,
+                printPolicy: {
+                  ...current.printPolicy,
+                  mode: value as ExamConfigPackage["printPolicy"]["mode"]
+                }
+              }))
+            }
+          />
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Key Restrictions</CardTitle>
+          <LabelledField label="Policy metadata">
+            <Textarea
+              className="min-h-[130px]"
+              value={packageDraft.keyRestrictionPolicy.metadata}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  keyRestrictionPolicy: {
+                    ...current.keyRestrictionPolicy,
+                    metadata: event.target.value
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="Blocked shortcuts">
+            <Textarea
+              className="min-h-[130px]"
+              value={packageDraft.keyRestrictionPolicy.blockedShortcuts.join("\n")}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  keyRestrictionPolicy: {
+                    ...current.keyRestrictionPolicy,
+                    blockedShortcuts: splitLines(event.target.value)
+                  }
+                }))
+              }
+            />
+          </LabelledField>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Kiosk / Lockdown</CardTitle>
+          <LabelledField label="Invigilator unlock PIN">
+            <Input
+              value={settings.invigilatorUnlockPin}
+              onChange={(event) =>
+                updateSettings((current) => ({
+                  ...current,
+                  invigilatorUnlockPin: event.target.value
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="Default theme">
+            <select
+              className={selectClassName}
+              value={settings.defaultTheme}
+              onChange={(event) =>
+                updateSettings((current) => ({
+                  ...current,
+                  defaultTheme: event.target.value as ThemePreference
+                }))
+              }
+            >
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System</option>
+            </select>
+          </LabelledField>
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <input
+              type="checkbox"
+              className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              checked={settings.allowElectronKioskAssist}
+              onChange={(event) =>
+                updateSettings((current) => ({
+                  ...current,
+                  allowElectronKioskAssist: event.target.checked
+                }))
+              }
+            />
+            Enable Electron window assist during active sessions
+          </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <input
+              type="checkbox"
+              className="size-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
+              checked={settings.allowNonKioskTestingMode || autoTestingMode}
+              disabled={autoTestingMode}
+              onChange={(event) =>
+                updateSettings((current) => ({
+                  ...current,
+                  allowNonKioskTestingMode: event.target.checked
+                }))
+              }
+            />
+            {autoTestingMode
+              ? "Windows Home detected without a verified native lockdown companion. Testing sessions are enabled automatically on this device."
+              : "Allow testing sessions when native lockdown or official kiosk deployment is not verified"}
+          </label>
+          {snapshot?.runtime ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Runtime: {snapshot.runtime.platform}
+              {snapshot.runtime.platform === "windows" ? ` / ${snapshot.runtime.windowsEdition ?? "unknown"} edition` : ""}
+              . Native companion {snapshot.runtime.nativeLockdown.lockdownCapable ? "active" : snapshot.runtime.nativeLockdown.featureLevel === "partial" ? "partial" : "not detected"}.
+              . Assigned Access {snapshot.runtime.supportsAssignedAccess ? "available" : "unavailable"}.
+              Shell Launcher {snapshot.runtime.supportsShellLauncher ? "available" : "unavailable"}.
+            </div>
+          ) : null}
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="space-y-5">
+          <CardTitle>Security posture</CardTitle>
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <input
+              type="checkbox"
+              className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              checked={security.kioskConfigured}
+              onChange={(event) =>
+                updateSecurity((current) => ({
+                  ...current,
+                  kioskConfigured: event.target.checked
+                }))
+              }
+            />
+            Official Windows kiosk deployment is configured when used
+          </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <input
+              type="checkbox"
+              className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              checked={security.nativeCompanionVerified}
+              onChange={(event) =>
+                updateSecurity((current) => ({
+                  ...current,
+                  nativeCompanionVerified: event.target.checked
+                }))
+              }
+            />
+            Native Windows lockdown companion is installed and verified
+          </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <input
+              type="checkbox"
+              className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              checked={security.dedicatedExamAccount}
+              onChange={(event) =>
+                updateSecurity((current) => ({
+                  ...current,
+                  dedicatedExamAccount: event.target.checked
+                }))
+              }
+            />
+            Dedicated exam user account is provisioned
+          </label>
+          <LabelledField label="Deployment mechanism">
+            <select
+              className={selectClassName}
+              value={security.kioskMode}
+              onChange={(event) =>
+                updateSecurity((current) => ({
+                  ...current,
+                  kioskMode:
+                    event.target.value === "assigned-access"
+                      ? "assigned-access"
+                      : event.target.value === "shell-launcher"
+                        ? "shell-launcher"
+                        : event.target.value === "windows-native-companion"
+                          ? "windows-native-companion"
+                          : event.target.value === "hybrid"
+                            ? "hybrid"
+                        : "not-configured"
+                }))
+              }
+            >
+              <option value="not-configured">Not configured</option>
+              <option value="windows-native-companion">Native Windows companion</option>
+              <option value="assigned-access">Assigned Access</option>
+              <option value="shell-launcher">Shell Launcher</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          </LabelledField>
+          <LabelledField label="Last verified">
+            <Input
+              type="datetime-local"
+              value={security.lastVerifiedAt ? security.lastVerifiedAt.slice(0, 16) : ""}
+              onChange={(event) =>
+                updateSecurity((current) => ({
+                  ...current,
+                  lastVerifiedAt: event.target.value ? new Date(event.target.value).toISOString() : undefined
+                }))
+              }
+            />
+          </LabelledField>
+        </Card>
+
+        <Card className="space-y-5">
+          <CardTitle>Diagnostics & logging</CardTitle>
+          <div className="grid gap-3">
+            {securityOverview?.packageSummaries.map((summary) => (
+              <StatusChip
+                key={summary.packageId}
+                title={summary.label}
+                subtitle={`${summary.securityMode} · ${summary.detail}`}
+                status={summary.status}
+              />
+            ))}
+          </div>
+          <div className="grid gap-3">
+            {securityOverview?.environmentChecks.map((check) => (
+              <StatusChip
+                key={check.id}
+                title={check.label}
+                subtitle={`${check.detail} ${check.observedValue ? `(${check.observedValue})` : ""}`}
+                status={check.status}
+              />
+            ))}
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            Process monitor: {securityOverview?.processSummary.monitored ? "active" : "not active"}.
+            Allowed {securityOverview?.processSummary.allowed ?? 0}, review {securityOverview?.processSummary.review ?? 0},
+            disallowed {securityOverview?.processSummary.disallowed ?? 0}.
+          </div>
+          <div className="max-h-[220px] space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+            {snapshot.securityLogs.slice(0, 10).map((entry) => (
+              <div key={entry.id} className="rounded-2xl border border-white bg-white px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                <div className="font-medium text-slate-900 dark:text-slate-50">
+                  {entry.category} · {entry.severity}
+                </div>
+                <div className="mt-1">{entry.message}</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{new Date(entry.timestamp).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </motion.div>
+  );
+};
+
+const StudentLmsTurnInPanel = ({
+  configPackage,
+  submission,
+  turningIn,
+  onTurnIn
+}: {
+  configPackage: ExamConfigPackage | null;
+  submission: SubmissionResult | null;
+  turningIn: boolean;
+  onTurnIn: () => void;
+}) => {
+  const binding = configPackage?.studentLmsBinding;
+  if (!binding?.enabled || !submission) {
+    return null;
+  }
+
+  const state = submission.studentLmsTurnIn;
+  const status = state?.status ?? "pending";
+  const actionLabel = status === "success" ? "Turned in" : turningIn ? "Connecting..." : "Turn in to LMS";
+
+  return (
+    <Card className="space-y-4 border-slate-200 bg-white">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Badge className={studentTurnInTone(status)}>{providerLabel(binding.provider)} turn-in</Badge>
+          <CardTitle className="mt-3">{binding.assignmentLabel || binding.assignmentId || "Assignment link ready"}</CardTitle>
+          <CardDescription className="mt-2 text-slate-700 dark:text-slate-300">
+            Sign in with the student LMS account to attach the Lockedscreen submission and complete the turn-in.
+          </CardDescription>
+        </div>
+        <Button className="px-3 py-2" onClick={onTurnIn} disabled={turningIn || status === "success"}>
+          {actionLabel}
+        </Button>
+      </div>
+      {binding.courseLabel || binding.courseId ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          Class: {binding.courseLabel || binding.courseId}
+        </div>
+      ) : null}
+      {state?.lastError ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{state.lastError}</div>
+      ) : null}
+      {state?.externalReference ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-all text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          LMS reference: {state.externalReference}
+        </div>
+      ) : null}
+    </Card>
+  );
+};
+
+const StudentExamPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { examId } = useParams();
+  const { snapshot, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
+  const exam = snapshot?.exams.find((candidate) => candidate.id === examId);
+  const configPackage = examId ? getConfigPackageForExam(snapshot ?? null, examId) : null;
+  const sessionExamId = exam?.id ?? null;
+  const sessionPackageId = configPackage?.id ?? null;
+  const fallbackCandidateRef = useRef<Candidate | null>(null);
+  if (!fallbackCandidateRef.current) {
+    fallbackCandidateRef.current = defaultCandidate();
+  }
+  const launchCandidate = parseCandidateFromSearch(location.search) ?? fallbackCandidateRef.current;
+  const [session, setSession] = useState<ExamSession | null>(() =>
+    exam ? createSession(exam, launchCandidate) : null
+  );
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [turningIn, setTurningIn] = useState(false);
+  const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
+
+  useEffect(() => {
+    if (!sessionExamId || !sessionPackageId) {
+      return;
+    }
+
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" });
+    return () => {
+      void endSession("Closed native exam runtime");
+    };
+  }, [beginSession, endSession, sessionExamId, sessionPackageId]);
+
+  useEffect(() => {
+    if (!exam) {
+      return;
+    }
+
+    setSession(createSession(exam, launchCandidate));
+    setCurrentIndex(0);
+    setSubmitted(false);
+    setSubmitting(false);
+    setTurningIn(false);
+    setSubmissionResult(null);
+  }, [exam, location.search]);
+
+  const handleStudentTurnIn = async (submissionId: string) => {
+    if (!configPackage) {
+      return;
+    }
+
+    setTurningIn(true);
+    const updatedSubmission = await turnInStudentLms({ submissionId, packageId: configPackage.id });
+    if (updatedSubmission) {
+      setSubmissionResult(updatedSubmission);
+    }
+    setTurningIn(false);
+  };
+
+  const finalize = async () => {
+    if (submitted || submitting || !session || !exam) {
+      return;
+    }
+
+    setSubmitting(true);
+    const result = await submitExam(exam, session);
+    if (!result) {
+      setSubmitting(false);
+      return;
+    }
+
+    setSubmissionResult(result);
+    setSubmitted(true);
+    setSubmitting(false);
+    if (configPackage?.studentLmsBinding.enabled) {
+      void handleStudentTurnIn(result.id);
+      return;
+    }
+
+    if (!requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
+      navigate("/student");
+    }
+  };
+
+  useEffect(() => {
+    if (!session || submitted) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      if (getRemainingSeconds(session) === 0) {
+        window.clearInterval(timer);
+        if (configPackage?.sessionPolicy.timeoutAction === "restart" && exam) {
+          setSession(createSession(exam, session.candidate));
+          setCurrentIndex(0);
+          return;
+        }
+        void finalize();
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted]);
+
+  if (!exam || !session) {
+    return null;
+  }
+
+  const question = exam.questions[currentIndex];
+  const response = session.responses.find((entry) => entry.questionId === question?.id);
+
+  return (
+    <StudentShell
+      exam={exam}
+      configPackage={configPackage}
+      session={session}
+      sessionSubmitted={submitted}
+      secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
+      testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
+      unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
+      onUnlock={() => navigate("/student")}
+    >
+      {submitted ? (
+        <div className="space-y-4">
+          <Card className="space-y-4 border-emerald-200 bg-emerald-50">
+            <Badge className="bg-emerald-100 text-emerald-800">Submission recorded</Badge>
+            <CardTitle>Your exam has been submitted.</CardTitle>
+            <CardDescription className="text-slate-700 dark:text-emerald-100">
+              Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen. If this
+              package requires invigilator-controlled exit, the session remains locked until the invigilator unlocks it.
+            </CardDescription>
+          </Card>
+          <StudentLmsTurnInPanel
+            configPackage={configPackage}
+            submission={submissionResult}
+            turningIn={turningIn}
+            onTurnIn={() => {
+              if (submissionResult) {
+                void handleStudentTurnIn(submissionResult.id);
+              }
+            }}
+          />
+        </div>
+      ) : question ? (
+        <div className="grid gap-4 lg:grid-cols-[minmax(11rem,0.24fr)_minmax(0,0.76fr)]">
+          <Card className="space-y-3 p-4">
+            <Badge className="bg-teal-100 text-teal-700">Question map</Badge>
+            <div className="grid grid-cols-5 gap-1.5">
+              {exam.questions.map((candidate, index) => {
+                const candidateResponse = session.responses.find((entry) => entry.questionId === candidate.id);
+                const answered = Boolean(candidateResponse?.selectedOptionId);
+                return (
+                  <button
+                    key={candidate.id}
+                    className={`rounded-xl px-2.5 py-2 text-sm font-semibold transition ${
+                      index === currentIndex
+                        ? "bg-slate-950 text-white"
+                        : answered
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    }`}
+                    onClick={() => setCurrentIndex(index)}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="rounded-xl bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Completion: {Math.round(calculateCompletion(session) * 100)}%
+            </div>
+          </Card>
+
+          <Card className="space-y-4 p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <Badge>Question {currentIndex + 1}</Badge>
+                <RichContent content={question.prompt} className="mt-3 text-lg leading-7 text-slate-900 dark:text-slate-50" />
+              </div>
+              <Badge className="bg-slate-900 text-white">{question.points} pt</Badge>
+            </div>
+
+            <div className="grid gap-2.5">
+              {question.options.map((option) => (
+                <button
+                  key={option.id}
+                  className={`rounded-[20px] border px-4 py-3 text-left text-base transition ${
+                    response?.selectedOptionId === option.id
+                      ? "border-teal-500 bg-teal-50 shadow-glow"
+                      : "border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600"
+                  }`}
+                  onClick={() =>
+                    setSession({
+                      ...session,
+                      responses: updateResponse(session.responses, question.id, {
+                        selectedOptionId: option.id
+                      })
+                    })
+                  }
+                >
+                  <div className="font-semibold text-slate-900 dark:text-slate-50">{option.label}</div>
+                  <RichContent content={option.content} className="mt-1.5 text-slate-700 dark:text-slate-200" />
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  className="px-3 py-2"
+                  onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))}
+                  disabled={currentIndex === 0}
+                >
+                  <ArrowLeft className="size-4" />
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="px-3 py-2"
+                  onClick={() =>
+                    setSession({
+                      ...session,
+                      responses: updateResponse(session.responses, question.id, {
+                        flagged: !response?.flagged
+                      })
+                    })
+                  }
+                >
+                  <Flag className="size-4" />
+                  {response?.flagged ? "Unflag" : "Flag"}
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="px-3 py-2"
+                  onClick={() => setCurrentIndex((value) => Math.min(exam.questions.length - 1, value + 1))}
+                  disabled={currentIndex === exam.questions.length - 1}
+                >
+                  Next
+                  <ArrowRight className="size-4" />
+                </Button>
+                <Button variant="danger" className="px-3 py-2" onClick={() => void finalize()} disabled={submitting}>
+                  {submitting ? "Submitting..." : "Submit exam"}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      ) : null}
+    </StudentShell>
+  );
+};
+
+const LinkExamPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { examId } = useParams();
+  const { snapshot, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
+  const exam = snapshot?.exams.find((candidate) => candidate.id === examId);
+  const configPackage = examId ? getConfigPackageForExam(snapshot ?? null, examId) : null;
+  const sessionExamId = exam?.id ?? null;
+  const sessionPackageId = configPackage?.id ?? null;
+  const fallbackCandidateRef = useRef<Candidate | null>(null);
+  if (!fallbackCandidateRef.current) {
+    fallbackCandidateRef.current = defaultCandidate();
+  }
+  const launchCandidate = parseCandidateFromSearch(location.search) ?? fallbackCandidateRef.current;
+  const [session, setSession] = useState<ExamSession | null>(() =>
+    exam ? createSession(exam, launchCandidate) : null
+  );
+  const [expired, setExpired] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [turningIn, setTurningIn] = useState(false);
+  const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
+  const webviewRef = useRef<any>(null);
+  const guardDomainsKey = configPackage?.browserPolicy.allowedDomains.join("|") ?? "";
+  const guardPrefixesKey =
+    configPackage?.browserPolicy.urlRules
+      .filter((rule) => rule.kind === "prefix")
+      .map((rule) => rule.pattern)
+      .join("|") ?? "";
+
+  useEffect(() => {
+    if (!sessionExamId || !sessionPackageId) {
+      return;
+    }
+
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" });
+
+    return () => {
+      void endSession("Closed hosted exam runtime");
+    };
+  }, [beginSession, endSession, sessionExamId, sessionPackageId]);
+
+  useEffect(() => {
+    if (!configPackage) {
+      return;
+    }
+
+    void window.lockedscreenApi.setNavigationGuard({
+      allowedDomains: configPackage.browserPolicy.allowedDomains,
+      allowedPrefixes: configPackage.browserPolicy.urlRules
+        .filter((rule) => rule.kind === "prefix")
+        .map((rule) => rule.pattern),
+      startUrl: configPackage.browserPolicy.startUrl,
+      mode: "link"
+    });
+
+    return () => {
+      void window.lockedscreenApi.setNavigationGuard(null);
+    };
+  }, [configPackage?.id, configPackage?.browserPolicy.startUrl, guardDomainsKey, guardPrefixesKey]);
+
+  useEffect(() => {
+    if (!exam) {
+      return;
+    }
+
+    setSession(createSession(exam, launchCandidate));
+    setExpired(false);
+    setSubmitted(false);
+    setSubmitting(false);
+    setTurningIn(false);
+    setSubmissionResult(null);
+  }, [exam, location.search]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      if (getRemainingSeconds(session) <= 0) {
+        window.clearInterval(timer);
+        if (configPackage?.sessionPolicy.timeoutAction === "restart" && exam) {
+          setSession(createSession(exam, session.candidate));
+          returnToStart();
+          return;
+        }
+        setExpired(true);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session]);
+
+  const finalize = async () => {
+    if (submitted || submitting || !exam || !session) {
+      return;
+    }
+
+    setSubmitting(true);
+    const result = await submitExam(exam, session);
+    if (!result) {
+      setSubmitting(false);
+      return;
+    }
+
+    setSubmissionResult(result);
+    setSubmitted(true);
+    setSubmitting(false);
+    if (configPackage?.studentLmsBinding.enabled && configPackage) {
+      setTurningIn(true);
+      const updatedSubmission = await turnInStudentLms({ submissionId: result.id, packageId: configPackage.id });
+      if (updatedSubmission) {
+        setSubmissionResult(updatedSubmission);
+      }
+      setTurningIn(false);
+      return;
+    }
+
+    if (!requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
+      navigate("/student");
+    }
+  };
+
+  const returnToStart = () => {
+    const startUrl = configPackage?.browserPolicy.startUrl ?? exam?.linkConfig?.url;
+    if (!startUrl || !webviewRef.current) {
+      return;
+    }
+
+    if (configPackage?.browserPolicy.protectedBackToStart && !window.confirm("Return to the configured start page?")) {
+      return;
+    }
+
+    webviewRef.current.src = startUrl;
+  };
+
+  if (!exam || !session) {
+    return null;
+  }
+
+  return (
+    <StudentShell
+      exam={exam}
+      configPackage={configPackage}
+      session={session}
+      sessionSubmitted={submitted}
+      secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
+      testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
+      unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
+      onUnlock={() => navigate("/student")}
+    >
+      <div className="relative h-[calc(100vh-8.5rem)] overflow-hidden rounded-[28px] border border-slate-200 bg-white">
+        {submitted ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/90 p-8">
+            <div className="w-full max-w-xl space-y-4 text-center text-white">
+              <div className="flex flex-col items-center justify-center gap-4">
+                <ShieldCheck className="size-12 text-emerald-300" />
+                <h2 className="text-3xl font-semibold">Submission recorded</h2>
+                <p className="max-w-lg text-sm text-slate-300">
+                  Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen.
+                </p>
+              </div>
+              <StudentLmsTurnInPanel
+                configPackage={configPackage}
+                submission={submissionResult}
+                turningIn={turningIn}
+                onTurnIn={() => {
+                  if (!submissionResult || !configPackage) {
+                    return;
+                  }
+
+                  setTurningIn(true);
+                  void turnInStudentLms({ submissionId: submissionResult.id, packageId: configPackage.id }).then(
+                    (updatedSubmission) => {
+                      if (updatedSubmission) {
+                        setSubmissionResult(updatedSubmission);
+                      }
+                      setTurningIn(false);
+                    }
+                  );
+                }}
+              />
+            </div>
+          </div>
+        ) : expired ? (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-950/90 p-8 text-center text-white">
+            <Clock3 className="size-12 text-amber-300" />
+            <h2 className="text-3xl font-semibold">Time expired</h2>
+            <p className="max-w-lg text-sm text-slate-300">
+              This linked exam session has ended. Submit the session record and wait for the invigilator.
+            </p>
+            <Button onClick={() => void finalize()}>End session</Button>
+          </div>
+        ) : null}
+
+        {(configPackage?.browserPolicy.showBackToStartButton || configPackage?.sessionPolicy.restartInsteadOfQuit) ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="text-sm text-slate-600 dark:text-slate-300">
+              Controlled hosted runtime. Navigation is limited to package-approved domains and URL rules.
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {configPackage?.browserPolicy.showBackToStartButton ? (
+                <Button variant="secondary" onClick={returnToStart}>
+                  Return to start
+                </Button>
+              ) : null}
+              {configPackage?.sessionPolicy.restartInsteadOfQuit ? (
+                <Button variant="secondary" onClick={returnToStart}>
+                  Restart session
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <webview
+          ref={webviewRef}
+          className="h-full w-full"
+          src={configPackage?.browserPolicy.startUrl ?? exam.linkConfig?.url}
+          partition="persist:lockedscreen-link"
+          allowpopups={false}
+        />
+      </div>
+    </StudentShell>
+  );
+};
+
+const StudentShell = ({
+  exam,
+  configPackage,
+  session,
+  sessionSubmitted,
+  secureMode,
+  testingModeName,
+  unlockPin,
+  onUnlock,
+  children
+}: {
+  exam: Exam;
+  configPackage: ExamConfigPackage | null;
+  session: ExamSession;
+  sessionSubmitted: boolean;
+  secureMode: boolean;
+  testingModeName: string;
+  unlockPin: string;
+  onUnlock: () => void;
+  children: ReactNode;
+}) => {
+  const { launchApprovedApplication } = useLockedscreenStore();
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  const remaining = getRemainingSeconds(session, currentTime);
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [pinAttempt, setPinAttempt] = useState("");
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [captureMessage, setCaptureMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [capturePending, setCapturePending] = useState(false);
+  const unlockInputRef = useRef<HTMLInputElement | null>(null);
+  const normalizedUnlockPin = unlockPin.trim();
+  const normalizedPinAttempt = pinAttempt.trim();
+  const showSchoolBranding = configPackage?.teacherOptions.showSchoolBranding !== false;
+  const showCandidateId = configPackage?.teacherOptions.showCandidateId !== false;
+  const showTimer = configPackage?.teacherOptions.showTimer !== false;
+
+  useEffect(() => {
+    setCurrentTime(new Date());
+
+    if (sessionSubmitted) {
+      return;
+    }
+
+    const endsAt = new Date(session.endsAt).getTime();
+    if (Number.isNaN(endsAt)) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now);
+
+      if (now.getTime() >= endsAt) {
+        window.clearInterval(timer);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [session.endsAt, sessionSubmitted]);
+
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
+      const lowerKey = event.key.toLowerCase();
+      if (
+        event.key === "F5" ||
+        (event.ctrlKey && (lowerKey === "r" || lowerKey === "w")) ||
+        (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight"))
+      ) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, []);
+
+  useEffect(() => {
+    if (unlockOpen) {
+      window.requestAnimationFrame(() => {
+        unlockInputRef.current?.focus();
+        unlockInputRef.current?.select();
+      });
+    }
+  }, [unlockOpen]);
+
+  const attemptUnlock = () => {
+    if (!configPackage?.quitUnlockPolicy.requireInvigilatorPin) {
+      setUnlockError(null);
+      setUnlockOpen(false);
+      setPinAttempt("");
+      onUnlock();
+      return;
+    }
+
+    if (normalizedPinAttempt === normalizedUnlockPin && normalizedUnlockPin.length > 0) {
+      setUnlockError(null);
+      setUnlockOpen(false);
+      setPinAttempt("");
+      onUnlock();
+      return;
+    }
+
+    setUnlockError("Incorrect invigilator PIN.");
+  };
+
+  const captureScreenshot = async () => {
+    if (normalizedUnlockPin.length > 0 && normalizedPinAttempt !== normalizedUnlockPin) {
+      setUnlockError("Enter the invigilator PIN to save a screenshot.");
+      return;
+    }
+
+    setCapturePending(true);
+    setCaptureMessage(null);
+    setUnlockError(null);
+    setUnlockOpen(false);
+
+    try {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+      });
+      const filePath = await window.lockedscreenApi.captureScreenshot();
+      if (filePath) {
+        setCaptureMessage({
+          tone: "success",
+          text: `Screenshot saved to ${filePath}`
+        });
+      }
+    } catch {
+      setCaptureMessage({
+        tone: "error",
+        text: "Unable to save a screenshot from the active exam window."
+      });
+    } finally {
+      setCapturePending(false);
+      setPinAttempt("");
+    }
+  };
+
+  return (
+    <motion.div {...animation} className="space-y-3">
+      <div className="rounded-[28px] border border-white/80 bg-white/92 px-4 py-3 text-slate-950 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/92 dark:text-slate-50">
+        <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
+                {exam.title || "Exam title"}
+              </h1>
+              {showSchoolBranding ? (
+                <Badge className="bg-teal-100 text-teal-900">{exam.branding.schoolName || "School name"}</Badge>
+              ) : null}
+              <Badge className="bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+                {exam.subject || "Subject"}
+              </Badge>
+              {exam.className ? (
+                <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">{exam.className}</Badge>
+              ) : null}
+              {exam.form ? (
+                <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Form {exam.form}</Badge>
+              ) : null}
+              <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+                {exam.mode === "link" ? "Hosted exam" : "Native exam"}
+              </Badge>
+              {configPackage ? (
+                <Badge
+                  className={configPackage.securityMode === "full-kiosk" ? "bg-slate-900 text-white" : "bg-blue-100 text-blue-800"}
+                >
+                  {configPackage.securityMode === "full-kiosk" ? "Full Kiosk Mode" : "Restricted App Mode"}
+                </Badge>
+              ) : null}
+              {!secureMode ? <Badge className="bg-amber-100 text-amber-900">{testingModeName}</Badge> : null}
+            </div>
+            {exam.instructions ? (
+              <p className="mt-1.5 max-w-5xl text-sm leading-5 text-slate-700 dark:text-slate-200">{exam.instructions}</p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-950 px-3 py-2 text-white">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Student</div>
+              <div className="text-sm font-semibold">{session.candidate.name}</div>
+              {showCandidateId ? <div className="text-xs text-slate-300">{session.candidate.id}</div> : null}
+            </div>
+            {showTimer ? (
+              <div className="rounded-[18px] border border-teal-200 bg-teal-50 px-3 py-2 text-teal-950">
+                <div className="text-[10px] uppercase tracking-[0.22em] text-teal-700">Remaining</div>
+                <div className="text-xl font-semibold leading-none">{formatTime(remaining)}</div>
+              </div>
+            ) : null}
+            <Button
+              variant="secondary"
+              className="shrink-0 border-slate-300 bg-white px-3 py-2 text-slate-900 hover:bg-slate-100"
+              onClick={() => setUnlockOpen(true)}
+            >
+              <Lock className="size-4" />
+              Invigilator unlock
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-2 grid gap-2">
+          {configPackage?.teacherOptions.supportMessage ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              {configPackage.teacherOptions.supportMessage}
+            </div>
+          ) : null}
+          {!secureMode ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              {testingModeName}: the app can run and stay full-screen, but the strongest Windows isolation still requires a verified native companion or official kiosk deployment.
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {captureMessage ? (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm break-all ${
+            captureMessage.tone === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border-rose-200 bg-rose-50 text-rose-900"
+          }`}
+        >
+          {captureMessage.text}
+        </div>
+      ) : null}
+
+      {configPackage?.allowedApplications.length ? (
+        <Card className="space-y-3 border-slate-200 bg-slate-50/80 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <CardTitle>Approved Tools</CardTitle>
+              <CardDescription>
+                These applications are package-approved and launched under kiosk supervision when permitted by the invigilator.
+              </CardDescription>
+            </div>
+            <Badge className="bg-slate-900 text-white">{configPackage.allowedApplications.length}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {configPackage.allowedApplications.map((entry) => (
+              <Button
+                key={entry.id}
+                variant="secondary"
+                className="px-3 py-2"
+                onClick={() => void launchApprovedApplication({ packageId: configPackage.id, appId: entry.id })}
+              >
+                {entry.label}
+              </Button>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
+      {unlockOpen ? (
+        <Card className="border-amber-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                  <Lock className="size-5" />
+                </div>
+                <CardTitle>{sessionSubmitted ? "Invigilator release required" : "Invigilator unlock required"}</CardTitle>
+              </div>
+              <CardDescription className="max-w-2xl">
+                {configPackage?.quitUnlockPolicy.requireInvigilatorPin
+                  ? sessionSubmitted
+                    ? "This exam has already been submitted. The session remains locked until the invigilator enters the PIN and releases the student."
+                    : "Exit from the active exam session requires the invigilator PIN. The same PIN can be used to save an in-app screenshot without relying on blocked OS shortcuts."
+                  : sessionSubmitted
+                    ? "This exam has already been submitted. Use the release action below to leave the controlled session."
+                    : "Use the release action below to leave the controlled session."}{" "}
+                Complete suppression of the Windows key and task switching must still be enforced by a verified native Windows companion or official kiosk deployment.
+              </CardDescription>
+              {configPackage?.quitUnlockPolicy.requireInvigilatorPin ? (
+                <div className="mt-4 max-w-sm space-y-3">
+                  <LabelledField label="Invigilator PIN">
+                    <Input
+                      ref={unlockInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      autoFocus
+                      spellCheck={false}
+                      value={pinAttempt}
+                      onChange={(event) => {
+                        setPinAttempt(event.target.value);
+                        setUnlockError(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          attemptUnlock();
+                        }
+                      }}
+                      className="text-center font-mono text-lg font-semibold tracking-[0.35em]"
+                      placeholder="Enter invigilator PIN"
+                    />
+                  </LabelledField>
+                  {unlockError ? <div className="text-sm font-medium text-rose-700">{unlockError}</div> : null}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" className="px-3 py-2" onClick={() => setUnlockOpen(false)} disabled={capturePending}>
+                Cancel
+              </Button>
+              <Button variant="secondary" className="px-3 py-2" onClick={() => void captureScreenshot()} disabled={capturePending}>
+                <Save className="size-4" />
+                {capturePending ? "Saving..." : "Save screenshot"}
+              </Button>
+              <Button className="px-3 py-2" onClick={attemptUnlock} disabled={capturePending}>
+                {sessionSubmitted ? "Release student" : "Unlock session"}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <div
+        aria-hidden={unlockOpen}
+        className={unlockOpen ? "pointer-events-none invisible" : undefined}
+      >
+        {children}
+      </div>
+    </motion.div>
+  );
+};
+
+const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
+  <Card
+    className="overflow-hidden"
+    style={{
+      borderTop: `6px solid ${exam.branding.accentColor}`
+    }}
+  >
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <CardTitle>Student preview</CardTitle>
+          <CardDescription>Shows the calm presentation, exam instructions, and navigation density.</CardDescription>
+        </div>
+        <Badge>{exam.appearance.theme}</Badge>
+      </div>
+
+      <div className="rounded-[28px] bg-slate-950 p-5 text-white">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm uppercase tracking-[0.2em] text-slate-400">{exam.branding.schoolName || "School name"}</div>
+            <div className="mt-2 text-2xl font-semibold">{exam.title || "Exam title"}</div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <Badge className="bg-white/10 text-white">{exam.subject || "Subject"}</Badge>
+              <Badge className="bg-white/10 text-white">{exam.className || "Class"}</Badge>
+              {exam.form ? <Badge className="bg-white/10 text-white">Form {exam.form}</Badge> : null}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-white/10 px-4 py-2 text-sm">{exam.durationMinutes} mins</div>
+        </div>
+        <div className="mt-5 rounded-[24px] bg-white px-5 py-4 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+          {exam.mode === "app" ? (
+            <>
+              <div className="mb-3 text-sm font-semibold text-slate-500 dark:text-slate-400">Question card</div>
+              <RichContent
+                content={exam.questions[0]?.prompt || "The first question preview appears here."}
+                className="text-base leading-7 text-slate-900 dark:text-slate-100"
+              />
+            </>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-slate-500 dark:text-slate-400">Embedded link session</div>
+              <div className="text-sm text-slate-700 dark:text-slate-200">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </Card>
+);
+
+const StatCard = ({ label, value }: { label: string; value: string }) => (
+  <div className="rounded-[24px] bg-slate-50 p-4 dark:bg-slate-800/80">
+    <div className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</div>
+    <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">{value}</div>
+  </div>
+);
+
+const LabelledField = ({
+  label,
+  children,
+  labelClassName
+}: {
+  label: string;
+  children: ReactNode;
+  labelClassName?: string;
+}) => (
+  <div className="grid gap-2">
+    <span className={`text-sm font-semibold ${labelClassName ?? "text-slate-800 dark:text-slate-200"}`}>{label}</span>
+    {children}
+  </div>
+);
+
+const ToggleField = ({
+  label,
+  checked,
+  onChange
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) => (
+  <label className="flex items-center gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+    <input
+      type="checkbox"
+      className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+      checked={checked}
+      onChange={(event) => onChange(event.target.checked)}
+    />
+    {label}
+  </label>
+);
+
+const PolicySelect = ({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) => (
+  <LabelledField label={label}>
+    <select className={selectClassName} value={value} onChange={(event) => onChange(event.target.value)}>
+      {options.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  </LabelledField>
+);
+
+const ValidationCard = ({ item }: { item: ValidationItem }) => (
+  <div className={`rounded-2xl border px-4 py-3 text-sm ${statusTone(item.status)}`}>
+    <div className="font-semibold">{item.label}</div>
+    <div className="mt-1">{item.detail}</div>
+    <div className="mt-2 text-xs uppercase tracking-[0.18em] opacity-80">{item.enforcement}</div>
+  </div>
+);
+
+const StatusChip = ({
+  title,
+  subtitle,
+  status
+}: {
+  title: string;
+  subtitle: string;
+  status: VerificationStatus;
+}) => (
+  <div className={`rounded-2xl border px-4 py-3 text-sm ${statusTone(status)}`}>
+    <div className="font-semibold">{title}</div>
+    <div className="mt-1">{subtitle}</div>
+  </div>
+);
+
+export default function App() {
+  return (
+    <MemoryRouter>
+      <AppFrame />
+    </MemoryRouter>
+  );
+}

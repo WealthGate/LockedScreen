@@ -1,0 +1,127 @@
+{
+  "name": "@lockedscreen/desktop",
+  "version": "0.2.9",
+  "private": true,
+  "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
+  "author": {
+    "name": "WealthGate"
+  },
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "dist": "npm run build && electron-builder --win nsis portable"
+  },
+  "build": {
+    "appId": "com.wealthgate.lockedscreen",
+    "productName": "Lockedscreen",
+    "artifactName": "Lockedscreen-Setup-${version}-${arch}.${ext}",
+    "executableName": "Lockedscreen",
+    "copyright": "Copyright 2026 WealthGate",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../windows-lockdown/Lockedscreen.Security.Service/bin/Release/net8.0-windows",
+        "to": "lockedscreen-security",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../windows-lockdown/Lockedscreen.Security.Client/bin/Release/net8.0-windows",
+        "to": "lockedscreen-security",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../windows-lockdown/Lockedscreen.Security.Agent/bin/Release/net8.0-windows",
+        "to": "lockedscreen-security",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "icon": "build/icon.ico",
+    "win": {
+      "icon": "build/icon.ico",
+      "legalTrademarks": "Lockedscreen is a trademark of WealthGate",
+      "verifyUpdateCodeSignature": false,
+      "requestedExecutionLevel": "asInvoker",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lockedscreen",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "Lockedscreen-Portable-${version}.${ext}"
+    },
+    "fileAssociations": [
+      {
+        "ext": "lscp",
+        "name": "Lockedscreen Exam Package",
+        "description": "Encrypted Lockedscreen exam package",
+        "role": "Editor"
+      }
+    ]
+  },
+  "dependencies": {
+    "@lockedscreen/exam-engine": "file:../../packages/exam-engine",
+    "@lockedscreen/parser": "file:../../packages/parser",
+    "@lockedscreen/shared-types": "file:../../packages/shared-types",
+    "@lockedscreen/storage": "file:../../packages/storage",
+    "@lockedscreen/ui": "file:../../packages/ui",
+    "dompurify": "^3.2.3",
+    "framer-motion": "^12.7.2",
+    "katex": "^0.16.11",
+    "lucide-react": "^0.511.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.6.1",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react-swc": "^3.7.2",
+    "autoprefixer": "^10.4.20",
+    "electron": "36.0.0",
+    "electron-vite": "^3.1.0",
+    "electron-builder": "^26.0.12",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.6"
+  }
+}

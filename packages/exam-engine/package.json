@@ -1,0 +1,10 @@
+{
+  "name": "@lockedscreen/exam-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@lockedscreen/shared-types": "file:../shared-types"
+  }
+}

@@ -1,0 +1,41 @@
+[QUESTION]
+What is the chemical symbol for sodium?
+[OPTION]
+A. S
+[OPTION]
+B. Na
+[OPTION]
+C. So
+[OPTION]
+D. Sd
+[ANSWER]
+B
+[/QUESTION]
+
+[QUESTION]
+Simplify \sqrt{49}.
+[OPTION]
+A. 5
+[OPTION]
+B. 6
+[OPTION]
+C. 7
+[OPTION]
+D. 8
+[ANSWER]
+C
+[/QUESTION]
+
+[QUESTION]
+Which chemical formula represents water?
+[OPTION]
+A. HO
+[OPTION]
+B. H_2O
+[OPTION]
+C. H_2O_2
+[OPTION]
+D. O_2H
+[ANSWER]
+B
+[/QUESTION]

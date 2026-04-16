@@ -1,0 +1,12 @@
+{
+  "name": "@lockedscreen/parser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@lockedscreen/shared-types": "file:../shared-types",
+    "mammoth": "^1.8.0",
+    "pdf-parse": "^1.1.1"
+  }
+}
