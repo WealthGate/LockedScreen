@@ -1,6 +1,8 @@
 node_modules/
 _github_publish/
 out/
+.dotnet-home/
+.nuget/
 
 apps/desktop/dist/
 apps/desktop/out/
