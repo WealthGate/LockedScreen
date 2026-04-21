@@ -52,15 +52,18 @@ Launch flow:
 
 ### LMS Integration
 
-Teachers can connect:
+LMS integration is optional. Schools that do not use Google Classroom, Microsoft 365, or another LMS can skip LMS setup and still use local exams, package export/import, OCR import, and CSV result export.
+
+Teachers can connect after the school app registration is configured:
 
 - `Google Classroom`
 - `Microsoft 365 Education / Teams`
-- `Generic OAuth LMS`
 - `Result destinations` for Canvas, Moodle, Schoology, Google Sheets, Teams automation, or any school-owned middleware endpoint
 
 Important:
 
+- school admins configure app registration client IDs, permission scopes, tenant values, and redirect details once in the admin/developer setup section
+- normal teachers should only choose the LMS, save the connection, click connect, sign in on the provider page, then load classes, students, and assignments
 - teachers and students are not supposed to enter LMS passwords directly into Lockedscreen
 - Lockedscreen opens the provider's own sign-in page for OAuth
 - that provider page can use the same password, passkey, Microsoft Authenticator, MFA, or school SSO flow already used by the school

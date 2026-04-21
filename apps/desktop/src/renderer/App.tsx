@@ -546,6 +546,24 @@ const providerLabel = (type: ResultDestinationType | LmsProviderType): string =>
           ? "Generic OAuth LMS"
           : "Generic LMS";
 
+const lmsConnectActionLabel = (connection: LmsConnection): string =>
+  connection.provider === "google-classroom"
+    ? connection.status === "connected"
+      ? "Reconnect Google Classroom"
+      : "Connect Google Classroom"
+    : connection.provider === "microsoft-365"
+      ? connection.status === "connected"
+        ? "Reconnect Microsoft 365"
+        : "Connect Microsoft 365"
+      : connection.status === "connected"
+        ? "Reconnect LMS"
+        : "Connect LMS";
+
+const hasAdminLmsSetup = (connection: LmsConnection): boolean =>
+  connection.clientId.trim().length > 0 &&
+  (connection.provider !== "generic-oauth-lms" ||
+    ((connection.authorizeUrl?.trim().length ?? 0) > 0 && (connection.tokenUrl?.trim().length ?? 0) > 0));
+
 const AppFrame = () => {
   const location = useLocation();
   const { snapshot, loading, error, load } = useLockedscreenStore();
@@ -3053,14 +3071,14 @@ const SettingsPage = () => {
             <div>
               <CardTitle>LMS connections</CardTitle>
               <CardDescription className="mt-2">
-                Connect teacher accounts directly with Google Classroom, Microsoft 365, or another OAuth-based LMS. Tokens stay in the main process and are not exposed to the renderer.
+                Connect Google Classroom or Microsoft 365 with the teacher's normal school sign-in. Schools that do not use LMS can skip this section.
               </CardDescription>
             </div>
             <Badge>{snapshot.lmsConnections.length} connection(s)</Badge>
           </div>
 
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-            <LabelledField label="Selected connection">
+            <LabelledField label="School connection">
               <select
                 className={selectClassName}
                 value={snapshot.lmsConnections.some((candidate) => candidate.id === selectedConnectionId) ? selectedConnectionId : "__new__"}
@@ -3074,7 +3092,7 @@ const SettingsPage = () => {
                   selectConnection(selected ?? null);
                 }}
               >
-                <option value="__new__">New connection</option>
+                <option value="__new__">New school connection</option>
                 {snapshot.lmsConnections.map((connection) => (
                   <option key={connection.id} value={connection.id}>
                     {connection.label}
@@ -3097,7 +3115,7 @@ const SettingsPage = () => {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label="Provider">
+            <LabelledField label="LMS">
               <select
                 className={selectClassName}
                 value={connectionDraft.provider}
@@ -3119,10 +3137,12 @@ const SettingsPage = () => {
               >
                 <option value="google-classroom">Google Classroom</option>
                 <option value="microsoft-365">Microsoft 365</option>
-                <option value="generic-oauth-lms">Generic OAuth LMS</option>
+                {connectionDraft.provider === "generic-oauth-lms" ? (
+                  <option value="generic-oauth-lms">Generic OAuth LMS</option>
+                ) : null}
               </select>
             </LabelledField>
-            <LabelledField label="Label">
+            <LabelledField label="Connection name">
               <Input
                 value={connectionDraft.label}
                 onChange={(event) => updateConnection((current) => ({ ...current, label: event.target.value }))}
@@ -3131,16 +3151,22 @@ const SettingsPage = () => {
           </div>
 
           <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
-            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">Advanced app connection setup</summary>
+            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">
+              Admin/developer app registration setup
+            </summary>
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+              These values are configured once by the school admin or developer. Teachers should not enter their email,
+              password, class code, or assignment link here.
+            </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <LabelledField label="OAuth client ID">
+              <LabelledField label="App registration client ID">
                 <Input
                   value={connectionDraft.clientId}
                   onChange={(event) => updateConnection((current) => ({ ...current, clientId: event.target.value }))}
                 />
               </LabelledField>
               {connectionDraft.provider === "microsoft-365" ? (
-                <LabelledField label="Tenant ID">
+                <LabelledField label="Microsoft tenant">
                   <Input
                     value={connectionDraft.tenantId ?? ""}
                     onChange={(event) => updateConnection((current) => ({ ...current, tenantId: event.target.value }))}
@@ -3165,7 +3191,7 @@ const SettingsPage = () => {
               ) : null}
             </div>
             <div className="mt-4">
-              <LabelledField label="OAuth scopes">
+              <LabelledField label="Approved permission scopes">
                 <Textarea
                   className="min-h-[110px] font-mono text-xs"
                   value={connectionDraft.scope}
@@ -3179,9 +3205,17 @@ const SettingsPage = () => {
             <Button
               variant="secondary"
               onClick={() => void handleConnectLms()}
-              disabled={adminBusy || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+              disabled={
+                adminBusy ||
+                !hasAdminLmsSetup(connectionDraft) ||
+                !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)
+              }
             >
-              {isPending("connect-lms") ? "Connecting..." : connectionDraft.status === "connected" ? "Reconnect" : "Connect account"}
+              {isPending("connect-lms")
+                ? "Connecting..."
+                : hasAdminLmsSetup(connectionDraft)
+                  ? lmsConnectActionLabel(connectionDraft)
+                  : "Admin setup required"}
             </Button>
             <Button
               variant="secondary"
@@ -3201,7 +3235,9 @@ const SettingsPage = () => {
                 ? `Connected as ${connectionDraft.accountName || connectionDraft.accountEmail || connectionDraft.label}.`
                 : connectionDraft.status === "error"
                   ? connectionDraft.lastError || "Connection failed."
-                  : "Save the connection first, then complete OAuth in the system browser."}
+                  : hasAdminLmsSetup(connectionDraft)
+                    ? "Save the connection, then connect with the teacher's school account in the system browser."
+                    : "Admin setup is optional. To use LMS turn-in, a school admin must first add the app registration in the admin/developer setup section."}
             </div>
             {connectionDraft.accountEmail ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -3235,7 +3271,7 @@ const SettingsPage = () => {
             <div>
               <CardTitle>Student LMS turn-in</CardTitle>
               <CardDescription className="mt-2">
-                Bind this package to a Google Classroom or Microsoft 365 assignment so the student can sign in after local submission and turn in directly from the app.
+                Optional. Bind this package to a Google Classroom or Microsoft 365 assignment after the school connection is set up.
               </CardDescription>
             </div>
             <Badge>{packageDraft.studentLmsBinding.enabled ? "Enabled" : "Disabled"}</Badge>
@@ -3256,7 +3292,7 @@ const SettingsPage = () => {
           />
 
           <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label="Provider">
+            <LabelledField label="LMS">
               <select
                 className={selectClassName}
                 value={packageDraft.studentLmsBinding.provider}
@@ -3278,7 +3314,7 @@ const SettingsPage = () => {
                 <option value="microsoft-365">Microsoft 365</option>
               </select>
             </LabelledField>
-            <LabelledField label="Connected teacher account">
+            <LabelledField label="Teacher school account">
               <select
                 className={selectClassName}
                 value={packageDraft.studentLmsBinding.connectionId ?? ""}
@@ -3309,7 +3345,7 @@ const SettingsPage = () => {
                   }));
                 }}
               >
-                <option value="">Manual package setup</option>
+                <option value="">Choose a connected account</option>
                 {bindingConnections.map((connection) => (
                   <option key={connection.id} value={connection.id}>
                     {connection.label}
@@ -3345,7 +3381,7 @@ const SettingsPage = () => {
                   }));
                 }}
               >
-                <option value="">Enter manually or load classes</option>
+                <option value="">Load classes from the connected account</option>
                 {connectionCourses.map((course) => (
                   <option key={course.id} value={course.id}>
                     {course.name}
@@ -3383,7 +3419,7 @@ const SettingsPage = () => {
                   }));
                 }}
               >
-                <option value="">Enter manually or load assignments</option>
+                <option value="">Load assignments from the selected class</option>
                 {bindingCourseWork.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.title}
@@ -3465,9 +3501,15 @@ const SettingsPage = () => {
           </div>
 
           <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
-            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">Advanced LMS assignment details</summary>
+            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">
+              Admin/developer package targeting details
+            </summary>
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+              These values are copied from the connected school account and selected class. Use this section only for admin
+              troubleshooting or developer-supported deployments.
+            </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <LabelledField label="OAuth client ID">
+              <LabelledField label="App registration client ID">
                 <Input
                   value={packageDraft.studentLmsBinding.clientId}
                   onChange={(event) =>
@@ -3482,7 +3524,7 @@ const SettingsPage = () => {
                 />
               </LabelledField>
               {packageDraft.studentLmsBinding.provider === "microsoft-365" ? (
-                <LabelledField label="Tenant ID">
+                <LabelledField label="Microsoft tenant">
                   <Input
                     value={packageDraft.studentLmsBinding.tenantId ?? ""}
                     onChange={(event) =>
@@ -3527,7 +3569,7 @@ const SettingsPage = () => {
               </LabelledField>
             </div>
             <div className="mt-4">
-              <LabelledField label="Student OAuth scopes">
+              <LabelledField label="Student permission scopes">
                 <Textarea
                   className="min-h-[110px] font-mono text-xs"
                   value={packageDraft.studentLmsBinding.scope}
