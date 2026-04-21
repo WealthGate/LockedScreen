@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { createCanvas } from "@napi-rs/canvas";
 import type {
   ImportPreview,
   ImportExtractionInfo,
@@ -27,6 +26,18 @@ const imageFilePattern = /\.(?:png|jpe?g|tiff?|bmp|webp)$/i;
 const minimumUsefulTextLength = 20;
 const maxOcrPdfPages = 30;
 const requireFromParser = createRequire(import.meta.url);
+
+const loadCanvas = async (): Promise<typeof import("@napi-rs/canvas")> => {
+  try {
+    return await import("@napi-rs/canvas");
+  } catch (error) {
+    throw new Error(
+      `Unable to initialize the PDF OCR canvas engine. Typed PDFs, DOCX, TXT, and image OCR can still be imported. Canvas error: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`
+    );
+  }
+};
 
 export interface ExtractedDocumentText {
   text: string;
@@ -89,7 +100,11 @@ const ocrImageBuffer = async (input: Buffer): Promise<string> => {
 };
 
 const ocrPdfBuffer = async (input: Buffer): Promise<ExtractedDocumentText> => {
-  const [{ getDocument }, worker] = await Promise.all([import("pdfjs-dist/legacy/build/pdf.mjs"), createOcrWorker()]);
+  const [{ getDocument }, { createCanvas }, worker] = await Promise.all([
+    import("pdfjs-dist/legacy/build/pdf.mjs"),
+    loadCanvas(),
+    createOcrWorker()
+  ]);
 
   try {
     const pdfDocumentOptions = {
