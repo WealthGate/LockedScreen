@@ -11,6 +11,7 @@ import type {
   LmsConnection,
   LmsCourse,
   LmsCourseWork,
+  LmsStudent,
   ResultDestination,
   SecurityProfile,
   SubmissionResult
@@ -35,12 +36,14 @@ interface LockedscreenStore {
   connectLmsConnection: (connectionId: string) => Promise<AppStateSnapshot | null>;
   listLmsCourses: (connectionId: string) => Promise<LmsCourse[]>;
   listLmsCourseWork: (payload: { connectionId: string; courseId: string }) => Promise<LmsCourseWork[]>;
+  listLmsStudents: (payload: { connectionId: string; courseId: string }) => Promise<LmsStudent[]>;
   deleteResultDestination: (destinationId: string) => Promise<AppStateSnapshot | null>;
   deleteConfigPackage: (packageId: string) => Promise<AppStateSnapshot | null>;
   duplicateConfigPackage: (packageId: string) => Promise<AppStateSnapshot | null>;
-  exportConfigPackage: (payload: { packageId: string; password: string; passwordHint?: string }) => Promise<string | null>;
-  importConfigPackage: (payload: { password: string; passwordHint?: string; filePath?: string }) => Promise<AppStateSnapshot | null>;
+  exportConfigPackage: (payload: { packageId: string }) => Promise<string | null>;
+  importConfigPackage: (payload?: { filePath?: string; password?: string }) => Promise<AppStateSnapshot | null>;
   importQuestions: () => Promise<ImportPreview | null>;
+  exportQuestionTemplate: () => Promise<string | null>;
   exportResultsCsv: (examId?: string) => Promise<string | null>;
   syncSubmissionResults: (submissionId: string) => Promise<AppStateSnapshot | null>;
   syncPendingResults: () => Promise<AppStateSnapshot | null>;
@@ -172,6 +175,14 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
       return [];
     }
   },
+  listLmsStudents: async (payload) => {
+    try {
+      return await window.lockedscreenApi.listLmsStudents(payload);
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Unexpected error" });
+      return [];
+    }
+  },
   deleteResultDestination: async (destinationId) => {
     const snapshot = await withGuard(() => window.lockedscreenApi.deleteResultDestination(destinationId), (error) => set({ error }));
     if (snapshot) {
@@ -207,6 +218,8 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
     set({ activeImport: preview ?? null });
     return preview;
   },
+  exportQuestionTemplate: async () =>
+    withGuard(() => window.lockedscreenApi.exportQuestionTemplate(), (error) => set({ error })),
   exportResultsCsv: async (examId) =>
     withGuard(() => window.lockedscreenApi.exportResultsCsv(examId), (error) => set({ error })),
   syncSubmissionResults: async (submissionId) => {

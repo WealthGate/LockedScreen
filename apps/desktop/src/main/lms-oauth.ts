@@ -4,7 +4,7 @@ import { URL, URLSearchParams } from "node:url";
 
 import { shell } from "electron";
 
-import type { LmsConnection, LmsCourse, LmsCourseWork, LmsProviderType } from "@lockedscreen/shared-types";
+import type { LmsConnection, LmsCourse, LmsCourseWork, LmsProviderType, LmsStudent } from "@lockedscreen/shared-types";
 
 import type { OAuthVault } from "./oauth-vault";
 
@@ -276,7 +276,9 @@ export const beginLmsOAuthConnection = async (
   vault: OAuthVault
 ): Promise<LmsConnection> => {
   if (!connection.clientId.trim()) {
-    throw new Error("Client ID is required before connecting this LMS.");
+    throw new Error(
+      "This LMS needs a one-time school app connection setup before sign-in. Ask the school IT/admin to add the Google or Microsoft app connection, then teachers can sign in with their normal school account."
+    );
   }
 
   const state = randomBytes(16).toString("hex");
@@ -426,6 +428,60 @@ export const listConnectionCourseWork = async (
       alternateLink: typeof item.webUrl === "string" ? item.webUrl : undefined,
       dueAt: typeof item.dueDateTime === "string" ? item.dueDateTime : undefined,
       state: typeof item.status === "string" ? item.status : undefined
+    }));
+  }
+
+  return [];
+};
+
+export const listConnectionStudents = async (
+  connection: LmsConnection,
+  courseId: string,
+  vault: OAuthVault
+): Promise<LmsStudent[]> => {
+  const normalizedCourseId = courseId.trim();
+  if (!normalizedCourseId) {
+    return [];
+  }
+
+  const accessToken = await getConnectionAccessToken(connection, vault);
+
+  if (connection.provider === "google-classroom") {
+    const response = await fetch(
+      `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(normalizedCourseId)}/students?pageSize=100`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    );
+    const payload = (await response.json()) as { students?: Array<Record<string, unknown>> };
+    return (payload.students ?? []).map((student) => {
+      const profile = student.profile as Record<string, unknown> | undefined;
+      const name = profile?.name as Record<string, unknown> | undefined;
+      return {
+        id: String(profile?.id ?? student.userId ?? ""),
+        name: String(name?.fullName ?? profile?.emailAddress ?? "Unnamed student"),
+        email: typeof profile?.emailAddress === "string" ? profile.emailAddress : undefined
+      };
+    });
+  }
+
+  if (connection.provider === "microsoft-365") {
+    const response = await fetch(
+      `https://graph.microsoft.com/v1.0/education/classes/${encodeURIComponent(normalizedCourseId)}/members?$top=100`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    );
+    const payload = (await response.json()) as { value?: Array<Record<string, unknown>> };
+    return (payload.value ?? []).map((student) => ({
+      id: String(student.id ?? ""),
+      name: String(student.displayName ?? student.userPrincipalName ?? "Unnamed student"),
+      email:
+        typeof student.userPrincipalName === "string"
+          ? student.userPrincipalName
+          : typeof student.mail === "string"
+            ? student.mail
+            : undefined
     }));
   }
 

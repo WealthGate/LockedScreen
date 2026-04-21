@@ -1,11 +1,12 @@
 # LOCKEDSCREEN
 
-LOCKEDSCREEN is a local-first Windows exam application for schools. It supports:
+LOCKEDSCREEN is a local-first, Windows-first exam application for schools. It supports:
 
 - app-based exams authored inside the app
 - link-based exams opened in a controlled webview
 - testing mode for lower-stakes rehearsal
 - native lockdown and alternate-desktop launch for stronger kiosk behavior on managed Windows devices
+- teacher-managed LMS connections for Google Classroom, Microsoft 365 Education / Teams, and custom OAuth or webhook-based LMS flows
 
 ## What To Install
 
@@ -48,6 +49,22 @@ Launch flow:
 3. Click `Launch secure session` or `Launch testing session`.
 4. The student completes the exam in the student shell.
 5. On submission, results are stored locally.
+
+### LMS Integration
+
+Teachers can connect:
+
+- `Google Classroom`
+- `Microsoft 365 Education / Teams`
+- `Generic OAuth LMS`
+- `Result destinations` for Canvas, Moodle, Schoology, Google Sheets, Teams automation, or any school-owned middleware endpoint
+
+Important:
+
+- teachers and students are not supposed to enter LMS passwords directly into Lockedscreen
+- Lockedscreen opens the provider's own sign-in page for OAuth
+- that provider page can use the same password, passkey, Microsoft Authenticator, MFA, or school SSO flow already used by the school
+- local submission always happens first; LMS delivery is additive
 
 ### 3. Link-Based Exam Mode
 
@@ -183,6 +200,26 @@ Useful scripts:
 - `npm run typecheck`
 - `npm run build`
 - `npm run dist`
+- `npm run dist:mac`
+- `npm run dist:linux`
+
+### macOS And Linux Procedure
+
+The Electron app can be packaged for macOS and Linux, but the current high-stakes lockdown stack is Windows-only.
+
+- Windows: secure deployment can use the native companion and official kiosk options
+- macOS: package and use in testing / restricted-app mode only
+- Linux: package and use in testing / restricted-app mode only
+
+Recommended build procedure:
+
+1. Build and validate the desktop app logic.
+2. On Windows, build the native lockdown binaries and produce the Windows installer.
+3. On macOS, run `npm run dist:mac` from the repository root or `npm run dist:mac --workspace @lockedscreen/desktop`.
+4. On Linux, run `npm run dist:linux` from the repository root or `npm run dist:linux --workspace @lockedscreen/desktop`.
+5. Test the LMS flow, result sync flow, package import/export, and student submission flow on each operating system before distributing installers.
+
+Do not describe the current macOS or Linux build as equivalent to the Windows native lockdown deployment. Those platforms currently provide contained exam delivery, not the Windows-specific lockdown guarantees.
 
 ## Current Windows Artifacts
 
@@ -228,6 +265,7 @@ That gives users a stable download point without requiring them to build locally
 
 - [Architecture overview](docs/architecture/overview.md)
 - [Teacher import guide](docs/teacher-guide/importing-questions.md)
+- [Teacher LMS setup guide](docs/teacher-guide/lms-setup.md)
 - [Windows kiosk setup](docs/security/windows-kiosk-setup.md)
 - [Security notes](docs/security/security-notes.md)
 - [Secure architecture](docs/security/secure-architecture.md)

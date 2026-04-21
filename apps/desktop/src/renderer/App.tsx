@@ -35,9 +35,11 @@ import type {
   ImportedExamMetadata,
   ImportedQuestionDraft,
   LaunchContext,
+  InstalledAppRole,
   LmsConnection,
   LmsCourse,
   LmsCourseWork,
+  LmsStudent,
   LmsProviderType,
   PackageUrlRule,
   Question,
@@ -502,6 +504,7 @@ type AdminActionState =
   | "connect-lms"
   | "load-lms-courses"
   | "load-lms-coursework"
+  | "load-lms-students"
   | "duplicate-package"
   | "delete-package"
   | "export-package"
@@ -547,10 +550,13 @@ const AppFrame = () => {
   const location = useLocation();
   const { snapshot, loading, error, load } = useLockedscreenStore();
   const [launchContext, setLaunchContext] = useState<LaunchContext | null>(null);
+  const installedRole: InstalledAppRole = launchContext?.installedRole ?? "teacher";
   const isStudentRoute =
+    installedRole === "student" ||
     location.pathname.startsWith("/student") ||
     location.pathname.startsWith("/session/") ||
-    location.pathname.startsWith("/link/");
+    location.pathname.startsWith("/link/") ||
+    location.pathname.startsWith("/package-import");
 
   useEffect(() => {
     void load();
@@ -577,14 +583,26 @@ const AppFrame = () => {
 
   return (
     <div className={`min-h-screen text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-4 sm:p-6"}`}>
-      <Routes>
-        <Route path="/" element={<ProfileSelectPage launchContext={launchContext} />} />
-        <Route path="/student" element={<StudentPortalPage />} />
-        <Route path="/session/:examId" element={<StudentExamPage />} />
-        <Route path="/link/:examId" element={<LinkExamPage />} />
-        <Route path="/teacher/*" element={<TeacherShell launchContext={launchContext} />} />
-        <Route path="*" element={<ProfileSelectPage launchContext={launchContext} />} />
-      </Routes>
+      {installedRole === "student" ? (
+        <Routes>
+          <Route path="/" element={<StudentPortalPage />} />
+          <Route path="/student" element={<StudentPortalPage />} />
+          <Route path="/session/:examId" element={<StudentExamPage />} />
+          <Route path="/link/:examId" element={<LinkExamPage />} />
+          <Route path="/package-import" element={<PackageImportPage launchContext={launchContext} />} />
+          <Route path="*" element={<StudentPortalPage />} />
+        </Routes>
+      ) : (
+        <Routes>
+          <Route path="/" element={<ProfileSelectPage launchContext={launchContext} />} />
+          <Route path="/student" element={<StudentPortalPage />} />
+          <Route path="/session/:examId" element={<StudentExamPage />} />
+          <Route path="/link/:examId" element={<LinkExamPage />} />
+          <Route path="/package-import" element={<PackageImportPage launchContext={launchContext} />} />
+          <Route path="/teacher/*" element={<TeacherShell launchContext={launchContext} />} />
+          <Route path="*" element={<ProfileSelectPage launchContext={launchContext} />} />
+        </Routes>
+      )}
       {launchContext?.route ? (
         <LaunchContextNavigator
           route={launchContext.route}
@@ -1696,10 +1714,12 @@ const QuestionEditor = ({
 };
 const ImportPage = () => {
   const navigate = useNavigate();
-  const { snapshot, activeImport, importQuestions, saveExam } = useLockedscreenStore();
+  const { snapshot, activeImport, importQuestions, exportQuestionTemplate, saveExam } = useLockedscreenStore();
   const [targetExamId, setTargetExamId] = useState<string>("new");
   const [reviewMetadata, setReviewMetadata] = useState<ImportedExamMetadata | null>(null);
   const [reviewQuestions, setReviewQuestions] = useState<ImportedQuestionDraft[]>([]);
+  const [templateSavedPath, setTemplateSavedPath] = useState<string | null>(null);
+  const [importPending, setImportPending] = useState(false);
 
   useEffect(() => {
     const nextReview = hydrateImportReview(activeImport);
@@ -1718,6 +1738,22 @@ const ImportPage = () => {
     setReviewQuestions((current) =>
       current.map((question) => (question.id === questionId ? updater(question) : question))
     );
+  };
+
+  const handleExportTemplate = async () => {
+    const filePath = await exportQuestionTemplate();
+    if (filePath) {
+      setTemplateSavedPath(filePath);
+    }
+  };
+
+  const handleImportQuestions = async () => {
+    setImportPending(true);
+    try {
+      await importQuestions();
+    } finally {
+      setImportPending(false);
+    }
   };
 
   const applyImport = async () => {
@@ -1766,14 +1802,81 @@ const ImportPage = () => {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Import questions</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-          Upload `.doc`, `.docx`, `.pdf`, or `.txt` exam papers, review the extracted heading and metadata, then select the correct option for each question before saving.
+          Upload `.doc`, `.docx`, `.pdf`, `.txt`, or scanned image exam papers, review the extracted heading and metadata, then select the correct option for each question before saving.
         </p>
       </div>
 
+      <Card className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <CardTitle>Teacher import format guide</CardTitle>
+            <CardDescription>
+              The importer reads document text, uses OCR for scans, and looks for clear exam labels. It does not guess from arbitrary layout.
+            </CardDescription>
+          </div>
+          <Button variant="secondary" onClick={() => void handleExportTemplate()}>
+            <Download className="size-4" />
+            Download sample template
+          </Button>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-50">Classic format</div>
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-sm leading-6 text-slate-800 dark:bg-slate-950 dark:text-slate-100">{`Q1. What is the chemical symbol for sodium?
+A. S
+B. Na
+C. So
+D. Sd
+ANS: B`}</pre>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-50">Tagged format</div>
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-sm leading-6 text-slate-800 dark:bg-slate-950 dark:text-slate-100">{`[QUESTION]
+What is the chemical symbol for sodium?
+[OPTION]
+A. S
+[OPTION]
+B. Na
+[ANSWER]
+B
+[/QUESTION]`}</pre>
+          </div>
+        </div>
+
+        <div className="grid gap-3 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-700">
+            <span className="font-semibold text-slate-950 dark:text-slate-50">Questions: </span>
+            Start with `Q1.`, `1.`, or `Question:`.
+          </div>
+          <div className="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-700">
+            <span className="font-semibold text-slate-950 dark:text-slate-50">Options: </span>
+            Use one option per line with labels such as `A.`, `B.`, `C.`, and `D.`.
+          </div>
+          <div className="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-700">
+            <span className="font-semibold text-slate-950 dark:text-slate-50">Answers: </span>
+            Use `ANS: B`, `Answer: B`, or `[ANSWER]` followed by the option key.
+          </div>
+        </div>
+
+        <div className="text-sm text-slate-600 dark:text-slate-300">
+          Header labels such as `Title:`, `Subject:`, `Class:`, `Form:`, `Duration:`, and `Instructions:` are
+          copied into the exam details for teacher review before saving. OCR works best with straight, high-contrast
+          scans that still use the question and option labels shown above.
+        </div>
+
+        {templateSavedPath ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            Sample template saved to {templateSavedPath}
+          </div>
+        ) : null}
+      </Card>
+
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={() => void importQuestions()}>
+        <Button onClick={() => void handleImportQuestions()} disabled={importPending}>
           <FileInput className="size-4" />
-          Choose import file
+          {importPending ? "Importing..." : "Choose import file"}
         </Button>
         <select
           className={selectClassName}
@@ -1793,6 +1896,20 @@ const ImportPage = () => {
           {unresolvedAnswerCount > 0 ? `Select ${unresolvedAnswerCount} answer${unresolvedAnswerCount === 1 ? "" : "s"}` : "Save import"}
         </Button>
       </div>
+
+      {importPending ? (
+        <Card className="border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/50 dark:text-blue-100">
+          <div className="flex items-start gap-3">
+            <div className="mt-1 size-3 animate-pulse rounded-full bg-blue-600" />
+            <div>
+              <CardTitle>Import in progress</CardTitle>
+              <CardDescription className="text-blue-900 dark:text-blue-100">
+                Reading the selected file. Scanned PDFs and image files may take longer while OCR converts them to text.
+              </CardDescription>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       {activeImport && reviewMetadata ? (
         <div className="grid gap-6 xl:grid-cols-[0.82fr_1.18fr]">
@@ -1870,6 +1987,15 @@ const ImportPage = () => {
                 <Badge>{reviewQuestions.length} questions</Badge>
               </div>
               <div className="space-y-3">
+                {activeImport.extraction?.usedOcr ? (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                    OCR was used for this import. Review every question, option label, and answer carefully because scan
+                    quality can change letters or numbers.
+                    {activeImport.extraction.pageLimitReached && activeImport.extraction.maxPages ? (
+                      <span> OCR stopped after {activeImport.extraction.maxPages} pages.</span>
+                    ) : null}
+                  </div>
+                ) : null}
                 {activeImport.issues.length === 0 ? (
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                     The document structure was extracted cleanly.
@@ -1931,8 +2057,8 @@ const ImportPage = () => {
       ) : (
         <Card className="space-y-3">
           <CardTitle>Ready to import</CardTitle>
-          <CardDescription>
-            Choose an exam document to extract the heading, class, subject, form, time, questions, and answer options into a review screen.
+            <CardDescription>
+            Choose an exam document or scan to extract the heading, class, subject, form, time, questions, and answer options into a review screen.
           </CardDescription>
         </Card>
       )}
@@ -2021,19 +2147,19 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
   const navigate = useNavigate();
   const { snapshot: currentSnapshot, importConfigPackage } = useLockedscreenStore();
   const packageImport = launchContext?.packageImport ?? null;
-  const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const [importedExam, setImportedExam] = useState<Exam | null>(null);
+  const importedPathRef = useRef<string | null>(null);
+  const returnRoute = launchContext?.installedRole === "student" ? "/student" : "/teacher";
 
   useEffect(() => {
-    setPassword("");
     setFeedback(null);
     setImportedExam(null);
   }, [packageImport?.filePath]);
 
   const handleImport = async () => {
-    if (!packageImport) {
+    if (!packageImport || pending) {
       return;
     }
 
@@ -2043,14 +2169,13 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
     try {
       const previousExams = new Map((currentSnapshot?.exams ?? []).map((candidate) => [candidate.id, candidate.updatedAt]));
       const importedSnapshot = await importConfigPackage({
-        password,
         filePath: packageImport.filePath
       });
 
       if (!importedSnapshot) {
         setFeedback({
           tone: "error",
-          text: "Import failed. Check the password and try again."
+          text: "Import failed. The package could not be opened on this device."
         });
         return;
       }
@@ -2060,20 +2185,32 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
       setFeedback({
         tone: "success",
         text: nextExam
-          ? `Imported "${nextExam.title || "Uploaded exam"}". You can start it now.`
+          ? `Opened "${nextExam.title || "Uploaded exam"}".`
           : "Exam package imported successfully."
       });
+      if (nextExam) {
+        navigate(buildDashboardLaunchRoute(nextExam.id), { replace: true });
+      }
     } finally {
       setPending(false);
     }
   };
+
+  useEffect(() => {
+    if (!packageImport || importedPathRef.current === packageImport.filePath) {
+      return;
+    }
+
+    importedPathRef.current = packageImport.filePath;
+    void handleImport();
+  }, [packageImport?.filePath]);
 
   return (
     <motion.div key="package-import" {...animation} className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Open exam package</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
-          Double-clicked Lockedscreen packages open here. Enter the package password to import the exam onto this device.
+          Double-clicked Lockedscreen packages import automatically and open in the student exam environment.
         </p>
       </div>
 
@@ -2086,31 +2223,9 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
                 <CardDescription>
                   {packageImport.examTitle
                     ? `This package contains the exam "${packageImport.examTitle}".`
-                    : "This package was exported from Lockedscreen and requires a password before import."}
+                    : "This package was exported from Lockedscreen and is ready to open."}
                 </CardDescription>
               </div>
-              {packageImport.passwordHint ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  Password hint: {packageImport.passwordHint}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="grid gap-4 md:max-w-xl">
-              <LabelledField label="Package password">
-                <Input
-                  type="password"
-                  autoFocus
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && password.trim().length > 0 && !pending) {
-                      event.preventDefault();
-                      void handleImport();
-                    }
-                  }}
-                />
-              </LabelledField>
             </div>
 
             {feedback ? (
@@ -2124,7 +2239,7 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
             ) : null}
 
             <div className="flex gap-3">
-              <Button variant="secondary" onClick={() => navigate("/teacher")}>
+              <Button variant="secondary" onClick={() => navigate(returnRoute)}>
                 Return to dashboard
               </Button>
               {importedExam ? (
@@ -2132,8 +2247,8 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
                   Start uploaded exam
                 </Button>
               ) : (
-                <Button onClick={() => void handleImport()} disabled={password.trim().length === 0 || pending}>
-                  {pending ? "Importing..." : "Unlock and import exam"}
+                <Button onClick={() => void handleImport()} disabled={pending}>
+                  {pending ? "Opening..." : "Open exam package"}
                 </Button>
               )}
             </div>
@@ -2145,7 +2260,7 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
               Open a `.lscp` file from File Explorer or use the admin console to import a package manually.
             </CardDescription>
             <div>
-              <Button onClick={() => navigate("/teacher")}>Return to dashboard</Button>
+              <Button onClick={() => navigate(returnRoute)}>Return to dashboard</Button>
             </div>
           </>
         )}
@@ -2301,6 +2416,7 @@ const SettingsPage = () => {
     connectLmsConnection,
     listLmsCourses,
     listLmsCourseWork,
+    listLmsStudents,
     deleteResultDestination,
     deleteConfigPackage,
     duplicateConfigPackage,
@@ -2312,9 +2428,6 @@ const SettingsPage = () => {
   const [security, setSecurity] = useState<SecurityProfile | null>(snapshot?.securityProfile ?? null);
   const [selectedPackageId, setSelectedPackageId] = useState(snapshot?.configPackages[0]?.id ?? "");
   const [packageDraft, setPackageDraft] = useState<ExamConfigPackage | null>(snapshot?.configPackages[0] ?? null);
-  const [exportPassword, setExportPassword] = useState("");
-  const [packagePasswordHint, setPackagePasswordHint] = useState("");
-  const [importPassword, setImportPassword] = useState("");
   const [urlRulesText, setUrlRulesText] = useState("");
   const [allowedAppsText, setAllowedAppsText] = useState("");
   const [pendingAction, setPendingAction] = useState<AdminActionState | null>(null);
@@ -2330,6 +2443,7 @@ const SettingsPage = () => {
   const [connectionDirty, setConnectionDirty] = useState(false);
   const [connectionCourses, setConnectionCourses] = useState<LmsCourse[]>([]);
   const [bindingCourseWork, setBindingCourseWork] = useState<LmsCourseWork[]>([]);
+  const [bindingStudents, setBindingStudents] = useState<LmsStudent[]>([]);
   const autoTestingMode = snapshot?.runtime?.canOnlyUseTestingMode === true;
 
   useEffect(() => {
@@ -2344,9 +2458,9 @@ const SettingsPage = () => {
       setConnectionDraft(null);
       setConnectionCourses([]);
       setBindingCourseWork([]);
+      setBindingStudents([]);
       setUrlRulesText("");
       setAllowedAppsText("");
-      setPackagePasswordHint("");
       return;
     }
 
@@ -2363,7 +2477,6 @@ const SettingsPage = () => {
       setPackageDraft(null);
       setUrlRulesText("");
       setAllowedAppsText("");
-      setPackagePasswordHint("");
       return;
     }
 
@@ -2375,7 +2488,7 @@ const SettingsPage = () => {
       setPackageDraft(selected ?? null);
       setUrlRulesText(selected ? serializeUrlRules(selected.browserPolicy.urlRules) : "");
       setAllowedAppsText(selected ? serializeAllowedApps(selected) : "");
-      setPackagePasswordHint(selected?.passwordHint ?? "");
+      setBindingStudents([]);
     }
 
     if (snapshot.resultDestinations.length === 0) {
@@ -2399,6 +2512,7 @@ const SettingsPage = () => {
         setConnectionDraft(blankLmsConnection());
         setConnectionCourses([]);
         setBindingCourseWork([]);
+        setBindingStudents([]);
       }
     } else {
       const selectedConnection =
@@ -2409,6 +2523,7 @@ const SettingsPage = () => {
         setConnectionDraft(selectedConnection ?? null);
         setConnectionCourses([]);
         setBindingCourseWork([]);
+        setBindingStudents([]);
       }
     }
   }, [
@@ -2463,7 +2578,7 @@ const SettingsPage = () => {
     setPackageDraft(nextPackage);
     setUrlRulesText(nextPackage ? serializeUrlRules(nextPackage.browserPolicy.urlRules) : "");
     setAllowedAppsText(nextPackage ? serializeAllowedApps(nextPackage) : "");
-    setPackagePasswordHint(nextPackage?.passwordHint ?? "");
+    setBindingStudents([]);
   };
 
   const selectPackage = (nextPackage: ExamConfigPackage | null) => {
@@ -2483,11 +2598,12 @@ const SettingsPage = () => {
     setConnectionDraft(nextConnection ?? blankLmsConnection());
     setConnectionDirty(false);
     setConnectionCourses([]);
+    setBindingStudents([]);
   };
 
   const buildPackageDraft = (): ExamConfigPackage => ({
     ...packageDraft,
-    passwordHint: packagePasswordHint || undefined,
+    passwordHint: undefined,
     browserPolicy: {
       ...packageDraft.browserPolicy,
       urlRules: parseUrlRules(urlRulesText)
@@ -2550,6 +2666,8 @@ const SettingsPage = () => {
                         ? "Loading classes..."
                         : action === "load-lms-coursework"
                           ? "Loading assignments..."
+                          : action === "load-lms-students"
+                            ? "Loading students..."
                 : action === "duplicate-package"
                   ? "Duplicating package..."
                   : action === "delete-package"
@@ -2725,6 +2843,55 @@ const SettingsPage = () => {
     );
   };
 
+  const studentAccessId = (student: LmsStudent): string => student.email?.trim() || student.id;
+  const selectedStudentIds = new Set(
+    packageDraft.studentAccessPolicy.assignedCandidateIds.length === 0 && packageDraft.studentAccessPolicy.assignedClassNames.length > 0
+      ? bindingStudents.map(studentAccessId)
+      : packageDraft.studentAccessPolicy.assignedCandidateIds
+  );
+
+  const applyStudentSelection = (students: LmsStudent[], selectedIds: Set<string>) => {
+    const allSelected = students.length > 0 && selectedIds.size === students.length;
+    const className = packageDraft.studentLmsBinding.courseLabel || selectedExam?.className || packageDraft.studentLmsBinding.courseId;
+    updatePackage((current) => ({
+      ...current,
+      studentAccessPolicy: {
+        ...current.studentAccessPolicy,
+        assignedClassNames: allSelected && className ? [className] : [],
+        assignedCandidateIds: allSelected ? [] : Array.from(selectedIds)
+      }
+    }));
+  };
+
+  const handleLoadBindingStudents = async () => {
+    const binding = packageDraft.studentLmsBinding;
+    const connectionId = binding.connectionId?.trim();
+    if (!connectionId || !binding.courseId.trim()) {
+      setActionFeedback({
+        tone: "error",
+        text: "Choose a connected LMS account and class before loading students."
+      });
+      return;
+    }
+
+    await runAdminAction(
+      "load-lms-students",
+      () =>
+        listLmsStudents({
+          connectionId,
+          courseId: binding.courseId
+        }),
+      {
+        success: (students) => `Loaded ${students.length} student${students.length === 1 ? "" : "s"}.`,
+        empty: "No students were returned for this class.",
+        onSuccess: (students) => {
+          setBindingStudents(students);
+          applyStudentSelection(students, new Set(students.map(studentAccessId)));
+        }
+      }
+    );
+  };
+
   const handleDuplicatePackage = async () => {
     const previousIds = new Set(snapshot.configPackages.map((candidate) => candidate.id));
     await runAdminAction("duplicate-package", () => duplicateConfigPackage(packageDraft.id), {
@@ -2752,9 +2919,7 @@ const SettingsPage = () => {
       "export-package",
       () =>
         exportConfigPackage({
-          packageId: packageDraft.id,
-          password: exportPassword,
-          passwordHint: packagePasswordHint || undefined
+          packageId: packageDraft.id
         }),
       {
         success: (filePath) => `Package exported to ${filePath}`,
@@ -2768,11 +2933,7 @@ const SettingsPage = () => {
     );
     await runAdminAction(
       "import-package",
-      () =>
-        importConfigPackage({
-          password: importPassword,
-          passwordHint: packagePasswordHint || undefined
-        }),
+      () => importConfigPackage(),
       {
         success: "Configuration package imported.",
         empty: "Package import was cancelled or did not complete.",
@@ -2825,7 +2986,7 @@ const SettingsPage = () => {
             <div>
               <CardTitle>Configuration packages</CardTitle>
               <CardDescription className="mt-2">
-                Protected exam packages separate teacher/admin policy from student runtime data. Use one active package per exam delivery profile.
+                Exam packages carry the exam and runtime policy for student devices. Students can open exported `.lscp` files directly from File Explorer.
               </CardDescription>
             </div>
             <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">{snapshot.configPackages.length} package(s)</Badge>
@@ -2856,35 +3017,21 @@ const SettingsPage = () => {
             <Button
               variant="secondary"
               onClick={() => void handleExportPackage()}
-              disabled={exportPassword.length === 0 || adminBusy}
+              disabled={adminBusy}
             >
               {isPending("export-package") ? "Exporting..." : "Export"}
             </Button>
             <Button
               variant="secondary"
               onClick={() => void handleImportPackage()}
-              disabled={importPassword.length === 0 || adminBusy}
+              disabled={adminBusy}
             >
               {isPending("import-package") ? "Importing..." : "Import"}
             </Button>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label="Export password">
-              <Input type="password" value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} />
-            </LabelledField>
-            <LabelledField label="Import password">
-              <Input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} />
-            </LabelledField>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            Exported package files do not require a PIN or password. Double-clicking a package on a student install imports it and opens the exam environment.
           </div>
-          <LabelledField label="Password hint">
-            <Input
-              value={packagePasswordHint}
-              onChange={(event) => {
-                setPackageDirty(true);
-                setPackagePasswordHint(event.target.value);
-              }}
-            />
-          </LabelledField>
         </Card>
 
         <Card className="space-y-5">
@@ -2981,45 +3128,52 @@ const SettingsPage = () => {
                 onChange={(event) => updateConnection((current) => ({ ...current, label: event.target.value }))}
               />
             </LabelledField>
-            <LabelledField label="Client ID">
-              <Input
-                value={connectionDraft.clientId}
-                onChange={(event) => updateConnection((current) => ({ ...current, clientId: event.target.value }))}
-              />
-            </LabelledField>
-            {connectionDraft.provider === "microsoft-365" ? (
-              <LabelledField label="Tenant ID">
-                <Input
-                  value={connectionDraft.tenantId ?? ""}
-                  onChange={(event) => updateConnection((current) => ({ ...current, tenantId: event.target.value }))}
-                />
-              </LabelledField>
-            ) : null}
-            {connectionDraft.provider === "generic-oauth-lms" ? (
-              <LabelledField label="Authorize URL">
-                <Input
-                  value={connectionDraft.authorizeUrl ?? ""}
-                  onChange={(event) => updateConnection((current) => ({ ...current, authorizeUrl: event.target.value }))}
-                />
-              </LabelledField>
-            ) : null}
-            {connectionDraft.provider === "generic-oauth-lms" ? (
-              <LabelledField label="Token URL">
-                <Input
-                  value={connectionDraft.tokenUrl ?? ""}
-                  onChange={(event) => updateConnection((current) => ({ ...current, tokenUrl: event.target.value }))}
-                />
-              </LabelledField>
-            ) : null}
           </div>
 
-          <LabelledField label="OAuth scopes">
-            <Textarea
-              className="min-h-[110px] font-mono text-xs"
-              value={connectionDraft.scope}
-              onChange={(event) => updateConnection((current) => ({ ...current, scope: event.target.value }))}
-            />
-          </LabelledField>
+          <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">Advanced app connection setup</summary>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <LabelledField label="OAuth client ID">
+                <Input
+                  value={connectionDraft.clientId}
+                  onChange={(event) => updateConnection((current) => ({ ...current, clientId: event.target.value }))}
+                />
+              </LabelledField>
+              {connectionDraft.provider === "microsoft-365" ? (
+                <LabelledField label="Tenant ID">
+                  <Input
+                    value={connectionDraft.tenantId ?? ""}
+                    onChange={(event) => updateConnection((current) => ({ ...current, tenantId: event.target.value }))}
+                  />
+                </LabelledField>
+              ) : null}
+              {connectionDraft.provider === "generic-oauth-lms" ? (
+                <LabelledField label="Authorize URL">
+                  <Input
+                    value={connectionDraft.authorizeUrl ?? ""}
+                    onChange={(event) => updateConnection((current) => ({ ...current, authorizeUrl: event.target.value }))}
+                  />
+                </LabelledField>
+              ) : null}
+              {connectionDraft.provider === "generic-oauth-lms" ? (
+                <LabelledField label="Token URL">
+                  <Input
+                    value={connectionDraft.tokenUrl ?? ""}
+                    onChange={(event) => updateConnection((current) => ({ ...current, tokenUrl: event.target.value }))}
+                  />
+                </LabelledField>
+              ) : null}
+            </div>
+            <div className="mt-4">
+              <LabelledField label="OAuth scopes">
+                <Textarea
+                  className="min-h-[110px] font-mono text-xs"
+                  value={connectionDraft.scope}
+                  onChange={(event) => updateConnection((current) => ({ ...current, scope: event.target.value }))}
+                />
+              </LabelledField>
+            </div>
+          </details>
 
           <div className="flex flex-wrap gap-3">
             <Button
@@ -3109,6 +3263,7 @@ const SettingsPage = () => {
                 onChange={(event) => {
                   const provider = event.target.value as StudentLmsProviderType;
                   setBindingCourseWork([]);
+                  setBindingStudents([]);
                   setConnectionCourses([]);
                   updatePackage((current) => ({
                     ...current,
@@ -3130,6 +3285,7 @@ const SettingsPage = () => {
                 onChange={(event) => {
                   const selectedConnection = snapshot.lmsConnections.find((candidate) => candidate.id === event.target.value) ?? null;
                   setBindingCourseWork([]);
+                  setBindingStudents([]);
                   if (selectedConnection) {
                     selectConnection(selectedConnection);
                   }
@@ -3171,6 +3327,7 @@ const SettingsPage = () => {
                 onChange={(event) => {
                   const selectedCourse = connectionCourses.find((course) => course.id === event.target.value);
                   setBindingCourseWork([]);
+                  setBindingStudents([]);
                   updatePackage((current) => ({
                     ...current,
                     studentLmsBinding: {
@@ -3179,6 +3336,11 @@ const SettingsPage = () => {
                       courseLabel: selectedCourse?.name ?? current.studentLmsBinding.courseLabel,
                       assignmentId: "",
                       assignmentLabel: ""
+                    },
+                    studentAccessPolicy: {
+                      ...current.studentAccessPolicy,
+                      assignedClassNames: selectedCourse?.name ? [selectedCourse.name] : current.studentAccessPolicy.assignedClassNames,
+                      assignedCandidateIds: []
                     }
                   }));
                 }}
@@ -3238,82 +3400,150 @@ const SettingsPage = () => {
             </Button>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label="OAuth client ID">
-              <Input
-                value={packageDraft.studentLmsBinding.clientId}
-                onChange={(event) =>
-                  updatePackage((current) => ({
-                    ...current,
-                    studentLmsBinding: {
-                      ...current.studentLmsBinding,
-                      clientId: event.target.value
-                    }
-                  }))
-                }
-              />
-            </LabelledField>
-            {packageDraft.studentLmsBinding.provider === "microsoft-365" ? (
-              <LabelledField label="Tenant ID">
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Students</div>
+                <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  All students in the selected class are assigned by default. Uncheck names to send the test to a smaller group.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleLoadBindingStudents()}
+                  disabled={adminBusy || !packageDraft.studentLmsBinding.connectionId || !packageDraft.studentLmsBinding.courseId}
+                >
+                  {isPending("load-lms-students") ? "Loading..." : "Load students"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => applyStudentSelection(bindingStudents, new Set(bindingStudents.map(studentAccessId)))}
+                  disabled={bindingStudents.length === 0 || adminBusy}
+                >
+                  Select all
+                </Button>
+              </div>
+            </div>
+            {bindingStudents.length > 0 ? (
+              <div className="grid max-h-56 gap-2 overflow-auto pr-1 sm:grid-cols-2">
+                {bindingStudents.map((student) => {
+                  const accessId = studentAccessId(student);
+                  const checked = selectedStudentIds.has(accessId);
+                  return (
+                    <label
+                      key={accessId}
+                      className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <input
+                        className="mt-1"
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          const nextIds = new Set(selectedStudentIds);
+                          if (event.target.checked) {
+                            nextIds.add(accessId);
+                          } else {
+                            nextIds.delete(accessId);
+                          }
+                          applyStudentSelection(bindingStudents, nextIds);
+                        }}
+                      />
+                      <span>
+                        <span className="block font-semibold text-slate-900 dark:text-slate-50">{student.name}</span>
+                        <span className="block text-xs text-slate-500 dark:text-slate-400">{student.email || student.id}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-600 dark:text-slate-300">
+                Load students after selecting a connected teacher account and class.
+              </div>
+            )}
+          </div>
+
+          <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">Advanced LMS assignment details</summary>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <LabelledField label="OAuth client ID">
                 <Input
-                  value={packageDraft.studentLmsBinding.tenantId ?? ""}
+                  value={packageDraft.studentLmsBinding.clientId}
                   onChange={(event) =>
                     updatePackage((current) => ({
                       ...current,
                       studentLmsBinding: {
                         ...current.studentLmsBinding,
-                        tenantId: event.target.value
+                        clientId: event.target.value
                       }
                     }))
                   }
                 />
               </LabelledField>
-            ) : null}
-            <LabelledField label="Class / course ID">
-              <Input
-                value={packageDraft.studentLmsBinding.courseId}
-                onChange={(event) =>
-                  updatePackage((current) => ({
-                    ...current,
-                    studentLmsBinding: {
-                      ...current.studentLmsBinding,
-                      courseId: event.target.value
+              {packageDraft.studentLmsBinding.provider === "microsoft-365" ? (
+                <LabelledField label="Tenant ID">
+                  <Input
+                    value={packageDraft.studentLmsBinding.tenantId ?? ""}
+                    onChange={(event) =>
+                      updatePackage((current) => ({
+                        ...current,
+                        studentLmsBinding: {
+                          ...current.studentLmsBinding,
+                          tenantId: event.target.value
+                        }
+                      }))
                     }
-                  }))
-                }
-              />
-            </LabelledField>
-            <LabelledField label="Assignment ID">
-              <Input
-                value={packageDraft.studentLmsBinding.assignmentId}
-                onChange={(event) =>
-                  updatePackage((current) => ({
-                    ...current,
-                    studentLmsBinding: {
-                      ...current.studentLmsBinding,
-                      assignmentId: event.target.value
-                    }
-                  }))
-                }
-              />
-            </LabelledField>
-          </div>
-
-          <LabelledField label="Student OAuth scopes">
-            <Textarea
-              className="min-h-[110px] font-mono text-xs"
-              value={packageDraft.studentLmsBinding.scope}
-              onChange={(event) =>
-                updatePackage((current) => ({
-                  ...current,
-                  studentLmsBinding: {
-                    ...current.studentLmsBinding,
-                    scope: event.target.value
+                  />
+                </LabelledField>
+              ) : null}
+              <LabelledField label="Class / course ID">
+                <Input
+                  value={packageDraft.studentLmsBinding.courseId}
+                  onChange={(event) =>
+                    updatePackage((current) => ({
+                      ...current,
+                      studentLmsBinding: {
+                        ...current.studentLmsBinding,
+                        courseId: event.target.value
+                      }
+                    }))
                   }
-                }))
-              }
-            />
-          </LabelledField>
+                />
+              </LabelledField>
+              <LabelledField label="Assignment ID">
+                <Input
+                  value={packageDraft.studentLmsBinding.assignmentId}
+                  onChange={(event) =>
+                    updatePackage((current) => ({
+                      ...current,
+                      studentLmsBinding: {
+                        ...current.studentLmsBinding,
+                        assignmentId: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </LabelledField>
+            </div>
+            <div className="mt-4">
+              <LabelledField label="Student OAuth scopes">
+                <Textarea
+                  className="min-h-[110px] font-mono text-xs"
+                  value={packageDraft.studentLmsBinding.scope}
+                  onChange={(event) =>
+                    updatePackage((current) => ({
+                      ...current,
+                      studentLmsBinding: {
+                        ...current.studentLmsBinding,
+                        scope: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </LabelledField>
+            </div>
+          </details>
         </Card>
 
         <Card className="space-y-5">
@@ -3336,7 +3566,7 @@ const SettingsPage = () => {
               </div>
             ) : null}
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Google Classroom turn-in must use the same Google Cloud OAuth client project that the class assignment expects. Microsoft 365 turn-in requires Microsoft Graph education assignment permissions for student delegated sign-in.
+              Teachers sign in with their normal school account. If the school has not set up the app connection yet, a school IT/admin may need to complete that one-time setup before class lists and student turn-in can work.
             </div>
           </div>
         </Card>

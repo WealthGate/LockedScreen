@@ -12,6 +12,7 @@ import type {
   LmsConnection,
   LmsCourse,
   LmsCourseWork,
+  LmsStudent,
   NavigationGuard,
   ResultDestination,
   SecurityProfile,
@@ -37,12 +38,14 @@ export interface LockedscreenApi {
   connectLmsConnection: (connectionId: string) => Promise<AppStateSnapshot>;
   listLmsCourses: (connectionId: string) => Promise<LmsCourse[]>;
   listLmsCourseWork: (payload: { connectionId: string; courseId: string }) => Promise<LmsCourseWork[]>;
+  listLmsStudents: (payload: { connectionId: string; courseId: string }) => Promise<LmsStudent[]>;
   deleteResultDestination: (destinationId: string) => Promise<AppStateSnapshot>;
   deleteConfigPackage: (packageId: string) => Promise<AppStateSnapshot>;
   duplicateConfigPackage: (packageId: string) => Promise<AppStateSnapshot>;
-  exportConfigPackage: (payload: { packageId: string; password: string; passwordHint?: string }) => Promise<string | null>;
-  importConfigPackage: (payload: { password: string; passwordHint?: string; filePath?: string }) => Promise<AppStateSnapshot | null>;
+  exportConfigPackage: (payload: { packageId: string }) => Promise<string | null>;
+  importConfigPackage: (payload?: { filePath?: string; password?: string }) => Promise<AppStateSnapshot | null>;
   importQuestions: () => Promise<ImportPreview | null>;
+  exportQuestionTemplate: () => Promise<string | null>;
   exportResultsCsv: (examId?: string) => Promise<string | null>;
   syncSubmissionResults: (submissionId: string) => Promise<AppStateSnapshot>;
   syncPendingResults: () => Promise<AppStateSnapshot>;
@@ -84,12 +87,14 @@ const api: LockedscreenApi = {
   connectLmsConnection: (connectionId) => ipcRenderer.invoke("lmsConnection:connect", connectionId),
   listLmsCourses: (connectionId) => ipcRenderer.invoke("lmsConnection:listCourses", connectionId),
   listLmsCourseWork: (payload) => ipcRenderer.invoke("lmsConnection:listCourseWork", payload),
+  listLmsStudents: (payload) => ipcRenderer.invoke("lmsConnection:listStudents", payload),
   deleteResultDestination: (destinationId) => ipcRenderer.invoke("resultsDestination:delete", destinationId),
   deleteConfigPackage: (packageId) => ipcRenderer.invoke("configPackage:delete", packageId),
   duplicateConfigPackage: (packageId) => ipcRenderer.invoke("configPackage:duplicate", packageId),
   exportConfigPackage: (payload) => ipcRenderer.invoke("configPackage:export", payload),
   importConfigPackage: (payload) => ipcRenderer.invoke("configPackage:import", payload),
   importQuestions: () => ipcRenderer.invoke("import:questions"),
+  exportQuestionTemplate: () => ipcRenderer.invoke("import:exportQuestionTemplate"),
   exportResultsCsv: (examId) => ipcRenderer.invoke("results:exportCsv", examId),
   syncSubmissionResults: (submissionId) => ipcRenderer.invoke("results:syncSubmission", submissionId),
   syncPendingResults: () => ipcRenderer.invoke("results:syncPending"),

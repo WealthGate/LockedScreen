@@ -8,8 +8,17 @@ LOCKEDSCREEN imports multiple-choice questions from existing exam documents and 
 - `.docx`
 - `.pdf`
 - `.txt`
+- `.png`
+- `.jpg`
+- `.jpeg`
+- `.tif`
+- `.tiff`
+- `.bmp`
+- `.webp`
 
 Legacy `.doc` import is best-effort on Windows and may depend on Microsoft Word being available on the device. If that path fails, convert the file to `.docx` or `.pdf` first.
+
+Scanned PDFs and image files are read with OCR. OCR works best when the scan is straight, high contrast, and uses the same question and option labels described below. Teachers should still review OCR imports carefully before saving because poor scan quality can confuse letters, numbers, and option labels.
 
 ## Supported Formats
 
@@ -117,14 +126,15 @@ B
 
 ## Import Workflow
 
-1. Prepare a `.doc`, `.docx`, `.pdf`, or `.txt` exam file.
+1. Prepare a `.doc`, `.docx`, `.pdf`, `.txt`, or supported image exam file.
 2. Open the teacher dashboard and choose `Import Questions`.
 3. Upload the file.
-4. Review the extracted heading, subject, class, form, and time.
-5. Review each imported question and option.
-6. Select the correct option for every question.
-7. Fix any flagged issues in the correction UI.
-8. Save the cleaned question set into a new or existing exam.
+4. For scanned PDFs or image files, wait for OCR to finish.
+5. Review the extracted heading, subject, class, form, and time.
+6. Review each imported question and option.
+7. Select the correct option for every question.
+8. Fix any flagged issues in the correction UI.
+9. Save the cleaned question set into a new or existing exam.
 
 ## Sample Files
 

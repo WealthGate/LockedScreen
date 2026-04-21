@@ -3,6 +3,8 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
 import type { Exam, ExamConfigPackage, ProtectedConfigPackageFile } from "@lockedscreen/shared-types";
 import { calculateConfigPackageChecksum, withStampedIntegrity } from "@lockedscreen/storage";
 
+export const automaticPackagePassword = "lockedscreen-local-exam-package-v1";
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -79,7 +81,7 @@ export const protectConfigPackage = (
     label: stamped.label,
     examTitle: exam?.title,
     checksum: stamped.integrity.checksum,
-    passwordHint: stamped.passwordHint,
+    passwordHint: undefined,
     algorithm: "aes-256-gcm",
     digest: "sha256",
     salt: salt.toString("base64"),

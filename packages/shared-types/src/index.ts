@@ -23,6 +23,7 @@ export type LmsProviderType = "google-classroom" | "microsoft-365" | "generic-oa
 export type LmsConnectionStatus = "disconnected" | "connected" | "error";
 export type StudentLmsProviderType = "google-classroom" | "microsoft-365";
 export type StudentLmsTurnInStatus = "pending" | "success" | "failed" | "skipped";
+export type InstalledAppRole = "teacher" | "student";
 export type SecurityLogCategory =
   | "package"
   | "integrity"
@@ -180,6 +181,12 @@ export interface LmsCourseWork {
   alternateLink?: string;
   dueAt?: string;
   state?: string;
+}
+
+export interface LmsStudent {
+  id: string;
+  name: string;
+  email?: string;
 }
 
 export interface StudentLmsBinding {
@@ -499,12 +506,22 @@ export interface ImportedExamMetadata {
   durationMinutes?: number;
 }
 
+export type ImportExtractionMethod = "text" | "docx" | "doc" | "pdf-text" | "pdf-ocr" | "image-ocr";
+
+export interface ImportExtractionInfo {
+  method: ImportExtractionMethod;
+  usedOcr: boolean;
+  pageLimitReached?: boolean;
+  maxPages?: number;
+}
+
 export interface ImportPreview {
   sourceFileName: string;
   metadata: ImportedExamMetadata;
   questions: ImportedQuestionDraft[];
   issues: ParseIssue[];
   sourceText: string;
+  extraction?: ImportExtractionInfo;
 }
 
 export interface NavigationGuard {
@@ -548,4 +565,5 @@ export interface LaunchContext {
   route: string | null;
   nativeHosted: boolean;
   packageImport: ProtectedPackageLaunchInfo | null;
+  installedRole: InstalledAppRole;
 }

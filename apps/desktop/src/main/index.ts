@@ -1,11 +1,11 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
-import { extractTextFromBuffer, parseExamDocument } from "@lockedscreen/parser";
+import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
   Candidate,
   AppSettings,
@@ -14,9 +14,11 @@ import type {
   ExamConfigPackage,
   ExamSession,
   LaunchContext,
+  InstalledAppRole,
   LmsConnection,
   LmsCourse,
   LmsCourseWork,
+  LmsStudent,
   NavigationGuard,
   ProtectedPackageLaunchInfo,
   ResultDestination,
@@ -28,7 +30,7 @@ import type {
 } from "@lockedscreen/shared-types";
 import { createStorageService } from "@lockedscreen/storage";
 
-import { beginLmsOAuthConnection, listConnectionCourses, listConnectionCourseWork } from "./lms-oauth";
+import { beginLmsOAuthConnection, listConnectionCourses, listConnectionCourseWork, listConnectionStudents } from "./lms-oauth";
 import { OAuthVault } from "./oauth-vault";
 import { createDisabledSyncState, syncSubmissionToDestination } from "./results-sync";
 import { buildSecurityOverview, createRuntimeEnvironment } from "./security/diagnostics";
@@ -38,7 +40,56 @@ import {
   launchAlternateDesktopExamShell,
   nativeCompanionRequired
 } from "./security/native-security";
-import { isProtectedPackageFile, protectConfigPackage, unprotectConfigPackage } from "./security/package-crypto";
+
+const questionAuthoringTemplate = `LOCKEDSCREEN Question Authoring Template
+
+Use either format below. Keep one answer option per line. Scanned PDFs and image files can be imported with OCR, but clean typed text is faster and more accurate.
+
+Classic format:
+
+Q1. <Type the question prompt here>
+A. <Option A>
+B. <Option B>
+C. <Option C>
+D. <Option D>
+ANS: <Single option key such as A, B, C, or D>
+
+Tagged format:
+
+[QUESTION]
+<Type the question prompt here>
+[OPTION]
+A. <Option A>
+[OPTION]
+B. <Option B>
+[OPTION]
+C. <Option C>
+[OPTION]
+D. <Option D>
+[ANSWER]
+<Single option key such as A, B, C, or D>
+[/QUESTION]
+
+Header fields the app can detect:
+
+Title: <Exam title>
+Subject: <Subject>
+Class: <Class or grade>
+Form: <Form>
+Teacher: <Teacher name>
+School: <School name>
+Duration: <Example: 1 hour 30 minutes>
+Instructions: <Student instructions>
+
+Notes:
+- Use plain option keys such as A, B, C, and D.
+- Keep the answer line exact and unambiguous.
+- Do not add explanations on the ANS: or [ANSWER] line.
+- Remove Word bullets or smart numbering if they change the option keys.
+- Save as .docx, .pdf, or .txt before import when possible.
+- For scans, use a straight, high-contrast image or PDF page.
+`;
+import { automaticPackagePassword, isProtectedPackageFile, protectConfigPackage, unprotectConfigPackage } from "./security/package-crypto";
 import {
   beginManagedSession,
   configureHostedPartition,
@@ -63,6 +114,21 @@ const requiresSingleInstanceLock = !launchedByNativeHost;
 const getPackageImportArg = (argv: string[]): string | null =>
   argv.find((entry) => entry.toLowerCase().endsWith(".lscp") && existsSync(entry)) ?? null;
 const initialPackageImportPath = getPackageImportArg(process.argv);
+const readInstalledRole = (): InstalledAppRole => {
+  const rolePath = join(process.resourcesPath, "install-role.json");
+
+  try {
+    if (!existsSync(rolePath)) {
+      return "teacher";
+    }
+
+    const parsed = JSON.parse(readFileSync(rolePath, "utf-8")) as { role?: unknown };
+    return parsed.role === "student" ? "student" : "teacher";
+  } catch {
+    return "teacher";
+  }
+};
+const installedRole = readInstalledRole();
 const preloadPath = (() => {
   const cjsPath = join(__dirname, "../preload/index.cjs");
   if (existsSync(cjsPath)) {
@@ -83,7 +149,8 @@ let lastProcessAlert = "";
 let pendingLaunchContext: LaunchContext = {
   route: launchRoute,
   nativeHosted: launchedByNativeHost,
-  packageImport: null
+  packageImport: null,
+  installedRole
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -172,7 +239,7 @@ const isStudentTurnInState = (value: unknown): value is StudentLmsTurnInState =>
 
 const isAppUrl = (input: string): boolean => input.startsWith("http://localhost:") || input.startsWith("file://");
 
-const createPackageImportRoute = (): string => `/teacher/package-import?open=${Date.now()}`;
+const createPackageImportRoute = (): string => `/package-import?open=${Date.now()}`;
 
 const readPackageLaunchInfo = async (filePath: string): Promise<ProtectedPackageLaunchInfo | null> => {
   try {
@@ -534,6 +601,20 @@ app.whenReady().then(async () => {
     }
   );
 
+  ipcMain.handle("lmsConnection:listStudents", async (_event, payload: unknown): Promise<LmsStudent[]> => {
+    if (!isRecord(payload) || typeof payload.connectionId !== "string" || typeof payload.courseId !== "string") {
+      throw new Error("Invalid LMS student lookup payload.");
+    }
+
+    const snapshot = await storage.getSnapshot();
+    const connection = snapshot.lmsConnections.find((candidate) => candidate.id === payload.connectionId);
+    if (!connection) {
+      throw new Error("LMS connection not found.");
+    }
+
+    return listConnectionStudents(connection, payload.courseId, oauthVault);
+  });
+
   ipcMain.handle("resultsDestination:delete", async (_event, destinationId: unknown) => {
     if (typeof destinationId !== "string") {
       throw new Error("Invalid result destination id.");
@@ -559,7 +640,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("configPackage:export", async (_event, payload: unknown) => {
-    if (!isRecord(payload) || typeof payload.packageId !== "string" || typeof payload.password !== "string") {
+    if (!isRecord(payload) || typeof payload.packageId !== "string") {
       throw new Error("Invalid export request.");
     }
 
@@ -573,14 +654,7 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const protectedFile = protectConfigPackage(
-      {
-        ...configPackage,
-        passwordHint: typeof payload.passwordHint === "string" ? payload.passwordHint : configPackage.passwordHint
-      },
-      payload.password,
-      exam
-    );
+    const protectedFile = protectConfigPackage({ ...configPackage, passwordHint: undefined }, automaticPackagePassword, exam);
 
     const output = await dialog.showSaveDialog({
       defaultPath: `${configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package"}.lscp`,
@@ -592,22 +666,22 @@ app.whenReady().then(async () => {
     }
 
     await writeFile(output.filePath, JSON.stringify(protectedFile, null, 2), "utf-8");
-    await recordSecurityEvent("package", "info", `Exported protected configuration package "${configPackage.label}".`, output.filePath);
+    await recordSecurityEvent("package", "info", `Exported configuration package "${configPackage.label}".`, output.filePath);
     return output.filePath;
   });
 
   ipcMain.handle("configPackage:import", async (_event, payload: unknown) => {
+    const request = isRecord(payload) ? payload : {};
     if (
-      !isRecord(payload) ||
-      typeof payload.password !== "string" ||
-      (payload.filePath !== undefined && typeof payload.filePath !== "string")
+      (payload !== undefined && !isRecord(payload)) ||
+      (request.filePath !== undefined && typeof request.filePath !== "string")
     ) {
       throw new Error("Invalid import request.");
     }
 
     const filePath =
-      typeof payload.filePath === "string"
-        ? payload.filePath
+      typeof request.filePath === "string"
+        ? request.filePath
         : (
             await dialog.showOpenDialog({
               properties: ["openFile"],
@@ -623,25 +697,33 @@ app.whenReady().then(async () => {
       throw new Error("Invalid protected package file.");
     }
 
-    const imported = unprotectConfigPackage(raw, payload.password);
+    let imported: { configPackage: ExamConfigPackage; exam: Exam | null };
+    try {
+      imported = unprotectConfigPackage(raw, automaticPackagePassword);
+    } catch (error) {
+      if (typeof request.password === "string" && request.password.trim().length > 0) {
+        imported = unprotectConfigPackage(raw, request.password);
+      } else {
+        throw error;
+      }
+    }
     const nextPackage = {
       ...imported.configPackage,
-      passwordHint:
-        typeof payload.passwordHint === "string" ? payload.passwordHint : imported.configPackage.passwordHint
+      passwordHint: undefined
     };
     const snapshot = await withRuntime(
       imported.exam
         ? storage.importExamBundle(imported.exam, nextPackage)
         : storage.saveConfigPackage(nextPackage)
     );
-    await recordSecurityEvent("package", "info", `Imported protected configuration package "${nextPackage.label}".`, filePath);
+    await recordSecurityEvent("package", "info", `Imported configuration package "${nextPackage.label}".`, filePath);
     return snapshot;
   });
 
   ipcMain.handle("import:questions", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters: [{ name: "Supported exam files", extensions: ["txt", "doc", "docx", "pdf"] }]
+      filters: [{ name: "Supported exam files", extensions: ["txt", "doc", "docx", "pdf", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"] }]
     });
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -654,8 +736,26 @@ app.whenReady().then(async () => {
     }
 
     const buffer = await readFile(filePath);
-    const text = await extractTextFromBuffer(filePath, buffer);
-    return parseExamDocument(filePath, text);
+    const extracted = await extractExamDocumentText(filePath, buffer);
+    const preview = parseExamDocument(filePath, extracted.text);
+    return {
+      ...preview,
+      extraction: extracted.extraction
+    };
+  });
+
+  ipcMain.handle("import:exportQuestionTemplate", async () => {
+    const output = await dialog.showSaveDialog({
+      defaultPath: "lockedscreen-question-template.txt",
+      filters: [{ name: "Text file", extensions: ["txt"] }]
+    });
+
+    if (output.canceled || !output.filePath) {
+      return null;
+    }
+
+    await writeFile(output.filePath, questionAuthoringTemplate, "utf-8");
+    return output.filePath;
   });
 
   ipcMain.handle("results:exportCsv", async (_event, examId?: string) => {

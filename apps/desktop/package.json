@@ -1,6 +1,6 @@
 {
   "name": "@lockedscreen/desktop",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "private": true,
   "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
   "author": {
@@ -12,7 +12,10 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
-    "dist": "npm run build && electron-builder --win nsis portable"
+    "dist": "npm run dist:win",
+    "dist:win": "npm run build && electron-builder --win nsis portable",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb"
   },
   "build": {
     "appId": "com.wealthgate.lockedscreen",
@@ -73,6 +76,44 @@
         }
       ]
     },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "build",
+      "category": "Education",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -81,7 +122,8 @@
       "shortcutName": "Lockedscreen",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
+      "installerHeaderIcon": "build/icon.ico",
+      "include": "build/installer-role.nsh"
     },
     "portable": {
       "artifactName": "Lockedscreen-Portable-${version}.${ext}"
@@ -90,7 +132,7 @@
       {
         "ext": "lscp",
         "name": "Lockedscreen Exam Package",
-        "description": "Encrypted Lockedscreen exam package",
+        "description": "Lockedscreen exam package",
         "role": "Editor"
       }
     ]

@@ -1,11 +1,14 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
+import { createCanvas } from "@napi-rs/canvas";
 import type {
   ImportPreview,
+  ImportExtractionInfo,
   ImportedExamMetadata,
   ImportedQuestionDraft,
   MultipleChoiceOption,
@@ -20,6 +23,15 @@ const optionLinePattern = /^\(?([A-H])\)?[\.\)\:\-]\s*(.+)$/i;
 const answerLinePattern = /^(?:ans(?:wer)?|correct\s*answer)\s*[:\-]\s*([A-H])\b/i;
 const separatorPattern = /^(?:[_\-=]{3,}|\*{3,})$/;
 const pageNoisePattern = /^(?:page\s+\d+(?:\s+of\s+\d+)?|turn\s+over|continued)$/i;
+const imageFilePattern = /\.(?:png|jpe?g|tiff?|bmp|webp)$/i;
+const minimumUsefulTextLength = 20;
+const maxOcrPdfPages = 30;
+const requireFromParser = createRequire(import.meta.url);
+
+export interface ExtractedDocumentText {
+  text: string;
+  extraction: ImportExtractionInfo;
+}
 
 const blankMetadata = (): ImportedExamMetadata => ({
   title: "",
@@ -48,6 +60,90 @@ const normalizeText = (text: string): string =>
     .replace(/[ \t]+/g, " ");
 
 const escapePowerShellLiteral = (value: string): string => value.replace(/'/g, "''");
+
+const hasUsefulText = (text: string): boolean => text.replace(/\s/g, "").length >= minimumUsefulTextLength;
+
+const createOcrWorker = async () => {
+  const tesseract = await import("tesseract.js");
+  const worker = await tesseract.createWorker("eng", undefined, {
+    workerPath: requireFromParser.resolve("tesseract.js/src/worker-script/node/index.js"),
+    langPath: dirname(requireFromParser.resolve("@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz")),
+    cachePath: join(tmpdir(), "lockedscreen-ocr-cache"),
+    logger: () => undefined
+  });
+  await worker.setParameters({
+    preserve_interword_spaces: "1",
+    tessedit_pageseg_mode: tesseract.PSM.AUTO
+  });
+  return worker;
+};
+
+const ocrImageBuffer = async (input: Buffer): Promise<string> => {
+  const worker = await createOcrWorker();
+  try {
+    const result = await worker.recognize(input);
+    return result.data.text;
+  } finally {
+    await worker.terminate();
+  }
+};
+
+const ocrPdfBuffer = async (input: Buffer): Promise<ExtractedDocumentText> => {
+  const [{ getDocument }, worker] = await Promise.all([import("pdfjs-dist/legacy/build/pdf.mjs"), createOcrWorker()]);
+
+  try {
+    const pdfDocumentOptions = {
+      data: new Uint8Array(input),
+      disableWorker: true,
+      isEvalSupported: false,
+      isOffscreenCanvasSupported: false,
+      useSystemFonts: true
+    } as unknown as Parameters<typeof getDocument>[0];
+    const loadingTask = getDocument(pdfDocumentOptions);
+    const pdf = await loadingTask.promise;
+    const pageCount = Math.min(pdf.numPages, maxOcrPdfPages);
+    const pageTexts: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+      const context = canvas.getContext("2d");
+
+      await page.render({
+        canvas: canvas as unknown as HTMLCanvasElement,
+        canvasContext: context as unknown as CanvasRenderingContext2D,
+        viewport,
+        background: "rgb(255,255,255)"
+      }).promise;
+
+      const image = canvas.toBuffer("image/png");
+      const result = await worker.recognize(image);
+      pageTexts.push(result.data.text);
+      page.cleanup();
+    }
+
+    const pageLimitReached = pdf.numPages > maxOcrPdfPages;
+    if (pageLimitReached) {
+      pageTexts.push(
+        `\n[OCR stopped after ${maxOcrPdfPages} pages. Split very large scanned PDFs before importing if questions are missing.]\n`
+      );
+    }
+
+    await pdf.destroy();
+    return {
+      text: pageTexts.join("\n\n"),
+      extraction: {
+        method: "pdf-ocr",
+        usedOcr: true,
+        pageLimitReached,
+        maxPages: maxOcrPdfPages
+      }
+    };
+  } finally {
+    await worker.terminate();
+  }
+};
 
 const parseDurationMinutes = (value: string): number | undefined => {
   const normalized = value.toLowerCase();
@@ -363,6 +459,63 @@ export const parseExamDocument = (fileName: string, text: string): ImportPreview
 
 export const parseStructuredQuestions = (text: string): ImportPreview => parseExamDocument("import.txt", text);
 
+export const extractExamDocumentText = async (fileName: string, input: Buffer): Promise<ExtractedDocumentText> => {
+  const lower = fileName.toLowerCase();
+
+  if (lower.endsWith(".txt")) {
+    return {
+      text: input.toString("utf-8"),
+      extraction: { method: "text", usedOcr: false }
+    };
+  }
+
+  if (lower.endsWith(".docx")) {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer: input });
+    return {
+      text: result.value,
+      extraction: { method: "docx", usedOcr: false }
+    };
+  }
+
+  if (lower.endsWith(".doc")) {
+    return {
+      text: await withTempLegacyDocument(".doc", input, extractDocTextWithWord),
+      extraction: { method: "doc", usedOcr: false }
+    };
+  }
+
+  if (lower.endsWith(".pdf")) {
+    const pdfParse = (await import("pdf-parse")).default;
+    const result = await pdfParse(input);
+    if (hasUsefulText(result.text)) {
+      return {
+        text: result.text,
+        extraction: { method: "pdf-text", usedOcr: false }
+      };
+    }
+
+    const ocrResult = await ocrPdfBuffer(input);
+    if (hasUsefulText(ocrResult.text)) {
+      return ocrResult;
+    }
+
+    return {
+      text: result.text,
+      extraction: { method: "pdf-text", usedOcr: false }
+    };
+  }
+
+  if (imageFilePattern.test(lower)) {
+    return {
+      text: await ocrImageBuffer(input),
+      extraction: { method: "image-ocr", usedOcr: true }
+    };
+  }
+
+  throw new Error("Unsupported file type. Use TXT, DOC, DOCX, PDF, PNG, JPG, TIFF, BMP, or WEBP.");
+};
+
 const withTempLegacyDocument = async (extension: ".doc", input: Buffer, operation: (filePath: string) => Promise<string>) => {
   const tempDir = await mkdtemp(join(tmpdir(), "lockedscreen-doc-import-"));
   const filePath = join(tempDir, `import${extension}`);
@@ -417,29 +570,8 @@ const extractDocTextWithWord = async (filePath: string): Promise<string> => {
 };
 
 export const extractTextFromBuffer = async (fileName: string, input: Buffer): Promise<string> => {
-  const lower = fileName.toLowerCase();
-
-  if (lower.endsWith(".txt")) {
-    return input.toString("utf-8");
-  }
-
-  if (lower.endsWith(".docx")) {
-    const mammoth = await import("mammoth");
-    const result = await mammoth.extractRawText({ buffer: input });
-    return result.value;
-  }
-
-  if (lower.endsWith(".doc")) {
-    return withTempLegacyDocument(".doc", input, extractDocTextWithWord);
-  }
-
-  if (lower.endsWith(".pdf")) {
-    const pdfParse = (await import("pdf-parse")).default;
-    const result = await pdfParse(input);
-    return result.text;
-  }
-
-  throw new Error("Unsupported file type. Use TXT, DOC, DOCX, or PDF.");
+  const extracted = await extractExamDocumentText(fileName, input);
+  return extracted.text;
 };
 
 export const toQuestions = (questions: ImportedQuestionDraft[]): Question[] =>

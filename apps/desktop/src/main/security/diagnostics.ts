@@ -151,7 +151,8 @@ export const createRuntimeEnvironment = (): RuntimeEnvironment => {
     supportsWindowsNativeLockdown: process.platform === "win32",
     nativeLockdown,
     canOnlyUseTestingMode:
-      process.platform === "win32" && windowsEdition === "home" && !nativeLockdown.lockdownCapable
+      process.platform !== "win32" ||
+      (process.platform === "win32" && windowsEdition === "home" && !nativeLockdown.lockdownCapable)
   };
 };
 
