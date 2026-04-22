@@ -624,7 +624,7 @@ const AppFrame = () => {
       {launchContext?.route ? (
         <LaunchContextNavigator
           route={launchContext.route}
-          navigationKey={launchContext.packageImport?.filePath ?? launchContext.route}
+          navigationKey={`${launchContext.route}|${launchContext.packageImport?.filePath ?? ""}`}
         />
       ) : null}
     </div>
@@ -633,8 +633,14 @@ const AppFrame = () => {
 
 const LaunchContextNavigator = ({ route, navigationKey }: { route: string; navigationKey: string }) => {
   const navigate = useNavigate();
+  const lastNavigationKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (lastNavigationKeyRef.current === navigationKey) {
+      return;
+    }
+
+    lastNavigationKeyRef.current = navigationKey;
     navigate(route, { replace: true });
   }, [navigate, navigationKey, route]);
 
