@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -73,6 +73,25 @@ const animation = {
   initial: { opacity: 0, y: 18 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -12 }
+};
+
+const hostedExamUserAgent =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+const minExamZoom = 0.75;
+const maxExamZoom = 1.75;
+const examZoomStep = 0.1;
+
+const clampExamZoom = (value: number) =>
+  Math.min(maxExamZoom, Math.max(minExamZoom, Math.round(value * 100) / 100));
+
+const isHostedFormCompletionUrl = (candidateUrl: string) => {
+  try {
+    const parsed = new URL(candidateUrl);
+    return parsed.hostname === "docs.google.com" && parsed.pathname.includes("/forms/") && parsed.pathname.includes("/formResponse");
+  } catch {
+    return false;
+  }
 };
 
 const blankAppearance = (): ExamAppearance => ({
@@ -4983,6 +5002,9 @@ const LinkExamPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [turningIn, setTurningIn] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
+  const [shellUnlockOpen, setShellUnlockOpen] = useState(false);
+  const [hostedZoom, setHostedZoom] = useState(1);
+  const [hostedSubmitDetected, setHostedSubmitDetected] = useState(false);
   const webviewRef = useRef<any>(null);
   const guardDomainsKey = configPackage?.browserPolicy.allowedDomains.join("|") ?? "";
   const guardPrefixesKey =
@@ -5033,7 +5055,29 @@ const LinkExamPage = () => {
     setSubmitting(false);
     setTurningIn(false);
     setSubmissionResult(null);
+    setHostedSubmitDetected(false);
   }, [exam, location.search]);
+
+  useEffect(() => {
+    if (submitted || expired) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const webview = webviewRef.current;
+      if (!webview) {
+        return;
+      }
+
+      webview.setZoomFactor?.(hostedZoom);
+      const currentUrl = typeof webview.getURL === "function" ? webview.getURL() : "";
+      if (currentUrl && isHostedFormCompletionUrl(currentUrl)) {
+        setHostedSubmitDetected(true);
+      }
+    }, 750);
+
+    return () => window.clearInterval(timer);
+  }, [expired, hostedZoom, submitted]);
 
   useEffect(() => {
     if (!session) {
@@ -5096,11 +5140,26 @@ const LinkExamPage = () => {
     }
 
     webviewRef.current.src = startUrl;
+    setHostedSubmitDetected(false);
+  };
+
+  const requestHostedCompletion = () => {
+    const confirmed = window.confirm(
+      hostedSubmitDetected
+        ? "Google Forms appears to have accepted the response. Record the local Lockedscreen submission now?"
+        : "Record the local Lockedscreen submission now? Use this only after the online form has been submitted."
+    );
+
+    if (confirmed) {
+      void finalize();
+    }
   };
 
   if (!exam || !session) {
     return null;
   }
+
+  const webviewHidden = submitted || expired || shellUnlockOpen;
 
   return (
     <StudentShell
@@ -5112,8 +5171,11 @@ const LinkExamPage = () => {
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
       onUnlock={() => navigate("/student")}
+      onUnlockDialogChange={setShellUnlockOpen}
+      onZoomChange={setHostedZoom}
+      scaleContent={false}
     >
-      <div className="relative h-[calc(100vh-8.5rem)] overflow-hidden rounded-[28px] border border-slate-200 bg-white">
+      <div className="relative flex h-[calc(100vh-8.5rem)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white">
         {submitted ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/90 p-8">
             <div className="w-full max-w-xl space-y-4 text-center text-white">
@@ -5157,37 +5219,76 @@ const LinkExamPage = () => {
           </div>
         ) : null}
 
-        {(configPackage?.browserPolicy.showBackToStartButton || configPackage?.sessionPolicy.restartInsteadOfQuit) ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
-            <div className="text-sm text-slate-600 dark:text-slate-300">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <span>
               Controlled hosted runtime. Navigation is limited to package-approved domains and URL rules.
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {configPackage?.browserPolicy.showBackToStartButton ? (
-                <Button variant="secondary" onClick={returnToStart}>
-                  Return to start
-                </Button>
-              ) : null}
-              {configPackage?.sessionPolicy.restartInsteadOfQuit ? (
-                <Button variant="secondary" onClick={returnToStart}>
-                  Restart session
-                </Button>
-              ) : null}
-            </div>
+            </span>
+            {hostedSubmitDetected ? <Badge className="bg-emerald-100 text-emerald-800">Online submission detected</Badge> : null}
           </div>
-        ) : null}
+          <div className="flex flex-wrap gap-2">
+            {configPackage?.browserPolicy.showBackToStartButton ? (
+              <Button variant="secondary" onClick={returnToStart}>
+                Return to start
+              </Button>
+            ) : null}
+            {configPackage?.sessionPolicy.restartInsteadOfQuit ? (
+              <Button variant="secondary" onClick={returnToStart}>
+                Restart session
+              </Button>
+            ) : null}
+            <Button onClick={requestHostedCompletion} disabled={submitting || submitted}>
+              {submitting ? "Recording..." : hostedSubmitDetected ? "Record detected submission" : "Record online submission"}
+            </Button>
+          </div>
+        </div>
 
         <webview
           ref={webviewRef}
-          className="h-full w-full"
+          className={`min-h-0 flex-1 w-full ${webviewHidden ? "hidden" : ""}`}
           src={configPackage?.browserPolicy.startUrl ?? exam.linkConfig?.url}
           partition="persist:lockedscreen-link"
+          useragent={hostedExamUserAgent}
           allowpopups={false}
         />
       </div>
     </StudentShell>
   );
 };
+
+const ExamZoomControls = ({ zoom, onChange }: { zoom: number; onChange: (zoom: number) => void }) => (
+  <div className="flex shrink-0 items-center overflow-hidden rounded-2xl border border-slate-300 bg-white text-slate-900">
+    <button
+      type="button"
+      className="flex h-10 w-10 items-center justify-center border-r border-slate-200 text-lg font-semibold hover:bg-slate-100 disabled:opacity-40"
+      onClick={() => onChange(clampExamZoom(zoom - examZoomStep))}
+      disabled={zoom <= minExamZoom}
+      aria-label="Zoom out"
+      title="Zoom out"
+    >
+      -
+    </button>
+    <button
+      type="button"
+      className="h-10 min-w-16 border-r border-slate-200 px-3 text-sm font-semibold hover:bg-slate-100"
+      onClick={() => onChange(1)}
+      aria-label="Reset zoom"
+      title="Reset zoom"
+    >
+      {Math.round(zoom * 100)}%
+    </button>
+    <button
+      type="button"
+      className="flex h-10 w-10 items-center justify-center text-lg font-semibold hover:bg-slate-100 disabled:opacity-40"
+      onClick={() => onChange(clampExamZoom(zoom + examZoomStep))}
+      disabled={zoom >= maxExamZoom}
+      aria-label="Zoom in"
+      title="Zoom in"
+    >
+      +
+    </button>
+  </div>
+);
 
 const StudentShell = ({
   exam,
@@ -5198,6 +5299,9 @@ const StudentShell = ({
   testingModeName,
   unlockPin,
   onUnlock,
+  onUnlockDialogChange,
+  onZoomChange,
+  scaleContent = true,
   children
 }: {
   exam: Exam;
@@ -5208,6 +5312,9 @@ const StudentShell = ({
   testingModeName: string;
   unlockPin: string;
   onUnlock: () => void;
+  onUnlockDialogChange?: (open: boolean) => void;
+  onZoomChange?: (zoom: number) => void;
+  scaleContent?: boolean;
   children: ReactNode;
 }) => {
   const { launchApprovedApplication } = useLockedscreenStore();
@@ -5218,6 +5325,7 @@ const StudentShell = ({
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [captureMessage, setCaptureMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [capturePending, setCapturePending] = useState(false);
+  const [contentZoom, setContentZoom] = useState(1);
   const unlockInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedUnlockPin = unlockPin.trim();
   const normalizedPinAttempt = pinAttempt.trim();
@@ -5276,7 +5384,13 @@ const StudentShell = ({
         unlockInputRef.current?.select();
       });
     }
-  }, [unlockOpen]);
+
+    onUnlockDialogChange?.(unlockOpen);
+  }, [onUnlockDialogChange, unlockOpen]);
+
+  useEffect(() => {
+    onZoomChange?.(contentZoom);
+  }, [contentZoom, onZoomChange]);
 
   const attemptUnlock = () => {
     if (!configPackage?.quitUnlockPolicy.requireInvigilatorPin) {
@@ -5381,6 +5495,7 @@ const StudentShell = ({
                 <div className="text-xl font-semibold leading-none">{formatTime(remaining)}</div>
               </div>
             ) : null}
+            <ExamZoomControls zoom={contentZoom} onChange={setContentZoom} />
             <Button
               variant="secondary"
               className="shrink-0 border-slate-300 bg-white px-3 py-2 text-slate-900 hover:bg-slate-100"
@@ -5512,6 +5627,7 @@ const StudentShell = ({
       <div
         aria-hidden={unlockOpen}
         className={unlockOpen ? "pointer-events-none invisible" : undefined}
+        style={scaleContent ? ({ zoom: contentZoom } as CSSProperties) : undefined}
       >
         {children}
       </div>
