@@ -20,6 +20,12 @@ const classroomApiError = (status: number, payload: unknown): Error => {
     return new Error("Google Classroom needs you to sign in again. Reconnect Google Classroom and try loading classes once more.");
   }
 
+  if (status === 400 && (detail.includes("client_secret") || detail.includes("invalid_grant"))) {
+    return new Error(
+      "Google Classroom needs the Desktop app client secret. Ask an admin to enter the client secret from the Google OAuth JSON, save settings, and reconnect Google Classroom."
+    );
+  }
+
   if (
     status === 403 &&
     (detail.includes("insufficient") || detail.includes("scope") || detail.includes("permission"))
@@ -52,11 +58,28 @@ export class GoogleClassroomService implements GoogleClassroomApi {
 
   async listCourses(connectionId: string, settings: GoogleIntegrationSettings): Promise<LmsCourse[]> {
     const accessToken = await this.oauth.getAccessToken(connectionId, settings);
-    const response = await fetch(`${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const payload = await readClassroomJson<{ courses?: Array<Record<string, unknown>> }>(response);
-    return (payload.courses ?? []).map((course) => ({
+    const courses: Array<Record<string, unknown>> = [];
+    let pageToken: string | undefined;
+
+    do {
+      const params = new URLSearchParams({
+        teacherId: "me",
+        pageSize: "100"
+      });
+      ["ACTIVE", "PROVISIONED"].forEach((state) => params.append("courseStates", state));
+      if (pageToken) {
+        params.set("pageToken", pageToken);
+      }
+
+      const response = await fetch(`${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const payload = await readClassroomJson<{ courses?: Array<Record<string, unknown>>; nextPageToken?: string }>(response);
+      courses.push(...(payload.courses ?? []));
+      pageToken = payload.nextPageToken;
+    } while (pageToken);
+
+    return courses.map((course) => ({
       id: String(course.id ?? ""),
       name: String(course.name ?? "Untitled course"),
       section: typeof course.section === "string" ? course.section : undefined,
