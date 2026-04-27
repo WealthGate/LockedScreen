@@ -36,6 +36,8 @@ export interface LockedscreenApi {
   saveLmsConnection: (connection: LmsConnection) => Promise<AppStateSnapshot>;
   deleteLmsConnection: (connectionId: string) => Promise<AppStateSnapshot>;
   connectLmsConnection: (connectionId: string) => Promise<AppStateSnapshot>;
+  signOutLmsConnection: (payload: { connectionId: string; revoke?: boolean }) => Promise<AppStateSnapshot>;
+  clearLmsConnectionTokens: (connectionId: string) => Promise<AppStateSnapshot>;
   listLmsCourses: (connectionId: string) => Promise<LmsCourse[]>;
   listLmsCourseWork: (payload: { connectionId: string; courseId: string }) => Promise<LmsCourseWork[]>;
   listLmsStudents: (payload: { connectionId: string; courseId: string }) => Promise<LmsStudent[]>;
@@ -85,6 +87,8 @@ const api: LockedscreenApi = {
   saveLmsConnection: (connection) => ipcRenderer.invoke("lmsConnection:save", connection),
   deleteLmsConnection: (connectionId) => ipcRenderer.invoke("lmsConnection:delete", connectionId),
   connectLmsConnection: (connectionId) => ipcRenderer.invoke("lmsConnection:connect", connectionId),
+  signOutLmsConnection: (payload) => ipcRenderer.invoke("lmsConnection:signOut", payload),
+  clearLmsConnectionTokens: (connectionId) => ipcRenderer.invoke("lmsConnection:clearTokens", connectionId),
   listLmsCourses: (connectionId) => ipcRenderer.invoke("lmsConnection:listCourses", connectionId),
   listLmsCourseWork: (payload) => ipcRenderer.invoke("lmsConnection:listCourseWork", payload),
   listLmsStudents: (payload) => ipcRenderer.invoke("lmsConnection:listStudents", payload),

@@ -11,6 +11,7 @@ import type {
   Exam,
   ExamConfigPackage,
   ExamSession,
+  GoogleIntegrationSettings,
   LmsConnection,
   ProcessPolicy,
   ResultDestination,
@@ -28,12 +29,35 @@ import type {
   TeacherOptions
 } from "@lockedscreen/shared-types";
 
+const defaultGoogleClassroomScopes = [
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/classroom.courses.readonly",
+  "https://www.googleapis.com/auth/classroom.coursework.students",
+  "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+  "https://www.googleapis.com/auth/classroom.rosters.readonly"
+];
+
+const defaultGoogleIntegration = (): GoogleIntegrationSettings => ({
+  enabled: false,
+  clientId: "",
+  requestedScopes: [...defaultGoogleClassroomScopes],
+  connectionStatus: "disconnected",
+  accountEmail: "",
+  accountName: "",
+  lastConnectedAt: undefined,
+  lastError: undefined
+});
+
 const defaultSettings: AppSettings = {
+  adminUnlockPin: "2468",
   invigilatorUnlockPin: "2468",
   defaultTheme: "system",
   allowElectronKioskAssist: true,
   allowNonKioskTestingMode: false,
-  approvedDomains: ["docs.google.com", "classroom.google.com", "forms.gle", "app.formative.com"]
+  approvedDomains: ["docs.google.com", "classroom.google.com", "forms.gle", "app.formative.com"],
+  googleIntegration: defaultGoogleIntegration()
 };
 
 const defaultSecurityProfile: SecurityProfile = {
@@ -164,6 +188,29 @@ const normalizeLmsConnection = (connection: LmsConnection): LmsConnection => ({
   scope: connection.scope ?? "",
   status: connection.status ?? "disconnected"
 });
+
+const normalizeGoogleIntegration = (
+  settings: Partial<GoogleIntegrationSettings> | null | undefined
+): GoogleIntegrationSettings => {
+  const requestedScopes = Array.isArray(settings?.requestedScopes)
+    ? settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean)
+    : [];
+  const mergedScopes = Array.from(new Set([...(requestedScopes.length > 0 ? requestedScopes : []), ...defaultGoogleClassroomScopes]));
+
+  return {
+    ...defaultGoogleIntegration(),
+    ...(settings ?? {}),
+    enabled: settings?.enabled === true,
+    clientId: settings?.clientId?.trim() ?? "",
+    requestedScopes: mergedScopes,
+    connectionStatus:
+      settings?.connectionStatus === "connected" || settings?.connectionStatus === "error"
+        ? settings.connectionStatus
+        : "disconnected",
+    accountEmail: settings?.accountEmail?.trim() ?? "",
+    accountName: settings?.accountName?.trim() ?? ""
+  };
+};
 
 const buildSubmissionSyncStates = (destinations: ResultDestination[]): SubmissionSyncState[] =>
   destinations.map((destination) => ({
@@ -481,7 +528,9 @@ const hydrateSnapshot = (raw: Partial<AppStateSnapshot> | null | undefined): App
     lmsConnections,
     settings: {
       ...defaultSettings,
-      ...(raw?.settings ?? {})
+      ...(raw?.settings ?? {}),
+      adminUnlockPin: raw?.settings?.adminUnlockPin ?? raw?.settings?.invigilatorUnlockPin ?? defaultSettings.adminUnlockPin,
+      googleIntegration: normalizeGoogleIntegration(raw?.settings?.googleIntegration)
     },
     securityProfile: {
       ...defaultSecurityProfile,

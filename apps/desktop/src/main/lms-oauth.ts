@@ -4,8 +4,21 @@ import { URL, URLSearchParams } from "node:url";
 
 import { shell } from "electron";
 
-import type { LmsConnection, LmsCourse, LmsCourseWork, LmsProviderType, LmsStudent } from "@lockedscreen/shared-types";
+import type {
+  GoogleIntegrationSettings,
+  LmsConnection,
+  LmsCourse,
+  LmsCourseWork,
+  LmsProviderType,
+  LmsStudent
+} from "@lockedscreen/shared-types";
 
+import {
+  GoogleClassroomService,
+  GoogleDesktopOAuthService,
+  googleScopesToString,
+  normalizeGoogleIntegrationSettings
+} from "./integrations/google";
 import type { OAuthVault } from "./oauth-vault";
 
 interface OAuthConnectionSecrets {
@@ -57,10 +70,10 @@ const providerDefaultScope = (provider: LmsProviderType): string =>
         "openid",
         "email",
         "profile",
-        "https://www.googleapis.com/auth/classroom.courses",
+        "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
-        "https://www.googleapis.com/auth/classroom.rosters.readonly",
-        "https://www.googleapis.com/auth/drive.file"
+        "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+        "https://www.googleapis.com/auth/classroom.rosters.readonly"
       ].join(" ")
     : provider === "microsoft-365"
       ? [
@@ -271,10 +284,47 @@ const fetchConnectionProfile = async (connection: LmsConnection, accessToken: st
   return {};
 };
 
+const googleSettingsFromConnection = (
+  connection: LmsConnection,
+  settings?: GoogleIntegrationSettings
+): GoogleIntegrationSettings =>
+  normalizeGoogleIntegrationSettings({
+    ...(settings ?? {}),
+    enabled: settings?.enabled ?? true,
+    clientId: settings?.clientId?.trim() || connection.clientId,
+    requestedScopes:
+      settings?.requestedScopes && settings.requestedScopes.length > 0
+        ? settings.requestedScopes
+        : (connection.scope.trim() || providerDefaultScope("google-classroom")).split(/\s+/),
+    connectionStatus: settings?.connectionStatus ?? connection.status,
+    accountEmail: settings?.accountEmail ?? connection.accountEmail,
+    accountName: settings?.accountName ?? connection.accountName,
+    lastConnectedAt: settings?.lastConnectedAt ?? connection.lastConnectedAt,
+    lastError: settings?.lastError ?? connection.lastError
+  });
+
 export const beginLmsOAuthConnection = async (
   connection: LmsConnection,
-  vault: OAuthVault
+  vault: OAuthVault,
+  googleSettings?: GoogleIntegrationSettings
 ): Promise<LmsConnection> => {
+  if (connection.provider === "google-classroom") {
+    const settings = googleSettingsFromConnection(connection, googleSettings);
+    const oauth = new GoogleDesktopOAuthService(vault);
+    const result = await oauth.beginTeacherSignIn(connection.id, settings);
+    return {
+      ...connection,
+      status: "connected",
+      clientId: settings.clientId,
+      accountEmail: result.profile.email,
+      accountName: result.profile.name,
+      lastConnectedAt: new Date().toISOString(),
+      lastError: undefined,
+      scope: googleScopesToString(settings),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
   if (!connection.clientId.trim()) {
     throw new Error(
       "This LMS needs a one-time school app connection setup before sign-in. Ask the school IT/admin to add the Google or Microsoft app connection, then teachers can sign in with their normal school account."
@@ -313,8 +363,14 @@ export const beginLmsOAuthConnection = async (
 
 export const getConnectionAccessToken = async (
   connection: LmsConnection,
-  vault: OAuthVault
+  vault: OAuthVault,
+  googleSettings?: GoogleIntegrationSettings
 ): Promise<string> => {
+  if (connection.provider === "google-classroom") {
+    const oauth = new GoogleDesktopOAuthService(vault);
+    return oauth.getAccessToken(connection.id, googleSettingsFromConnection(connection, googleSettings));
+  }
+
   const secrets = await vault.getTokens(connection.id);
   if (!secrets?.accessToken) {
     throw new Error("This LMS connection is not authenticated.");
@@ -333,24 +389,41 @@ export const getConnectionAccessToken = async (
   return refreshed.accessToken;
 };
 
+export const signOutLmsConnection = async (
+  connection: LmsConnection,
+  vault: OAuthVault,
+  options: { revoke?: boolean } = {}
+): Promise<LmsConnection> => {
+  if (connection.provider === "google-classroom") {
+    const oauth = new GoogleDesktopOAuthService(vault);
+    await oauth.signOut(connection.id, options);
+  } else {
+    await vault.deleteTokens(connection.id);
+  }
+
+  return {
+    ...connection,
+    status: "disconnected",
+    accountEmail: "",
+    accountName: "",
+    lastConnectedAt: undefined,
+    lastError: undefined,
+    updatedAt: new Date().toISOString()
+  };
+};
+
 export const listConnectionCourses = async (
   connection: LmsConnection,
-  vault: OAuthVault
+  vault: OAuthVault,
+  googleSettings?: GoogleIntegrationSettings
 ): Promise<LmsCourse[]> => {
-  const accessToken = await getConnectionAccessToken(connection, vault);
-
   if (connection.provider === "google-classroom") {
-    const response = await fetch("https://classroom.googleapis.com/v1/courses", {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const payload = (await response.json()) as { courses?: Array<Record<string, unknown>> };
-    return (payload.courses ?? []).map((course) => ({
-      id: String(course.id ?? ""),
-      name: String(course.name ?? "Untitled course"),
-      section: typeof course.section === "string" ? course.section : undefined,
-      alternateLink: typeof course.alternateLink === "string" ? course.alternateLink : undefined
-    }));
+    const oauth = new GoogleDesktopOAuthService(vault);
+    const classroom = new GoogleClassroomService(oauth);
+    return classroom.listCourses(connection.id, googleSettingsFromConnection(connection, googleSettings));
   }
+
+  const accessToken = await getConnectionAccessToken(connection, vault);
 
   if (connection.provider === "microsoft-365") {
     const response = await fetch("https://graph.microsoft.com/v1.0/education/classes?$top=50", {
@@ -371,47 +444,21 @@ export const listConnectionCourses = async (
 export const listConnectionCourseWork = async (
   connection: LmsConnection,
   courseId: string,
-  vault: OAuthVault
+  vault: OAuthVault,
+  googleSettings?: GoogleIntegrationSettings
 ): Promise<LmsCourseWork[]> => {
   const normalizedCourseId = courseId.trim();
   if (!normalizedCourseId) {
     return [];
   }
 
-  const accessToken = await getConnectionAccessToken(connection, vault);
-
   if (connection.provider === "google-classroom") {
-    const response = await fetch(
-      `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(normalizedCourseId)}/courseWork?pageSize=50`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      }
-    );
-    const payload = (await response.json()) as { courseWork?: Array<Record<string, unknown>> };
-    return (payload.courseWork ?? []).map((item) => {
-      const dueDate = item.dueDate as Record<string, unknown> | undefined;
-      const dueTime = item.dueTime as Record<string, unknown> | undefined;
-      const year = Number(dueDate?.year ?? 0);
-      const month = Number(dueDate?.month ?? 0);
-      const day = Number(dueDate?.day ?? 0);
-      const hours = Number(dueTime?.hours ?? 0);
-      const minutes = Number(dueTime?.minutes ?? 0);
-      const seconds = Number(dueTime?.seconds ?? 0);
-      const dueAt =
-        year > 0 && month > 0 && day > 0
-          ? new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds)).toISOString()
-          : undefined;
-
-      return {
-        id: String(item.id ?? ""),
-        courseId: normalizedCourseId,
-        title: String(item.title ?? "Untitled coursework"),
-        alternateLink: typeof item.alternateLink === "string" ? item.alternateLink : undefined,
-        dueAt,
-        state: typeof item.state === "string" ? item.state : undefined
-      };
-    });
+    const oauth = new GoogleDesktopOAuthService(vault);
+    const classroom = new GoogleClassroomService(oauth);
+    return classroom.listCourseWork(connection.id, googleSettingsFromConnection(connection, googleSettings), normalizedCourseId);
   }
+
+  const accessToken = await getConnectionAccessToken(connection, vault);
 
   if (connection.provider === "microsoft-365") {
     const response = await fetch(
@@ -437,33 +484,21 @@ export const listConnectionCourseWork = async (
 export const listConnectionStudents = async (
   connection: LmsConnection,
   courseId: string,
-  vault: OAuthVault
+  vault: OAuthVault,
+  googleSettings?: GoogleIntegrationSettings
 ): Promise<LmsStudent[]> => {
   const normalizedCourseId = courseId.trim();
   if (!normalizedCourseId) {
     return [];
   }
 
-  const accessToken = await getConnectionAccessToken(connection, vault);
-
   if (connection.provider === "google-classroom") {
-    const response = await fetch(
-      `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(normalizedCourseId)}/students?pageSize=100`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      }
-    );
-    const payload = (await response.json()) as { students?: Array<Record<string, unknown>> };
-    return (payload.students ?? []).map((student) => {
-      const profile = student.profile as Record<string, unknown> | undefined;
-      const name = profile?.name as Record<string, unknown> | undefined;
-      return {
-        id: String(profile?.id ?? student.userId ?? ""),
-        name: String(name?.fullName ?? profile?.emailAddress ?? "Unnamed student"),
-        email: typeof profile?.emailAddress === "string" ? profile.emailAddress : undefined
-      };
-    });
+    const oauth = new GoogleDesktopOAuthService(vault);
+    const classroom = new GoogleClassroomService(oauth);
+    return classroom.listStudents(connection.id, googleSettingsFromConnection(connection, googleSettings), normalizedCourseId);
   }
+
+  const accessToken = await getConnectionAccessToken(connection, vault);
 
   if (connection.provider === "microsoft-365") {
     const response = await fetch(

@@ -30,7 +30,14 @@ import type {
 } from "@lockedscreen/shared-types";
 import { createStorageService } from "@lockedscreen/storage";
 
-import { beginLmsOAuthConnection, listConnectionCourses, listConnectionCourseWork, listConnectionStudents } from "./lms-oauth";
+import {
+  beginLmsOAuthConnection,
+  getConnectionAccessToken,
+  listConnectionCourses,
+  listConnectionCourseWork,
+  listConnectionStudents,
+  signOutLmsConnection
+} from "./lms-oauth";
 import { OAuthVault } from "./oauth-vault";
 import { createDisabledSyncState, syncSubmissionToDestination } from "./results-sync";
 import { buildSecurityOverview, createRuntimeEnvironment } from "./security/diagnostics";
@@ -165,6 +172,7 @@ const isExam = (value: unknown): value is Exam =>
 
 const isSettings = (value: unknown): value is AppSettings =>
   isRecord(value) &&
+  typeof value.adminUnlockPin === "string" &&
   typeof value.invigilatorUnlockPin === "string" &&
   typeof value.allowElectronKioskAssist === "boolean" &&
   typeof value.allowNonKioskTestingMode === "boolean" &&
@@ -566,8 +574,118 @@ app.whenReady().then(async () => {
       throw new Error("LMS connection not found.");
     }
 
-    const connected = await beginLmsOAuthConnection(connection, oauthVault);
+    let connected: LmsConnection;
+    try {
+      connected = await beginLmsOAuthConnection(connection, oauthVault, snapshot.settings.googleIntegration);
+    } catch (error) {
+      if (connection.provider === "google-classroom") {
+        const lastError = error instanceof Error ? error.message : "Google Classroom sign-in failed.";
+        await storage.saveLmsConnection({
+          ...connection,
+          status: "error",
+          lastError,
+          updatedAt: new Date().toISOString()
+        });
+        await storage.saveSettings({
+          ...snapshot.settings,
+          googleIntegration: {
+            ...snapshot.settings.googleIntegration,
+            connectionStatus: "error",
+            lastError
+          }
+        });
+      }
+
+      throw error;
+    }
+
+    if (connected.provider === "google-classroom") {
+      const currentSnapshot = await storage.getSnapshot();
+      await storage.saveSettings({
+        ...currentSnapshot.settings,
+        googleIntegration: {
+          ...currentSnapshot.settings.googleIntegration,
+          enabled: true,
+          clientId: connected.clientId,
+          requestedScopes: connected.scope.split(/\s+/).filter(Boolean),
+          connectionStatus: connected.status,
+          accountEmail: connected.accountEmail,
+          accountName: connected.accountName,
+          lastConnectedAt: connected.lastConnectedAt,
+          lastError: connected.lastError
+        }
+      });
+    }
     return withRuntime(storage.saveLmsConnection(connected));
+  });
+
+  ipcMain.handle("lmsConnection:signOut", async (_event, payload: unknown) => {
+    if (!isRecord(payload) || typeof payload.connectionId !== "string") {
+      throw new Error("Invalid LMS sign-out request.");
+    }
+
+    const snapshot = await storage.getSnapshot();
+    const connection = snapshot.lmsConnections.find((candidate) => candidate.id === payload.connectionId);
+    if (!connection) {
+      throw new Error("LMS connection not found.");
+    }
+
+    const signedOut = await signOutLmsConnection(connection, oauthVault, { revoke: payload.revoke !== false });
+    if (signedOut.provider === "google-classroom") {
+      const currentSnapshot = await storage.getSnapshot();
+      await storage.saveSettings({
+        ...currentSnapshot.settings,
+        googleIntegration: {
+          ...currentSnapshot.settings.googleIntegration,
+          connectionStatus: "disconnected",
+          accountEmail: "",
+          accountName: "",
+          lastConnectedAt: undefined,
+          lastError: undefined
+        }
+      });
+    }
+
+    return withRuntime(storage.saveLmsConnection(signedOut));
+  });
+
+  ipcMain.handle("lmsConnection:clearTokens", async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== "string") {
+      throw new Error("Invalid LMS connection id.");
+    }
+
+    const snapshot = await storage.getSnapshot();
+    const connection = snapshot.lmsConnections.find((candidate) => candidate.id === connectionId);
+    if (!connection) {
+      throw new Error("LMS connection not found.");
+    }
+
+    await oauthVault.deleteTokens(connection.id);
+    const resetConnection: LmsConnection = {
+      ...connection,
+      status: "disconnected",
+      accountEmail: "",
+      accountName: "",
+      lastConnectedAt: undefined,
+      lastError: undefined,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (resetConnection.provider === "google-classroom") {
+      await storage.saveSettings({
+        ...snapshot.settings,
+        googleIntegration: {
+          ...snapshot.settings.googleIntegration,
+          connectionStatus: "disconnected",
+          accountEmail: "",
+          accountName: "",
+          lastConnectedAt: undefined,
+          lastError: undefined
+        }
+      });
+    }
+
+    return withRuntime(storage.saveLmsConnection(resetConnection));
   });
 
   ipcMain.handle("lmsConnection:listCourses", async (_event, connectionId: unknown): Promise<LmsCourse[]> => {
@@ -581,7 +699,7 @@ app.whenReady().then(async () => {
       throw new Error("LMS connection not found.");
     }
 
-    return listConnectionCourses(connection, oauthVault);
+    return listConnectionCourses(connection, oauthVault, snapshot.settings.googleIntegration);
   });
 
   ipcMain.handle(
@@ -597,7 +715,7 @@ app.whenReady().then(async () => {
         throw new Error("LMS connection not found.");
       }
 
-      return listConnectionCourseWork(connection, payload.courseId, oauthVault);
+      return listConnectionCourseWork(connection, payload.courseId, oauthVault, snapshot.settings.googleIntegration);
     }
   );
 
@@ -612,7 +730,7 @@ app.whenReady().then(async () => {
       throw new Error("LMS connection not found.");
     }
 
-    return listConnectionStudents(connection, payload.courseId, oauthVault);
+    return listConnectionStudents(connection, payload.courseId, oauthVault, snapshot.settings.googleIntegration);
   });
 
   ipcMain.handle("resultsDestination:delete", async (_event, destinationId: unknown) => {
@@ -925,7 +1043,8 @@ app.whenReady().then(async () => {
       const pendingTurnInState: StudentLmsTurnInState = {
         provider: activePackage.studentLmsBinding.provider,
         status: "pending",
-        lastAttemptAt: new Date().toISOString()
+        lastAttemptAt: new Date().toISOString(),
+        gradeSyncStatus: activePackage.studentLmsBinding.provider === "google-classroom" ? "pending" : undefined
       };
       snapshot = await storage.updateSubmissionStudentLmsTurnIn(result.id, pendingTurnInState);
       result.studentLmsTurnIn = pendingTurnInState;
@@ -962,7 +1081,20 @@ app.whenReady().then(async () => {
     }
 
     try {
-      const state = await turnInSubmissionToLms(mainWindow, configPackage, exam, submission);
+      let teacherAccessToken: string | undefined;
+      const binding = configPackage.studentLmsBinding;
+      if (binding.provider === "google-classroom" && binding.connectionId) {
+        const teacherConnection = snapshot.lmsConnections.find((candidate) => candidate.id === binding.connectionId);
+        if (teacherConnection?.status === "connected") {
+          try {
+            teacherAccessToken = await getConnectionAccessToken(teacherConnection, oauthVault, snapshot.settings.googleIntegration);
+          } catch {
+            teacherAccessToken = undefined;
+          }
+        }
+      }
+
+      const state = await turnInSubmissionToLms(mainWindow, configPackage, exam, submission, { teacherAccessToken });
       const nextSnapshot = await storage.updateSubmissionStudentLmsTurnIn(submission.id, state);
       const updatedSubmission = nextSnapshot.submissions.find((candidate) => candidate.id === submission.id);
       if (!updatedSubmission) {

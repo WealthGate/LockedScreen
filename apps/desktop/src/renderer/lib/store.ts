@@ -34,6 +34,8 @@ interface LockedscreenStore {
   saveLmsConnection: (connection: LmsConnection) => Promise<AppStateSnapshot | null>;
   deleteLmsConnection: (connectionId: string) => Promise<AppStateSnapshot | null>;
   connectLmsConnection: (connectionId: string) => Promise<AppStateSnapshot | null>;
+  signOutLmsConnection: (payload: { connectionId: string; revoke?: boolean }) => Promise<AppStateSnapshot | null>;
+  clearLmsConnectionTokens: (connectionId: string) => Promise<AppStateSnapshot | null>;
   listLmsCourses: (connectionId: string) => Promise<LmsCourse[]>;
   listLmsCourseWork: (payload: { connectionId: string; courseId: string }) => Promise<LmsCourseWork[]>;
   listLmsStudents: (payload: { connectionId: string; courseId: string }) => Promise<LmsStudent[]>;
@@ -153,7 +155,30 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
     return snapshot;
   },
   connectLmsConnection: async (connectionId) => {
-    const snapshot = await withGuard(() => window.lockedscreenApi.connectLmsConnection(connectionId), (error) => set({ error }));
+    let snapshot: AppStateSnapshot | null = null;
+    try {
+      snapshot = await window.lockedscreenApi.connectLmsConnection(connectionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      const latest = await withGuard(() => window.lockedscreenApi.getSnapshot(), () => undefined);
+      set(latest ? { error: message, snapshot: latest } : { error: message });
+      throw error;
+    }
+
+    if (snapshot) {
+      set({ snapshot, error: null });
+    }
+    return snapshot;
+  },
+  signOutLmsConnection: async (payload) => {
+    const snapshot = await withGuard(() => window.lockedscreenApi.signOutLmsConnection(payload), (error) => set({ error }));
+    if (snapshot) {
+      set({ snapshot, error: null });
+    }
+    return snapshot;
+  },
+  clearLmsConnectionTokens: async (connectionId) => {
+    const snapshot = await withGuard(() => window.lockedscreenApi.clearLmsConnectionTokens(connectionId), (error) => set({ error }));
     if (snapshot) {
       set({ snapshot, error: null });
     }
@@ -164,7 +189,7 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
       return await window.lockedscreenApi.listLmsCourses(connectionId);
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Unexpected error" });
-      return [];
+      throw error;
     }
   },
   listLmsCourseWork: async (payload) => {
@@ -172,7 +197,7 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
       return await window.lockedscreenApi.listLmsCourseWork(payload);
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Unexpected error" });
-      return [];
+      throw error;
     }
   },
   listLmsStudents: async (payload) => {

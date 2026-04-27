@@ -4,17 +4,21 @@ import { dirname } from "node:path";
 
 import { safeStorage } from "electron";
 
-interface LmsTokenBundle {
-  accessToken: string;
-  refreshToken?: string;
-  expiresAt?: string;
-}
+import type { OAuthTokenBundle, SecureTokenStore } from "./integrations/google";
 
 type VaultContent = Record<string, string>;
 
 const connectionKey = (connectionId: string): string => createHash("sha256").update(connectionId).digest("hex");
 
-export class OAuthVault {
+/**
+ * Per-teacher OAuth token vault.
+ *
+ * The app stores machine/admin Google integration settings in normal app state,
+ * but teacher tokens live here under a hashed connection ID. The JSON file is
+ * only a transport for encrypted blobs: safeStorage encrypts the token bundle
+ * with the operating system's desktop secret protection before any write.
+ */
+export class OAuthVault implements SecureTokenStore {
   constructor(private readonly filePath: string) {}
 
   private async readVault(): Promise<VaultContent> {
@@ -39,14 +43,14 @@ export class OAuthVault {
     }
   }
 
-  async saveTokens(connectionId: string, tokens: LmsTokenBundle): Promise<void> {
+  async saveTokens(connectionId: string, tokens: OAuthTokenBundle): Promise<void> {
     this.requireEncryption();
     const vault = await this.readVault();
     vault[connectionKey(connectionId)] = safeStorage.encryptString(JSON.stringify(tokens)).toString("base64");
     await this.writeVault(vault);
   }
 
-  async getTokens(connectionId: string): Promise<LmsTokenBundle | null> {
+  async getTokens(connectionId: string): Promise<OAuthTokenBundle | null> {
     this.requireEncryption();
     const vault = await this.readVault();
     const raw = vault[connectionKey(connectionId)];
@@ -55,7 +59,7 @@ export class OAuthVault {
     }
 
     const decrypted = safeStorage.decryptString(Buffer.from(raw, "base64"));
-    return JSON.parse(decrypted) as LmsTokenBundle;
+    return JSON.parse(decrypted) as OAuthTokenBundle;
   }
 
   async deleteTokens(connectionId: string): Promise<void> {

@@ -23,6 +23,7 @@ export type LmsProviderType = "google-classroom" | "microsoft-365" | "generic-oa
 export type LmsConnectionStatus = "disconnected" | "connected" | "error";
 export type StudentLmsProviderType = "google-classroom" | "microsoft-365";
 export type StudentLmsTurnInStatus = "pending" | "success" | "failed" | "skipped";
+export type StudentLmsGradeSyncStatus = "pending" | "success" | "failed" | "skipped";
 export type InstalledAppRole = "teacher" | "student";
 export type SecurityLogCategory =
   | "package"
@@ -209,6 +210,21 @@ export interface StudentLmsTurnInState {
   submittedAt?: string;
   externalReference?: string;
   lastError?: string;
+  gradeSyncStatus?: StudentLmsGradeSyncStatus;
+  gradeSyncedAt?: string;
+  gradeValue?: number;
+  gradeSyncError?: string;
+}
+
+export interface GoogleIntegrationSettings {
+  enabled: boolean;
+  clientId: string;
+  requestedScopes: string[];
+  connectionStatus: LmsConnectionStatus;
+  accountEmail?: string;
+  accountName?: string;
+  lastConnectedAt?: string;
+  lastError?: string;
 }
 
 export interface SubmissionSyncState {
@@ -362,11 +378,13 @@ export interface ExamConfigPackage {
 }
 
 export interface AppSettings {
+  adminUnlockPin: string;
   invigilatorUnlockPin: string;
   defaultTheme: ThemePreference;
   allowElectronKioskAssist: boolean;
   allowNonKioskTestingMode: boolean;
   approvedDomains: string[];
+  googleIntegration: GoogleIntegrationSettings;
 }
 
 export interface SecurityProfile {

@@ -174,10 +174,10 @@ const defaultLmsScope = (provider: LmsProviderType): string =>
         "openid",
         "email",
         "profile",
-        "https://www.googleapis.com/auth/classroom.courses",
+        "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
-        "https://www.googleapis.com/auth/classroom.rosters.readonly",
-        "https://www.googleapis.com/auth/drive.file"
+        "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+        "https://www.googleapis.com/auth/classroom.rosters.readonly"
       ].join(" ")
     : provider === "microsoft-365"
       ? [
@@ -411,6 +411,15 @@ const splitLines = (value: string): string[] =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+const splitScopes = (value: string): string[] =>
+  value
+    .split(/[\s,\n\r]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const mergeGoogleDefaultScopes = (scopes: string[]): string[] =>
+  Array.from(new Set([...scopes.map((scope) => scope.trim()).filter(Boolean), ...defaultLmsScope("google-classroom").split(/\s+/)]));
+
 const serializeUrlRules = (rules: PackageUrlRule[]): string =>
   rules
     .map((rule) => [rule.label, rule.kind, rule.role, rule.pattern, rule.allowSubdomains ? "subdomains" : "exact"].join("|"))
@@ -521,6 +530,8 @@ type AdminActionState =
   | "save-lms-connection"
   | "delete-lms-connection"
   | "connect-lms"
+  | "sign-out-lms"
+  | "clear-lms-tokens"
   | "load-lms-courses"
   | "load-lms-coursework"
   | "load-lms-students"
@@ -2419,6 +2430,11 @@ const ResultsPage = () => {
                     {providerLabel(result.studentLmsTurnIn.provider)}: {result.studentLmsTurnIn.status}
                   </Badge>
                 ) : null}
+                {result.studentLmsTurnIn?.gradeSyncStatus ? (
+                  <Badge className={studentTurnInTone(result.studentLmsTurnIn.gradeSyncStatus)}>
+                    Grade sync: {result.studentLmsTurnIn.gradeSyncStatus}
+                  </Badge>
+                ) : null}
               </div>
               {result.syncStates.some((state) => state.lastError) ? (
                 <div className="mt-3 grid gap-2">
@@ -2439,6 +2455,11 @@ const ResultsPage = () => {
                   {providerLabel(result.studentLmsTurnIn.provider)}: {result.studentLmsTurnIn.lastError}
                 </div>
               ) : null}
+              {result.studentLmsTurnIn?.gradeSyncError ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Grade sync: {result.studentLmsTurnIn.gradeSyncError}
+                </div>
+              ) : null}
             </div>
           ))
         )}
@@ -2457,6 +2478,8 @@ const SettingsPage = () => {
     saveLmsConnection,
     deleteLmsConnection,
     connectLmsConnection,
+    signOutLmsConnection,
+    clearLmsConnectionTokens,
     listLmsCourses,
     listLmsCourseWork,
     listLmsStudents,
@@ -2487,6 +2510,9 @@ const SettingsPage = () => {
   const [connectionCourses, setConnectionCourses] = useState<LmsCourse[]>([]);
   const [bindingCourseWork, setBindingCourseWork] = useState<LmsCourseWork[]>([]);
   const [bindingStudents, setBindingStudents] = useState<LmsStudent[]>([]);
+  const [adminAdvancedUnlocked, setAdminAdvancedUnlocked] = useState(false);
+  const [adminPinAttempt, setAdminPinAttempt] = useState("");
+  const [adminUnlockError, setAdminUnlockError] = useState<string | null>(null);
   const autoTestingMode = snapshot?.runtime?.canOnlyUseTestingMode === true;
 
   useEffect(() => {
@@ -2616,6 +2642,29 @@ const SettingsPage = () => {
   };
   const adminBusy = pendingAction !== null;
   const isPending = (action: AdminActionState): boolean => pendingAction === action;
+  const googleIntegrationReady =
+    settings.googleIntegration.enabled && settings.googleIntegration.clientId.trim().length > 0;
+  const connectionHasAdminSetup =
+    connectionDraft.provider === "google-classroom" ? googleIntegrationReady : hasAdminLmsSetup(connectionDraft);
+  const adminUnlockPin = settings.adminUnlockPin.trim();
+  const adminUnlockRequiresPin = adminUnlockPin.length > 0;
+
+  const unlockAdvancedAdminSections = () => {
+    if (adminUnlockRequiresPin && adminPinAttempt.trim() !== adminUnlockPin) {
+      setAdminUnlockError("Incorrect admin PIN.");
+      return;
+    }
+
+    setAdminAdvancedUnlocked(true);
+    setAdminUnlockError(null);
+    setAdminPinAttempt("");
+  };
+
+  const lockAdvancedAdminSections = () => {
+    setAdminAdvancedUnlocked(false);
+    setAdminUnlockError(null);
+    setAdminPinAttempt("");
+  };
 
   const syncStructuredEditors = (nextPackage: ExamConfigPackage | null) => {
     setPackageDraft(nextPackage);
@@ -2705,12 +2754,16 @@ const SettingsPage = () => {
                         ? "Deleting LMS connection..."
                     : action === "connect-lms"
                       ? "Connecting LMS account..."
-                      : action === "load-lms-courses"
-                        ? "Loading classes..."
-                        : action === "load-lms-coursework"
-                          ? "Loading assignments..."
-                          : action === "load-lms-students"
-                            ? "Loading students..."
+                      : action === "sign-out-lms"
+                        ? "Signing out..."
+                        : action === "clear-lms-tokens"
+                          ? "Clearing stored tokens..."
+                          : action === "load-lms-courses"
+                            ? "Loading classes..."
+                            : action === "load-lms-coursework"
+                              ? "Loading assignments..."
+                              : action === "load-lms-students"
+                                ? "Loading students..."
                 : action === "duplicate-package"
                   ? "Duplicating package..."
                   : action === "delete-package"
@@ -2764,12 +2817,34 @@ const SettingsPage = () => {
     });
   };
 
-  const handleSaveSettings = async () =>
-    runAdminAction("save-settings", () => saveSettings(settings), {
+  const handleSaveSettings = async () => {
+    const nextSettings: AppSettings = {
+      ...settings,
+      adminUnlockPin: settings.adminUnlockPin.trim(),
+      invigilatorUnlockPin: settings.invigilatorUnlockPin.trim(),
+      googleIntegration: {
+        ...settings.googleIntegration,
+        clientId: settings.googleIntegration.clientId.trim(),
+        requestedScopes:
+          settings.googleIntegration.requestedScopes.length > 0
+            ? mergeGoogleDefaultScopes(settings.googleIntegration.requestedScopes)
+            : defaultLmsScope("google-classroom").split(/\s+/),
+        connectionStatus: settings.googleIntegration.enabled
+          ? settings.googleIntegration.connectionStatus
+          : "disconnected",
+        lastError: settings.googleIntegration.enabled ? settings.googleIntegration.lastError : undefined
+      }
+    };
+
+    return runAdminAction("save-settings", () => saveSettings(nextSettings), {
       success: "Application settings saved.",
       empty: "Application settings were not saved.",
-      onSuccess: () => setSettingsDirty(false)
+      onSuccess: () => {
+        setSettings(nextSettings);
+        setSettingsDirty(false);
+      }
     });
+  };
 
   const handleSaveDestination = async () => {
     const nextDestination = {
@@ -2807,14 +2882,23 @@ const SettingsPage = () => {
     });
 
   const handleSaveConnection = async () => {
+    const googleScopes = settings.googleIntegration.requestedScopes.length > 0
+      ? settings.googleIntegration.requestedScopes.join(" ")
+      : defaultLmsScope("google-classroom");
     const nextConnection = {
       ...connectionDraft,
       label: connectionDraft.label.trim() || providerLabel(connectionDraft.provider),
-      clientId: connectionDraft.clientId.trim(),
+      clientId:
+        connectionDraft.provider === "google-classroom"
+          ? settings.googleIntegration.clientId.trim()
+          : connectionDraft.clientId.trim(),
       tenantId: connectionDraft.tenantId?.trim() || undefined,
       authorizeUrl: connectionDraft.authorizeUrl?.trim() || undefined,
       tokenUrl: connectionDraft.tokenUrl?.trim() || undefined,
-      scope: connectionDraft.scope.trim() || defaultLmsScope(connectionDraft.provider)
+      scope:
+        connectionDraft.provider === "google-classroom"
+          ? googleScopes
+          : connectionDraft.scope.trim() || defaultLmsScope(connectionDraft.provider)
     };
 
     await runAdminAction("save-lms-connection", () => saveLmsConnection(nextConnection), {
@@ -2839,16 +2923,87 @@ const SettingsPage = () => {
       }
     });
 
-  const handleConnectLms = async () =>
-    runAdminAction("connect-lms", () => connectLmsConnection(connectionDraft.id), {
-      success: "LMS account connected.",
-      empty: "LMS connection did not complete.",
+  const handleConnectLms = async () => {
+    setPendingAction("connect-lms");
+    setActionFeedback({
+      tone: "info",
+      text:
+        connectionDraft.provider === "google-classroom"
+          ? "Connecting Google Classroom..."
+          : "Connecting LMS account..."
+    });
+
+    try {
+      const nextSnapshot = await connectLmsConnection(connectionDraft.id);
+      if (!nextSnapshot) {
+        setActionFeedback({ tone: "error", text: "LMS connection did not complete." });
+        return;
+      }
+
+      const connected =
+        nextSnapshot.lmsConnections.find((candidate) => candidate.id === connectionDraft.id) ??
+        nextSnapshot.lmsConnections[0];
+      if (!connected) {
+        setActionFeedback({ tone: "error", text: "Connected account was not found." });
+        return;
+      }
+
+      selectConnection(connected);
+
+      if (connected.provider !== "google-classroom") {
+        setActionFeedback({ tone: "success", text: "LMS account connected." });
+        return;
+      }
+
+      setActionFeedback({ tone: "info", text: "Connected. Loading Google Classroom classes..." });
+      const courses = await listLmsCourses(connected.id);
+      setConnectionCourses(courses);
+      setActionFeedback({
+        tone: "success",
+        text: `Connected Google Classroom and loaded ${courses.length} class${courses.length === 1 ? "" : "es"}.`
+      });
+    } catch (error) {
+      setConnectionCourses([]);
+      setActionFeedback({
+        tone: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Google Classroom could not connect. Reconnect Google Classroom and try again."
+      });
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const handleSignOutLms = async () =>
+    runAdminAction(
+      "sign-out-lms",
+      () => signOutLmsConnection({ connectionId: connectionDraft.id, revoke: true }),
+      {
+        success: "Signed out and revoked the stored Google authorization.",
+        empty: "Sign-out did not complete.",
+        onSuccess: (nextSnapshot) => {
+          const signedOut =
+            nextSnapshot.lmsConnections.find((candidate) => candidate.id === connectionDraft.id) ??
+            nextSnapshot.lmsConnections[0];
+          if (signedOut) {
+            selectConnection(signedOut);
+          }
+        }
+      }
+    );
+
+  const handleClearLmsTokens = async () =>
+    runAdminAction("clear-lms-tokens", () => clearLmsConnectionTokens(connectionDraft.id), {
+      success: "Stored OAuth tokens cleared from this device.",
+      empty: "Token reset did not complete.",
       onSuccess: (nextSnapshot) => {
-        const connected =
+        const reset =
           nextSnapshot.lmsConnections.find((candidate) => candidate.id === connectionDraft.id) ??
           nextSnapshot.lmsConnections[0];
-        if (connected) {
-          selectConnection(connected);
+        if (reset) {
+          selectConnection(reset);
         }
       }
     });
@@ -2860,10 +3015,8 @@ const SettingsPage = () => {
       onSuccess: (courses) => setConnectionCourses(courses)
     });
 
-  const handleLoadBindingCourseWork = async () => {
-    const binding = packageDraft.studentLmsBinding;
-    const connectionId = binding.connectionId?.trim();
-    if (!connectionId || !binding.courseId.trim()) {
+  const loadBindingCourseWork = async (connectionId: string, courseId: string) => {
+    if (!connectionId || !courseId.trim()) {
       setActionFeedback({
         tone: "error",
         text: "Choose a connected LMS account and class before loading assignments."
@@ -2876,7 +3029,7 @@ const SettingsPage = () => {
       () =>
         listLmsCourseWork({
           connectionId,
-          courseId: binding.courseId
+          courseId
         }),
       {
         success: (items) => `Loaded ${items.length} assignment${items.length === 1 ? "" : "s"}.`,
@@ -2933,6 +3086,22 @@ const SettingsPage = () => {
         }
       }
     );
+  };
+
+  const handleLoadBindingCourseWork = async () => {
+    const binding = packageDraft.studentLmsBinding;
+    await loadBindingCourseWork(binding.connectionId?.trim() ?? "", binding.courseId);
+  };
+
+  const selectBindingAssignment = (assignment: LmsCourseWork) => {
+    updatePackage((current) => ({
+      ...current,
+      studentLmsBinding: {
+        ...current.studentLmsBinding,
+        assignmentId: assignment.id,
+        assignmentLabel: assignment.title
+      }
+    }));
   };
 
   const handleDuplicatePackage = async () => {
@@ -3090,6 +3259,106 @@ const SettingsPage = () => {
         </Card>
       </div>
 
+      <Card className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Google Classroom integration</CardTitle>
+            <CardDescription className="mt-2">
+              Teachers sign in with their school Google account after an admin completes the one-time school setup.
+            </CardDescription>
+          </div>
+          <Badge>{settings.googleIntegration.enabled ? "Enabled" : "Disabled"}</Badge>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <ToggleField
+            label="Enable Google Classroom"
+            checked={settings.googleIntegration.enabled}
+            onChange={(checked) =>
+              updateSettings((current) => ({
+                ...current,
+                googleIntegration: {
+                  ...current.googleIntegration,
+                  enabled: checked,
+                  connectionStatus: checked ? current.googleIntegration.connectionStatus : "disconnected"
+                }
+              }))
+            }
+          />
+          <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(settings.googleIntegration.connectionStatus === "connected" ? "success" : settings.googleIntegration.connectionStatus === "error" ? "error" : "info")}`}>
+            {settings.googleIntegration.connectionStatus === "connected"
+              ? `Connected as ${settings.googleIntegration.accountName || settings.googleIntegration.accountEmail || "Google Classroom"}.`
+              : settings.googleIntegration.connectionStatus === "error"
+                ? settings.googleIntegration.lastError || "Google Classroom connection failed."
+                : settings.googleIntegration.enabled
+                  ? "Google Classroom is ready for teacher sign-in. Connect a teacher account below."
+                  : "School setup is required before teachers can connect Google Classroom."}
+          </div>
+        </div>
+
+        <AdvancedAdminSection
+          title="Advanced admin Google setup"
+          unlocked={adminAdvancedUnlocked}
+          requiresPin={adminUnlockRequiresPin}
+          pinAttempt={adminPinAttempt}
+          unlockError={adminUnlockError}
+          onPinAttemptChange={(value) => {
+            setAdminPinAttempt(value);
+            setAdminUnlockError(null);
+          }}
+          onUnlock={unlockAdvancedAdminSections}
+          onLock={lockAdvancedAdminSections}
+        >
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            These values are for the school administrator. Teachers do not need to know OAuth client IDs or permission scopes.
+          </div>
+
+          <div className="mt-4 grid gap-4">
+            <LabelledField label="Google desktop app client ID">
+              <Input
+                value={settings.googleIntegration.clientId}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    googleIntegration: {
+                      ...current.googleIntegration,
+                      clientId: event.target.value,
+                      connectionStatus:
+                        event.target.value.trim() === current.googleIntegration.clientId.trim()
+                          ? current.googleIntegration.connectionStatus
+                          : "disconnected"
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+
+            <LabelledField label="Requested Google permissions">
+              <Textarea
+                className="min-h-[130px] font-mono text-xs"
+                value={settings.googleIntegration.requestedScopes.join("\n")}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    googleIntegration: {
+                      ...current.googleIntegration,
+                      requestedScopes: splitScopes(event.target.value),
+                      connectionStatus: "disconnected"
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+          </div>
+        </AdvancedAdminSection>
+
+        {settings.googleIntegration.lastConnectedAt ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            Last connected: {formatDateTime(settings.googleIntegration.lastConnectedAt) ?? settings.googleIntegration.lastConnectedAt}
+          </div>
+        ) : null}
+      </Card>
+
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3102,129 +3371,166 @@ const SettingsPage = () => {
             <Badge>{snapshot.lmsConnections.length} connection(s)</Badge>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-            <LabelledField label="School connection">
-              <select
-                className={selectClassName}
-                value={snapshot.lmsConnections.some((candidate) => candidate.id === selectedConnectionId) ? selectedConnectionId : "__new__"}
-                onChange={(event) => {
-                  if (event.target.value === "__new__") {
-                    selectConnection(blankLmsConnection());
-                    return;
-                  }
-
-                  const selected = snapshot.lmsConnections.find((candidate) => candidate.id === event.target.value);
-                  selectConnection(selected ?? null);
-                }}
-              >
-                <option value="__new__">New school connection</option>
-                {snapshot.lmsConnections.map((connection) => (
-                  <option key={connection.id} value={connection.id}>
-                    {connection.label}
-                  </option>
-                ))}
-              </select>
-            </LabelledField>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Button variant="secondary" onClick={() => void handleSaveConnection()} disabled={adminBusy}>
-                {isPending("save-lms-connection") ? "Saving..." : "Save connection"}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => void handleDeleteConnection()}
-                disabled={adminBusy || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
-              >
-                {isPending("delete-lms-connection") ? "Deleting..." : "Delete"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label="LMS">
-              <select
-                className={selectClassName}
-                value={connectionDraft.provider}
-                onChange={(event) => {
-                  const provider = event.target.value as LmsProviderType;
-                  updateConnection((current) => ({
-                    ...current,
-                    provider,
-                    label:
-                      current.label === providerLabel(current.provider) || current.label.trim().length === 0
-                        ? providerLabel(provider)
-                        : current.label,
-                    scope: defaultLmsScope(provider),
-                    tenantId: provider === "microsoft-365" ? current.tenantId || "common" : "",
-                    authorizeUrl: provider === "generic-oauth-lms" ? current.authorizeUrl : "",
-                    tokenUrl: provider === "generic-oauth-lms" ? current.tokenUrl : ""
-                  }));
-                }}
-              >
-                <option value="google-classroom">Google Classroom</option>
-                <option value="microsoft-365">Microsoft 365</option>
-                {connectionDraft.provider === "generic-oauth-lms" ? (
-                  <option value="generic-oauth-lms">Generic OAuth LMS</option>
-                ) : null}
-              </select>
-            </LabelledField>
-            <LabelledField label="Connection name">
-              <Input
-                value={connectionDraft.label}
-                onChange={(event) => updateConnection((current) => ({ ...current, label: event.target.value }))}
-              />
-            </LabelledField>
-          </div>
-
-          <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
-            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">
-              Admin/developer app registration setup
-            </summary>
+          <AdvancedAdminSection
+            title="Advanced connection management"
+            unlocked={adminAdvancedUnlocked}
+            requiresPin={adminUnlockRequiresPin}
+            pinAttempt={adminPinAttempt}
+            unlockError={adminUnlockError}
+            onPinAttemptChange={(value) => {
+              setAdminPinAttempt(value);
+              setAdminUnlockError(null);
+            }}
+            onUnlock={unlockAdvancedAdminSections}
+            onLock={lockAdvancedAdminSections}
+          >
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-              These values are configured once by the school admin or developer. Teachers should not enter their email,
-              password, class code, or assignment link here.
+              Admins can create or repair the saved school connection here. Teachers normally only use Connect Google Classroom.
             </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+              <LabelledField label="School connection">
+                <select
+                  className={selectClassName}
+                  value={snapshot.lmsConnections.some((candidate) => candidate.id === selectedConnectionId) ? selectedConnectionId : "__new__"}
+                  onChange={(event) => {
+                    if (event.target.value === "__new__") {
+                      selectConnection(blankLmsConnection());
+                      return;
+                    }
+
+                    const selected = snapshot.lmsConnections.find((candidate) => candidate.id === event.target.value);
+                    selectConnection(selected ?? null);
+                  }}
+                >
+                  <option value="__new__">New school connection</option>
+                  {snapshot.lmsConnections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.label}
+                    </option>
+                  ))}
+                </select>
+              </LabelledField>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Button variant="secondary" onClick={() => void handleSaveConnection()} disabled={adminBusy}>
+                  {isPending("save-lms-connection") ? "Saving..." : "Save connection"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleDeleteConnection()}
+                  disabled={adminBusy || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+                >
+                  {isPending("delete-lms-connection") ? "Deleting..." : "Delete"}
+                </Button>
+              </div>
+            </div>
+
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <LabelledField label="App registration client ID">
+              <LabelledField label="LMS">
+                <select
+                  className={selectClassName}
+                  value={connectionDraft.provider}
+                  onChange={(event) => {
+                    const provider = event.target.value as LmsProviderType;
+                    updateConnection((current) => ({
+                      ...current,
+                      provider,
+                      label:
+                        current.label === providerLabel(current.provider) || current.label.trim().length === 0
+                          ? providerLabel(provider)
+                          : current.label,
+                      clientId: provider === "google-classroom" ? settings.googleIntegration.clientId : current.clientId,
+                      scope:
+                        provider === "google-classroom"
+                          ? settings.googleIntegration.requestedScopes.join(" ") || defaultLmsScope(provider)
+                          : defaultLmsScope(provider),
+                      tenantId: provider === "microsoft-365" ? current.tenantId || "common" : "",
+                      authorizeUrl: provider === "generic-oauth-lms" ? current.authorizeUrl : "",
+                      tokenUrl: provider === "generic-oauth-lms" ? current.tokenUrl : ""
+                    }));
+                  }}
+                >
+                  <option value="google-classroom">Google Classroom</option>
+                  <option value="microsoft-365">Microsoft 365</option>
+                  {connectionDraft.provider === "generic-oauth-lms" ? (
+                    <option value="generic-oauth-lms">Generic OAuth LMS</option>
+                  ) : null}
+                </select>
+              </LabelledField>
+              <LabelledField label="Connection name">
                 <Input
-                  value={connectionDraft.clientId}
-                  onChange={(event) => updateConnection((current) => ({ ...current, clientId: event.target.value }))}
+                  value={connectionDraft.label}
+                  onChange={(event) => updateConnection((current) => ({ ...current, label: event.target.value }))}
                 />
               </LabelledField>
-              {connectionDraft.provider === "microsoft-365" ? (
+            </div>
+          </AdvancedAdminSection>
+
+          {connectionDraft.provider === "google-classroom" ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Teachers only need to connect their school Google account. If the button is disabled, ask an admin to finish the Google Classroom setup above.
+            </div>
+          ) : (
+            <AdvancedAdminSection
+              title="Admin/developer app registration setup"
+              unlocked={adminAdvancedUnlocked}
+              requiresPin={adminUnlockRequiresPin}
+              pinAttempt={adminPinAttempt}
+              unlockError={adminUnlockError}
+              onPinAttemptChange={(value) => {
+                setAdminPinAttempt(value);
+                setAdminUnlockError(null);
+              }}
+              onUnlock={unlockAdvancedAdminSections}
+              onLock={lockAdvancedAdminSections}
+            >
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                These values are configured once by the school admin or developer. Teachers should not enter their email,
+                password, class code, or assignment link here.
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <LabelledField label="App registration client ID">
+                  <Input
+                    value={connectionDraft.clientId}
+                    onChange={(event) => updateConnection((current) => ({ ...current, clientId: event.target.value }))}
+                  />
+                </LabelledField>
+                {connectionDraft.provider === "microsoft-365" ? (
                 <LabelledField label="Microsoft tenant">
                   <Input
                     value={connectionDraft.tenantId ?? ""}
                     onChange={(event) => updateConnection((current) => ({ ...current, tenantId: event.target.value }))}
                   />
                 </LabelledField>
-              ) : null}
-              {connectionDraft.provider === "generic-oauth-lms" ? (
+                ) : null}
+                {connectionDraft.provider === "generic-oauth-lms" ? (
                 <LabelledField label="Authorize URL">
                   <Input
                     value={connectionDraft.authorizeUrl ?? ""}
                     onChange={(event) => updateConnection((current) => ({ ...current, authorizeUrl: event.target.value }))}
                   />
                 </LabelledField>
-              ) : null}
-              {connectionDraft.provider === "generic-oauth-lms" ? (
+                ) : null}
+                {connectionDraft.provider === "generic-oauth-lms" ? (
                 <LabelledField label="Token URL">
                   <Input
                     value={connectionDraft.tokenUrl ?? ""}
                     onChange={(event) => updateConnection((current) => ({ ...current, tokenUrl: event.target.value }))}
                   />
                 </LabelledField>
-              ) : null}
-            </div>
-            <div className="mt-4">
-              <LabelledField label="Approved permission scopes">
-                <Textarea
-                  className="min-h-[110px] font-mono text-xs"
-                  value={connectionDraft.scope}
-                  onChange={(event) => updateConnection((current) => ({ ...current, scope: event.target.value }))}
-                />
-              </LabelledField>
-            </div>
-          </details>
+                ) : null}
+              </div>
+              <div className="mt-4">
+                <LabelledField label="Approved permission scopes">
+                  <Textarea
+                    className="min-h-[110px] font-mono text-xs"
+                    value={connectionDraft.scope}
+                    onChange={(event) => updateConnection((current) => ({ ...current, scope: event.target.value }))}
+                  />
+                </LabelledField>
+              </div>
+            </AdvancedAdminSection>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <Button
@@ -3232,13 +3538,13 @@ const SettingsPage = () => {
               onClick={() => void handleConnectLms()}
               disabled={
                 adminBusy ||
-                !hasAdminLmsSetup(connectionDraft) ||
+                !connectionHasAdminSetup ||
                 !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)
               }
             >
               {isPending("connect-lms")
                 ? "Connecting..."
-                : hasAdminLmsSetup(connectionDraft)
+                : connectionHasAdminSetup
                   ? lmsConnectActionLabel(connectionDraft)
                   : "Admin setup required"}
             </Button>
@@ -3249,27 +3555,81 @@ const SettingsPage = () => {
             >
               {isPending("load-lms-courses") ? "Loading..." : "Load classes"}
             </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleSignOutLms()}
+              disabled={adminBusy || connectionDraft.status !== "connected" || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+            >
+              {isPending("sign-out-lms") ? "Signing out..." : "Sign out"}
+            </Button>
           </div>
+
+          <AdvancedAdminSection
+            title="Advanced account support"
+            unlocked={adminAdvancedUnlocked}
+            requiresPin={adminUnlockRequiresPin}
+            pinAttempt={adminPinAttempt}
+            unlockError={adminUnlockError}
+            onPinAttemptChange={(value) => {
+              setAdminPinAttempt(value);
+              setAdminUnlockError(null);
+            }}
+            onUnlock={unlockAdvancedAdminSections}
+            onLock={lockAdvancedAdminSections}
+          >
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+              Use token reset only when reconnecting does not work or when support asks you to clear the local saved authorization.
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => void handleClearLmsTokens()}
+                disabled={adminBusy || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+              >
+                {isPending("clear-lms-tokens") ? "Clearing..." : "Reset stored tokens"}
+              </Button>
+            </div>
+          </AdvancedAdminSection>
         </Card>
 
         <Card className="space-y-5">
-          <CardTitle>Connection status</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Classroom classes</CardTitle>
+              <CardDescription className="mt-2">
+                Verify the connected teacher account can read Google Classroom classes.
+              </CardDescription>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => void handleLoadCourses()}
+              disabled={adminBusy || connectionDraft.status !== "connected" || !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)}
+            >
+              {isPending("load-lms-courses") ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
           <div className="grid gap-3">
             <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(connectionDraft.status === "connected" ? "success" : connectionDraft.status === "error" ? "error" : "info")}`}>
               {connectionDraft.status === "connected"
                 ? `Connected as ${connectionDraft.accountName || connectionDraft.accountEmail || connectionDraft.label}.`
                 : connectionDraft.status === "error"
                   ? connectionDraft.lastError || "Connection failed."
-                  : hasAdminLmsSetup(connectionDraft)
+                  : connectionHasAdminSetup
                     ? "Save the connection, then connect with the teacher's school account in the system browser."
-                    : "Admin setup is optional. To use LMS turn-in, a school admin must first add the app registration in the admin/developer setup section."}
+                    : connectionDraft.provider === "google-classroom"
+                      ? "School setup is required before teachers can connect Google Classroom."
+                      : "Admin setup is optional. To use LMS turn-in, a school admin must first add the app registration in the admin/developer setup section."}
             </div>
             {connectionDraft.accountEmail ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 Account: {connectionDraft.accountName || "Connected user"} / {connectionDraft.accountEmail}
               </div>
             ) : null}
-            {connectionCourses.length > 0 ? (
+            {isPending("connect-lms") && connectionDraft.provider === "google-classroom" ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                Loading Google Classroom classes...
+              </div>
+            ) : connectionCourses.length > 0 ? (
               <div className="grid gap-2">
                 {connectionCourses.map((course) => (
                   <div key={course.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800">
@@ -3280,12 +3640,38 @@ const SettingsPage = () => {
               </div>
             ) : (
               <CardDescription>
-                After connecting, load classes to verify the teacher account can see Classroom courses or Microsoft education classes.
+                {connectionDraft.status === "connected"
+                  ? "No classes are loaded yet. Use Refresh to load the connected teacher's classes."
+                  : "After connecting, Lockedscreen will load the teacher's Google Classroom classes here."}
               </CardDescription>
             )}
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Security constraint: teacher OAuth tokens are kept only on the admin device. They are not packed into `.lscp` files sent to students.
-            </div>
+            {connectionDraft.provider === "google-classroom" && connectionDraft.status === "error" ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Reconnect Google Classroom if the sign-in expired or Google needs the teacher to approve Classroom access again.
+                <div className="mt-3">
+                  <Button variant="secondary" onClick={() => void handleConnectLms()} disabled={adminBusy || !connectionHasAdminSetup}>
+                    Reconnect Google Classroom
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            <AdvancedAdminSection
+              title="Advanced connection details"
+              unlocked={adminAdvancedUnlocked}
+              requiresPin={adminUnlockRequiresPin}
+              pinAttempt={adminPinAttempt}
+              unlockError={adminUnlockError}
+              onPinAttemptChange={(value) => {
+                setAdminPinAttempt(value);
+                setAdminUnlockError(null);
+              }}
+              onUnlock={unlockAdvancedAdminSections}
+              onLock={lockAdvancedAdminSections}
+            >
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                Teacher OAuth tokens are kept only on this device and are not packed into `.lscp` files sent to students.
+              </div>
+            </AdvancedAdminSection>
           </div>
         </Card>
       </div>
@@ -3386,6 +3772,7 @@ const SettingsPage = () => {
                 className={selectClassName}
                 value={packageDraft.studentLmsBinding.courseId}
                 onChange={(event) => {
+                  const courseId = event.target.value;
                   const selectedCourse = connectionCourses.find((course) => course.id === event.target.value);
                   setBindingCourseWork([]);
                   setBindingStudents([]);
@@ -3393,7 +3780,7 @@ const SettingsPage = () => {
                     ...current,
                     studentLmsBinding: {
                       ...current.studentLmsBinding,
-                      courseId: event.target.value,
+                      courseId,
                       courseLabel: selectedCourse?.name ?? current.studentLmsBinding.courseLabel,
                       assignmentId: "",
                       assignmentLabel: ""
@@ -3404,6 +3791,9 @@ const SettingsPage = () => {
                       assignedCandidateIds: []
                     }
                   }));
+                  if (packageDraft.studentLmsBinding.connectionId && courseId) {
+                    void loadBindingCourseWork(packageDraft.studentLmsBinding.connectionId, courseId);
+                  }
                 }}
               >
                 <option value="">Load classes from the connected account</option>
@@ -3447,7 +3837,7 @@ const SettingsPage = () => {
                 <option value="">Load assignments from the selected class</option>
                 {bindingCourseWork.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.title}
+                    {item.title}{item.dueAt ? ` - due ${formatDateTime(item.dueAt) ?? item.dueAt}` : ""}
                   </option>
                 ))}
               </select>
@@ -3460,6 +3850,45 @@ const SettingsPage = () => {
               {isPending("load-lms-coursework") ? "Loading..." : "Load assignments"}
             </Button>
           </div>
+
+          {packageDraft.studentLmsBinding.courseLabel ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Selected class: <span className="font-semibold text-slate-900 dark:text-slate-50">{packageDraft.studentLmsBinding.courseLabel}</span>
+            </div>
+          ) : null}
+
+          {isPending("load-lms-coursework") ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Loading assignments for the selected class...
+            </div>
+          ) : bindingCourseWork.length > 0 ? (
+            <div className="grid gap-2">
+              {bindingCourseWork.map((item) => {
+                const selected = packageDraft.studentLmsBinding.assignmentId === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                      selected
+                        ? "border-teal-500 bg-teal-50 text-teal-950 dark:border-teal-400 dark:bg-teal-950 dark:text-teal-50"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    }`}
+                    onClick={() => selectBindingAssignment(item)}
+                  >
+                    <span className="block font-semibold text-slate-900 dark:text-slate-50">{item.title}</span>
+                    <span className="mt-1 block text-xs">
+                      {item.dueAt ? `Due ${formatDateTime(item.dueAt) ?? item.dueAt}` : "No due date listed"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : packageDraft.studentLmsBinding.courseId ? (
+            <CardDescription>
+              No assignments are loaded yet. Select a class or use Load assignments.
+            </CardDescription>
+          ) : null}
 
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3525,92 +3954,10 @@ const SettingsPage = () => {
             )}
           </div>
 
-          <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
-            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">
-              Admin/developer package targeting details
-            </summary>
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-              These values are copied from the connected school account and selected class. Use this section only for admin
-              troubleshooting or developer-supported deployments.
-            </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <LabelledField label="App registration client ID">
-                <Input
-                  value={packageDraft.studentLmsBinding.clientId}
-                  onChange={(event) =>
-                    updatePackage((current) => ({
-                      ...current,
-                      studentLmsBinding: {
-                        ...current.studentLmsBinding,
-                        clientId: event.target.value
-                      }
-                    }))
-                  }
-                />
-              </LabelledField>
-              {packageDraft.studentLmsBinding.provider === "microsoft-365" ? (
-                <LabelledField label="Microsoft tenant">
-                  <Input
-                    value={packageDraft.studentLmsBinding.tenantId ?? ""}
-                    onChange={(event) =>
-                      updatePackage((current) => ({
-                        ...current,
-                        studentLmsBinding: {
-                          ...current.studentLmsBinding,
-                          tenantId: event.target.value
-                        }
-                      }))
-                    }
-                  />
-                </LabelledField>
-              ) : null}
-              <LabelledField label="Class / course ID">
-                <Input
-                  value={packageDraft.studentLmsBinding.courseId}
-                  onChange={(event) =>
-                    updatePackage((current) => ({
-                      ...current,
-                      studentLmsBinding: {
-                        ...current.studentLmsBinding,
-                        courseId: event.target.value
-                      }
-                    }))
-                  }
-                />
-              </LabelledField>
-              <LabelledField label="Assignment ID">
-                <Input
-                  value={packageDraft.studentLmsBinding.assignmentId}
-                  onChange={(event) =>
-                    updatePackage((current) => ({
-                      ...current,
-                      studentLmsBinding: {
-                        ...current.studentLmsBinding,
-                        assignmentId: event.target.value
-                      }
-                    }))
-                  }
-                />
-              </LabelledField>
-            </div>
-            <div className="mt-4">
-              <LabelledField label="Student permission scopes">
-                <Textarea
-                  className="min-h-[110px] font-mono text-xs"
-                  value={packageDraft.studentLmsBinding.scope}
-                  onChange={(event) =>
-                    updatePackage((current) => ({
-                      ...current,
-                      studentLmsBinding: {
-                        ...current.studentLmsBinding,
-                        scope: event.target.value
-                      }
-                    }))
-                  }
-                />
-              </LabelledField>
-            </div>
-          </details>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            Google and Microsoft app details are managed in the Admin Console connection settings. This package keeps only
+            the selected teacher account, class, assignment, and student access list.
+          </div>
         </Card>
 
         <Card className="space-y-5">
@@ -4475,11 +4822,28 @@ const SettingsPage = () => {
           <CardTitle>Kiosk / Lockdown</CardTitle>
           <LabelledField label="Invigilator unlock PIN">
             <Input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
               value={settings.invigilatorUnlockPin}
               onChange={(event) =>
                 updateSettings((current) => ({
                   ...current,
                   invigilatorUnlockPin: event.target.value
+                }))
+              }
+            />
+          </LabelledField>
+          <LabelledField label="Admin advanced settings PIN">
+            <Input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={settings.adminUnlockPin}
+              onChange={(event) =>
+                updateSettings((current) => ({
+                  ...current,
+                  adminUnlockPin: event.target.value
                 }))
               }
             />
@@ -4714,6 +5078,21 @@ const StudentLmsTurnInPanel = ({
       ) : null}
       {state?.lastError ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{state.lastError}</div>
+      ) : null}
+      {binding.provider === "google-classroom" && state?.gradeSyncStatus ? (
+        <div
+          className={`rounded-xl border px-3 py-2 text-sm ${
+            state.gradeSyncStatus === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+              : state.gradeSyncStatus === "failed"
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          }`}
+        >
+          Grade sync: {state.gradeSyncStatus}
+          {typeof state.gradeValue === "number" ? ` (${state.gradeValue} points)` : ""}
+          {state.gradeSyncError ? ` - ${state.gradeSyncError}` : ""}
+        </div>
       ) : null}
       {state?.externalReference ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-all text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -5726,6 +6105,102 @@ const ToggleField = ({
     {label}
   </label>
 );
+
+const AdvancedAdminSection = ({
+  title,
+  unlocked,
+  requiresPin,
+  pinAttempt,
+  unlockError,
+  onPinAttemptChange,
+  onUnlock,
+  onLock,
+  children
+}: {
+  title: string;
+  unlocked: boolean;
+  requiresPin: boolean;
+  pinAttempt: string;
+  unlockError: string | null;
+  onPinAttemptChange: (value: string) => void;
+  onUnlock: () => void;
+  onLock: () => void;
+  children: ReactNode;
+}) => {
+  if (!unlocked) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-100">
+              <Lock className="size-4" />
+              {title}
+            </div>
+            <CardDescription>
+              Admin unlock is required for technical setup, support, and token management.
+            </CardDescription>
+          </div>
+          <Badge className="bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100">Locked</Badge>
+        </div>
+
+        {!requiresPin ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            No invigilator PIN is set. Configure one in Kiosk / Lockdown to require a PIN before opening advanced settings.
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          {requiresPin ? (
+            <LabelledField label="Admin PIN">
+              <Input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                value={pinAttempt}
+                onChange={(event) => onPinAttemptChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    onUnlock();
+                  }
+                }}
+                placeholder="Enter admin PIN"
+              />
+            </LabelledField>
+          ) : (
+            <div className="text-sm text-slate-600 dark:text-slate-300">
+              Unlocking will expose admin-only configuration on this screen.
+            </div>
+          )}
+          <Button variant="secondary" onClick={onUnlock}>
+            <Lock className="size-4" />
+            Unlock
+          </Button>
+        </div>
+        {unlockError ? <div className="mt-2 text-sm font-medium text-rose-700">{unlockError}</div> : null}
+      </div>
+    );
+  }
+
+  return (
+    <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-800">
+      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3 font-semibold text-slate-800 dark:text-slate-100">
+        <span>{title}</span>
+        <button
+          type="button"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          onClick={(event) => {
+            event.preventDefault();
+            onLock();
+          }}
+        >
+          Lock
+        </button>
+      </summary>
+      {children}
+    </details>
+  );
+};
 
 const PolicySelect = ({
   label,
