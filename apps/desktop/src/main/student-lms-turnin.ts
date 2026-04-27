@@ -234,19 +234,24 @@ const exchangeAuthorizationCode = async (
   redirectUri: string,
   verifier: string
 ): Promise<StudentOAuthTokens> => {
+  const body = new URLSearchParams({
+    client_id: binding.clientId,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+    scope: binding.scope.trim() || defaultStudentScope(binding.provider)
+  });
+  if (binding.clientSecret?.trim()) {
+    body.set("client_secret", binding.clientSecret.trim());
+  }
+
   const response = await fetch(providerTokenUrl(binding), {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: new URLSearchParams({
-      client_id: binding.clientId,
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-      scope: binding.scope.trim() || defaultStudentScope(binding.provider)
-    })
+    body
   });
 
   const payload = (await response.json()) as Record<string, unknown>;

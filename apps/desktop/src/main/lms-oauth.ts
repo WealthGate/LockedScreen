@@ -186,19 +186,24 @@ const exchangeAuthorizationCode = async (
   redirectUri: string,
   verifier: string
 ): Promise<OAuthConnectionSecrets> => {
+  const body = new URLSearchParams({
+    client_id: connection.clientId,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+    scope: connection.scope.trim() || providerDefaultScope(connection.provider)
+  });
+  if (connection.clientSecret?.trim()) {
+    body.set("client_secret", connection.clientSecret.trim());
+  }
+
   const response = await fetch(providerTokenUrl(connection), {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: new URLSearchParams({
-      client_id: connection.clientId,
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-      scope: connection.scope.trim() || providerDefaultScope(connection.provider)
-    })
+    body
   });
 
   const payload = (await response.json()) as Record<string, unknown>;
@@ -218,17 +223,22 @@ const refreshConnectionToken = async (
   connection: LmsConnection,
   refreshToken: string
 ): Promise<OAuthConnectionSecrets> => {
+  const body = new URLSearchParams({
+    client_id: connection.clientId,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    scope: connection.scope.trim() || providerDefaultScope(connection.provider)
+  });
+  if (connection.clientSecret?.trim()) {
+    body.set("client_secret", connection.clientSecret.trim());
+  }
+
   const response = await fetch(providerTokenUrl(connection), {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: new URLSearchParams({
-      client_id: connection.clientId,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      scope: connection.scope.trim() || providerDefaultScope(connection.provider)
-    })
+    body
   });
 
   const payload = (await response.json()) as Record<string, unknown>;
@@ -316,6 +326,7 @@ export const beginLmsOAuthConnection = async (
       ...connection,
       status: "connected",
       clientId: settings.clientId,
+      clientSecret: settings.clientSecret,
       accountEmail: result.profile.email,
       accountName: result.profile.name,
       lastConnectedAt: new Date().toISOString(),

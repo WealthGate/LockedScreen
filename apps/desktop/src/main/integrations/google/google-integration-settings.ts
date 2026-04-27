@@ -19,6 +19,7 @@ export const defaultGoogleClassroomScopes = [
 export const createDefaultGoogleIntegrationSettings = (): GoogleIntegrationSettings => ({
   enabled: false,
   clientId: "",
+  clientSecret: "",
   requestedScopes: [...defaultGoogleClassroomScopes],
   connectionStatus: "disconnected",
   accountEmail: "",
@@ -40,6 +41,7 @@ export const normalizeGoogleIntegrationSettings = (
     ...(settings ?? {}),
     enabled: settings?.enabled === true,
     clientId: settings?.clientId?.trim() ?? "",
+    clientSecret: settings?.clientSecret?.trim() ?? "",
     requestedScopes: mergedScopes,
     connectionStatus: normalizeConnectionStatus(settings?.connectionStatus),
     accountEmail: settings?.accountEmail?.trim() ?? "",

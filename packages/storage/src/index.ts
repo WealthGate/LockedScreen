@@ -42,6 +42,7 @@ const defaultGoogleClassroomScopes = [
 const defaultGoogleIntegration = (): GoogleIntegrationSettings => ({
   enabled: false,
   clientId: "",
+  clientSecret: "",
   requestedScopes: [...defaultGoogleClassroomScopes],
   connectionStatus: "disconnected",
   accountEmail: "",
@@ -141,6 +142,7 @@ const defaultStudentLmsBinding = (): StudentLmsBinding => ({
   provider: "google-classroom",
   connectionId: undefined,
   clientId: "",
+  clientSecret: undefined,
   tenantId: "",
   scope: "",
   courseId: "",
@@ -157,7 +159,8 @@ const normalizeExam = (exam: Exam): Exam => ({
 const normalizeStudentLmsBinding = (binding: StudentLmsBinding | null | undefined): StudentLmsBinding => ({
   ...defaultStudentLmsBinding(),
   ...(binding ?? {}),
-  clientId: binding?.clientId ?? "",
+  clientId: binding?.clientId?.trim() ?? "",
+  clientSecret: binding?.clientSecret?.trim() || undefined,
   scope: binding?.scope ?? "",
   courseId: binding?.courseId ?? "",
   assignmentId: binding?.assignmentId ?? ""
@@ -185,6 +188,7 @@ const normalizeResultDestination = (destination: ResultDestination): ResultDesti
 
 const normalizeLmsConnection = (connection: LmsConnection): LmsConnection => ({
   ...connection,
+  clientSecret: connection.clientSecret?.trim() || undefined,
   scope: connection.scope ?? "",
   status: connection.status ?? "disconnected"
 });
@@ -202,6 +206,7 @@ const normalizeGoogleIntegration = (
     ...(settings ?? {}),
     enabled: settings?.enabled === true,
     clientId: settings?.clientId?.trim() ?? "",
+    clientSecret: settings?.clientSecret?.trim() ?? "",
     requestedScopes: mergedScopes,
     connectionStatus:
       settings?.connectionStatus === "connected" || settings?.connectionStatus === "error"

@@ -152,19 +152,24 @@ const exchangeAuthorizationCode = async (
   redirectUri: string,
   verifier: string
 ): Promise<OAuthTokenBundle> => {
+  const body = new URLSearchParams({
+    client_id: settings.clientId,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+    scope: googleScopesToString(settings)
+  });
+  if (settings.clientSecret?.trim()) {
+    body.set("client_secret", settings.clientSecret.trim());
+  }
+
   const response = await fetch(googleClassroomDesktopOAuth.tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: new URLSearchParams({
-      client_id: settings.clientId,
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-      scope: googleScopesToString(settings)
-    })
+    body
   });
 
   const payload = (await response.json()) as Record<string, unknown>;
@@ -184,17 +189,22 @@ const refreshToken = async (
   settings: GoogleIntegrationSettings,
   refreshTokenValue: string
 ): Promise<OAuthTokenBundle> => {
+  const body = new URLSearchParams({
+    client_id: settings.clientId,
+    grant_type: "refresh_token",
+    refresh_token: refreshTokenValue,
+    scope: googleScopesToString(settings)
+  });
+  if (settings.clientSecret?.trim()) {
+    body.set("client_secret", settings.clientSecret.trim());
+  }
+
   const response = await fetch(googleClassroomDesktopOAuth.tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: new URLSearchParams({
-      client_id: settings.clientId,
-      grant_type: "refresh_token",
-      refresh_token: refreshTokenValue,
-      scope: googleScopesToString(settings)
-    })
+    body
   });
 
   const payload = (await response.json()) as Record<string, unknown>;

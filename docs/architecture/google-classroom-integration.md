@@ -4,8 +4,8 @@ Lockedscreen separates Google Classroom integration into two data classes:
 
 1. Admin integration configuration
    - Stored in normal Lockedscreen app state.
-   - Contains non-secret deployment settings such as enabled/disabled state, the Google OAuth Desktop app client ID, requested scopes, and connection status metadata.
-   - This data is safe to back up with the rest of the application configuration because it does not contain OAuth access tokens or refresh tokens.
+   - Contains deployment settings such as enabled/disabled state, the Google OAuth Desktop app client ID, the Desktop app client secret when Google requires it, requested scopes, and connection status metadata.
+   - This data does not contain OAuth access tokens or refresh tokens. The Desktop app client secret is hidden in admin-only UI because teachers do not need to see it, but Google treats installed-app client secrets as app registration metadata rather than a user token.
 
 2. Per-teacher OAuth tokens
    - Stored in the local OAuth vault, not in the app state JSON.

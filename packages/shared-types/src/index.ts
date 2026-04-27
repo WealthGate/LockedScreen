@@ -156,6 +156,7 @@ export interface LmsConnection {
   provider: LmsProviderType;
   status: LmsConnectionStatus;
   clientId: string;
+  clientSecret?: string;
   tenantId?: string;
   authorizeUrl?: string;
   tokenUrl?: string;
@@ -195,6 +196,7 @@ export interface StudentLmsBinding {
   provider: StudentLmsProviderType;
   connectionId?: string;
   clientId: string;
+  clientSecret?: string;
   tenantId?: string;
   scope: string;
   courseId: string;
@@ -219,6 +221,7 @@ export interface StudentLmsTurnInState {
 export interface GoogleIntegrationSettings {
   enabled: boolean;
   clientId: string;
+  clientSecret?: string;
   requestedScopes: string[];
   connectionStatus: LmsConnectionStatus;
   accountEmail?: string;

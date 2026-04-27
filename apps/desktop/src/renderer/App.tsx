@@ -200,6 +200,7 @@ const blankLmsConnection = (provider: LmsProviderType = "google-classroom"): Lms
     provider,
     status: "disconnected",
     clientId: "",
+    clientSecret: "",
     tenantId: provider === "microsoft-365" ? "common" : "",
     authorizeUrl: "",
     tokenUrl: "",
@@ -229,6 +230,7 @@ const blankStudentLmsBinding = (provider: StudentLmsProviderType = "google-class
   provider,
   connectionId: "",
   clientId: "",
+  clientSecret: undefined,
   tenantId: provider === "microsoft-365" ? "common" : "",
   scope: defaultStudentLmsScope(provider),
   courseId: "",
@@ -2712,6 +2714,7 @@ const SettingsPage = () => {
       ...packageDraft.studentLmsBinding,
       connectionId: packageDraft.studentLmsBinding.connectionId?.trim() || undefined,
       clientId: packageDraft.studentLmsBinding.clientId.trim(),
+      clientSecret: packageDraft.studentLmsBinding.clientSecret?.trim() || undefined,
       tenantId: packageDraft.studentLmsBinding.provider === "microsoft-365"
         ? packageDraft.studentLmsBinding.tenantId?.trim() || "common"
         : undefined,
@@ -2825,6 +2828,7 @@ const SettingsPage = () => {
       googleIntegration: {
         ...settings.googleIntegration,
         clientId: settings.googleIntegration.clientId.trim(),
+        clientSecret: settings.googleIntegration.clientSecret?.trim() ?? "",
         requestedScopes:
           settings.googleIntegration.requestedScopes.length > 0
             ? mergeGoogleDefaultScopes(settings.googleIntegration.requestedScopes)
@@ -2892,6 +2896,10 @@ const SettingsPage = () => {
         connectionDraft.provider === "google-classroom"
           ? settings.googleIntegration.clientId.trim()
           : connectionDraft.clientId.trim(),
+      clientSecret:
+        connectionDraft.provider === "google-classroom"
+          ? settings.googleIntegration.clientSecret?.trim() || undefined
+          : connectionDraft.clientSecret?.trim() || undefined,
       tenantId: connectionDraft.tenantId?.trim() || undefined,
       authorizeUrl: connectionDraft.authorizeUrl?.trim() || undefined,
       tokenUrl: connectionDraft.tokenUrl?.trim() || undefined,
@@ -3333,6 +3341,27 @@ const SettingsPage = () => {
               />
             </LabelledField>
 
+            <LabelledField label="Google desktop app client secret">
+              <Input
+                type="password"
+                autoComplete="off"
+                value={settings.googleIntegration.clientSecret ?? ""}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    googleIntegration: {
+                      ...current.googleIntegration,
+                      clientSecret: event.target.value,
+                      connectionStatus:
+                        event.target.value.trim() === (current.googleIntegration.clientSecret ?? "").trim()
+                          ? current.googleIntegration.connectionStatus
+                          : "disconnected"
+                    }
+                  }))
+                }
+              />
+            </LabelledField>
+
             <LabelledField label="Requested Google permissions">
               <Textarea
                 className="min-h-[130px] font-mono text-xs"
@@ -3440,6 +3469,10 @@ const SettingsPage = () => {
                           ? providerLabel(provider)
                           : current.label,
                       clientId: provider === "google-classroom" ? settings.googleIntegration.clientId : current.clientId,
+                      clientSecret:
+                        provider === "google-classroom"
+                          ? settings.googleIntegration.clientSecret?.trim() || undefined
+                          : current.clientSecret,
                       scope:
                         provider === "google-classroom"
                           ? settings.googleIntegration.requestedScopes.join(" ") || defaultLmsScope(provider)
@@ -3743,6 +3776,7 @@ const SettingsPage = () => {
                       connectionId: selectedConnection?.id ?? "",
                       provider: selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom",
                       clientId: selectedConnection?.clientId ?? current.studentLmsBinding.clientId,
+                      clientSecret: selectedConnection?.clientSecret ?? current.studentLmsBinding.clientSecret,
                       tenantId:
                         selectedConnection?.provider === "microsoft-365"
                           ? (selectedConnection.tenantId ?? "common")
