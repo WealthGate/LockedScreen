@@ -4469,6 +4469,9 @@ const SettingsPage = () => {
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               Teachers sign in with their normal school account. If the school has not set up the app connection yet, a school IT/admin may need to complete that one-time setup before class lists and student turn-in can work.
             </div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Posting a package to Classroom requires Google Classroom write permission and Google Drive file permission. If posting fails after an update, sign out and reconnect the teacher Google account so Google can ask for the new permissions.
+            </div>
           </div>
         </Card>
       </div>
@@ -4600,12 +4603,31 @@ const SettingsPage = () => {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label={destinationDraft.type === "google-sheets" ? "Google Sheet link" : "Endpoint URL"}>
+            <LabelledField
+              label={
+                destinationDraft.type === "google-classroom-grade-sync"
+                  ? "Grade-sync server URL"
+                  : destinationDraft.type === "google-sheets"
+                    ? "Google Sheet link"
+                    : "Endpoint URL"
+              }
+            >
               <Input
-                placeholder={destinationDraft.type === "google-sheets" ? "https://docs.google.com/spreadsheets/d/..." : "https://..."}
+                placeholder={
+                  destinationDraft.type === "google-classroom-grade-sync"
+                    ? "https://school-sync.example.com/lockedscreen/grade-sync"
+                    : destinationDraft.type === "google-sheets"
+                      ? "https://docs.google.com/spreadsheets/d/..."
+                      : "https://..."
+                }
                 value={destinationDraft.endpointUrl}
                 onChange={(event) => updateDestination((current) => ({ ...current, endpointUrl: event.target.value }))}
               />
+              {destinationDraft.type === "google-classroom-grade-sync" ? (
+                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                  This is not used for posting the package to Classroom. It is the school-owned server address that receives student scores after submission and writes grades back to Classroom.
+                </div>
+              ) : null}
             </LabelledField>
             {destinationDraft.type === "google-sheets" ? (
               <LabelledField label="Teacher Google account">
@@ -4748,6 +4770,9 @@ const SettingsPage = () => {
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
               Google Classroom grade sync server: point the endpoint URL to the school-owned grade-sync bridge. The app sends the local score; the server owns the teacher authorization and writes the grade into Classroom.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              The endpoint URL comes from the school IT/admin after they deploy the grade-sync bridge or Apps Script web app. It is usually a secure HTTPS address ending in an API route or `/exec`.
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
               Microsoft Teams or generic LMS: use a school-owned middleware endpoint, webhook, or automation flow that receives Lockedscreen results and pushes them into the LMS.

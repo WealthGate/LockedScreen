@@ -1,9 +1,14 @@
+import { readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+
 import { app, BrowserWindow, ipcMain } from "electron";
 import updater from "electron-updater";
 
 import type { AppUpdateState } from "@lockedscreen/shared-types";
 
 const { autoUpdater } = updater;
+
+const updateCacheFilePattern = /lockedscreen.*\.(exe|blockmap|yml)$/i;
 
 let updateState: AppUpdateState = {
   status: "idle",
@@ -41,9 +46,34 @@ const friendlyUpdateError = (error: unknown): string => {
   return message || "Unable to check for updates right now.";
 };
 
+const cleanupOldUpdateFiles = async (): Promise<void> => {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  const currentVersion = app.getVersion();
+  const localAppData = process.env.LOCALAPPDATA;
+  const candidateDirectories = [
+    localAppData ? join(localAppData, "lockedscreen-updater") : "",
+    localAppData ? join(localAppData, "Lockedscreen-updater") : "",
+    join(app.getPath("userData"), "pending")
+  ].filter(Boolean);
+
+  for (const directory of candidateDirectories) {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && updateCacheFilePattern.test(entry.name) && !entry.name.includes(currentVersion))
+        .map((entry) => rm(join(directory, entry.name), { force: true }).catch(() => undefined))
+    );
+  }
+};
+
 export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): void => {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+
+  void cleanupOldUpdateFiles();
 
   autoUpdater.on("checking-for-update", () => {
     setUpdateState(getMainWindow(), {

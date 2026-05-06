@@ -101,6 +101,28 @@ const readClassroomJson = async <T>(response: Response): Promise<T> => {
   return payload as T;
 };
 
+const requiredPublishScopes = [
+  "https://www.googleapis.com/auth/classroom.coursework.students",
+  "https://www.googleapis.com/auth/drive.file"
+] as const;
+
+const assertPublishScopesConfigured = (settings: GoogleIntegrationSettings): void => {
+  const configuredScopes = new Set(settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean));
+  const missingScopes = requiredPublishScopes.filter((scope) => !configuredScopes.has(scope));
+  if (missingScopes.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Posting a package to Google Classroom needs these Google permissions: ${missingScopes.join(", ")}. Ask an admin to save the Google Classroom settings, then reconnect the teacher Google account.`
+  );
+};
+
+const classroomPublishPermissionError = (): Error =>
+  new Error(
+    "Posting this package needs Google Classroom write permission and Google Drive file permission. In Google Cloud, make sure the OAuth consent screen includes classroom.coursework.students and drive.file, then sign out and reconnect the teacher Google account in Lockedscreen."
+  );
+
 export class GoogleClassroomService implements GoogleClassroomApi {
   constructor(private readonly oauth: GoogleOAuthFlow) {}
 
@@ -217,6 +239,8 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult> {
+    assertPublishScopesConfigured(settings);
+
     const normalizedCourseId = request.courseId.trim();
     if (!normalizedCourseId) {
       throw new Error("Select a Google Classroom class before posting the package.");
@@ -252,7 +276,15 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         body: uploadBody
       }
     );
-    const driveFile = await readClassroomJson<Record<string, unknown>>(uploadResponse);
+    let driveFile: Record<string, unknown>;
+    try {
+      driveFile = await readClassroomJson<Record<string, unknown>>(uploadResponse);
+    } catch (error) {
+      if ((error as ClassroomRequestError).status === 403) {
+        throw classroomPublishPermissionError();
+      }
+      throw error;
+    }
     const driveFileId = String(driveFile.id ?? "");
     if (!driveFileId) {
       throw new Error("Google Drive did not return a file id for the exported package.");
@@ -290,13 +322,20 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         body: JSON.stringify(courseWorkBody)
       }
     );
-    const courseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
+    try {
+      const courseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
 
-    return {
-      courseWork: parseCourseWork(courseWork, normalizedCourseId),
-      driveFileId,
-      driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
-      driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined
-    };
+      return {
+        courseWork: parseCourseWork(courseWork, normalizedCourseId),
+        driveFileId,
+        driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
+        driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined
+      };
+    } catch (error) {
+      if ((error as ClassroomRequestError).status === 403) {
+        throw classroomPublishPermissionError();
+      }
+      throw error;
+    }
   }
 }
