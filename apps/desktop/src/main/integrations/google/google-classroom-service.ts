@@ -21,7 +21,9 @@ export interface GoogleClassroomApi {
   ): Promise<GoogleClassroomPublishResult>;
 }
 
-const classroomApiError = (status: number, payload: unknown): Error => {
+type ClassroomRequestError = Error & { status?: number };
+
+const classroomApiError = (status: number, payload: unknown): ClassroomRequestError => {
   const record = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
   const errorRecord = typeof record.error === "object" && record.error !== null ? (record.error as Record<string, unknown>) : {};
   const message = typeof errorRecord.message === "string" ? errorRecord.message : "";
@@ -29,31 +31,41 @@ const classroomApiError = (status: number, payload: unknown): Error => {
   const detail = `${statusText} ${message}`.toLowerCase();
 
   if (status === 401 || detail.includes("invalid authentication") || detail.includes("invalid credentials")) {
-    return new Error("Google Classroom needs you to sign in again. Reconnect Google Classroom and try loading classes once more.");
+    const error = new Error("Google Classroom needs you to sign in again. Reconnect Google Classroom and try loading classes once more.") as ClassroomRequestError;
+    error.status = status;
+    return error;
   }
 
   if (status === 400 && (detail.includes("client_secret") || detail.includes("invalid_grant"))) {
-    return new Error(
+    const error = new Error(
       "Google Classroom needs the Desktop app client secret. Ask an admin to enter the client secret from the Google OAuth JSON, save settings, and reconnect Google Classroom."
-    );
+    ) as ClassroomRequestError;
+    error.status = status;
+    return error;
   }
 
   if (
     status === 403 &&
     (detail.includes("insufficient") || detail.includes("scope") || detail.includes("permission"))
   ) {
-    return new Error(
+    const error = new Error(
       "Lockedscreen does not have the needed Google Classroom permission. Ask an admin to confirm the Classroom and Drive permissions, then reconnect Google Classroom."
-    );
+    ) as ClassroomRequestError;
+    error.status = status;
+    return error;
   }
 
   if (status === 403) {
-    return new Error(
+    const error = new Error(
       "Google Classroom did not allow this request. Ask your school Google administrator to allow the Lockedscreen Classroom app, then reconnect."
-    );
+    ) as ClassroomRequestError;
+    error.status = status;
+    return error;
   }
 
-  return new Error("Google Classroom could not load classes right now. Check your connection and try again.");
+  const error = new Error("Google Classroom could not load classes right now. Check your connection and try again.") as ClassroomRequestError;
+  error.status = status;
+  return error;
 };
 
 const parseCourseWork = (item: Record<string, unknown>, courseId: string): LmsCourseWork => {
@@ -94,28 +106,52 @@ export class GoogleClassroomService implements GoogleClassroomApi {
 
   async listCourses(connectionId: string, settings: GoogleIntegrationSettings): Promise<LmsCourse[]> {
     const accessToken = await this.oauth.getAccessToken(connectionId, settings);
-    const courses: Array<Record<string, unknown>> = [];
-    let pageToken: string | undefined;
 
-    do {
-      const params = new URLSearchParams({
-        teacherId: "me",
-        pageSize: "100"
-      });
-      ["ACTIVE", "PROVISIONED"].forEach((state) => params.append("courseStates", state));
-      if (pageToken) {
-        params.set("pageToken", pageToken);
+    const loadPages = async (teacherOnly: boolean): Promise<Array<Record<string, unknown>>> => {
+      const courses: Array<Record<string, unknown>> = [];
+      let pageToken: string | undefined;
+
+      do {
+        const params = new URLSearchParams({
+          pageSize: "100"
+        });
+        if (teacherOnly) {
+          params.set("teacherId", "me");
+        }
+        ["ACTIVE", "PROVISIONED"].forEach((state) => params.append("courseStates", state));
+        if (pageToken) {
+          params.set("pageToken", pageToken);
+        }
+
+        const response = await fetch(`${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const payload = await readClassroomJson<{ courses?: Array<Record<string, unknown>>; nextPageToken?: string }>(response);
+        courses.push(...(payload.courses ?? []));
+        pageToken = payload.nextPageToken;
+      } while (pageToken);
+
+      return courses;
+    };
+
+    let courses: Array<Record<string, unknown>>;
+    try {
+      courses = await loadPages(true);
+    } catch (error) {
+      if ((error as ClassroomRequestError).status !== 400) {
+        throw error;
       }
+      courses = await loadPages(false);
+    }
+    if (courses.length === 0) {
+      courses = await loadPages(false);
+    }
 
-      const response = await fetch(`${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const payload = await readClassroomJson<{ courses?: Array<Record<string, unknown>>; nextPageToken?: string }>(response);
-      courses.push(...(payload.courses ?? []));
-      pageToken = payload.nextPageToken;
-    } while (pageToken);
+    const uniqueCourses = Array.from(new Map(courses.map((course) => [String(course.id ?? ""), course])).values()).filter(
+      (course) => String(course.id ?? "").length > 0
+    );
 
-    return courses.map((course) => ({
+    return uniqueCourses.map((course) => ({
       id: String(course.id ?? ""),
       name: String(course.name ?? "Untitled course"),
       section: typeof course.section === "string" ? course.section : undefined,

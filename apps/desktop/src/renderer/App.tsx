@@ -2663,11 +2663,14 @@ const SettingsPage = () => {
         snapshot.lmsConnections.find((candidate) => candidate.id === selectedConnectionId) ?? snapshot.lmsConnections[0];
 
       if (!connectionDirty || connectionDraft?.id !== selectedConnection?.id) {
+        const selectedConnectionChanged = connectionDraft?.id !== selectedConnection?.id;
         setSelectedConnectionId(selectedConnection?.id ?? "");
         setConnectionDraft(selectedConnection ?? null);
-        setConnectionCourses([]);
-        setBindingCourseWork([]);
-        setBindingStudents([]);
+        if (selectedConnectionChanged) {
+          setConnectionCourses([]);
+          setBindingCourseWork([]);
+          setBindingStudents([]);
+        }
       }
     }
   }, [
@@ -3146,12 +3149,35 @@ const SettingsPage = () => {
       }
     });
 
-  const handleLoadCourses = async (connectionId: string = connectionDraft.id) =>
-    runAdminAction("load-lms-courses", () => listLmsCourses(connectionId), {
-      success: (courses) => `Loaded ${courses.length} class${courses.length === 1 ? "" : "es"}.`,
-      empty: "No classes were returned for this LMS connection.",
-      onSuccess: (courses) => setConnectionCourses(courses)
-    });
+  const handleLoadCourses = async (connectionId: string = connectionDraft.id) => {
+    const targetConnectionId = connectionId.trim();
+    if (!targetConnectionId) {
+      setActionFeedback({ tone: "error", text: "Choose a connected Google Classroom account before loading classes." });
+      return;
+    }
+
+    setPendingAction("load-lms-courses");
+    setActionFeedback({ tone: "info", text: "Loading Google Classroom classes..." });
+    try {
+      const courses = await listLmsCourses(targetConnectionId);
+      setConnectionCourses(courses);
+      setActionFeedback({
+        tone: courses.length > 0 ? "success" : "info",
+        text:
+          courses.length > 0
+            ? `Loaded ${courses.length} class${courses.length === 1 ? "" : "es"}.`
+            : "No classes were returned for this Google Classroom account."
+      });
+    } catch (error) {
+      setConnectionCourses([]);
+      setActionFeedback({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Google Classroom classes could not be loaded. Try reconnecting Google Classroom."
+      });
+    } finally {
+      setPendingAction(null);
+    }
+  };
 
   const selectBindingCourse = (course: LmsCourse) => {
     setBindingCourseWork([]);
@@ -3973,16 +3999,28 @@ const SettingsPage = () => {
                 Account: {connectionDraft.accountName || "Connected user"} / {connectionDraft.accountEmail}
               </div>
             ) : null}
-            {isPending("connect-lms") && connectionDraft.provider === "google-classroom" ? (
+            {isPending("load-lms-courses") && connectionDraft.provider === "google-classroom" ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 Loading Google Classroom classes...
               </div>
             ) : connectionCourses.length > 0 ? (
               <div className="grid gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Loaded Google Classroom classes</div>
+                  <Badge>{connectionCourses.length} loaded</Badge>
+                </div>
                 {connectionCourses.map((course) => (
-                  <div key={course.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="font-semibold text-slate-900 dark:text-slate-50">{course.name}</div>
-                    <div className="mt-1 text-slate-600 dark:text-slate-300">{course.section || course.id}</div>
+                  <div
+                    key={course.id}
+                    className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 md:grid-cols-[1fr_auto] md:items-center"
+                  >
+                    <div>
+                      <div className="font-semibold text-slate-900 dark:text-slate-50">{course.name}</div>
+                      <div className="mt-1 text-slate-600 dark:text-slate-300">{course.section || course.id}</div>
+                    </div>
+                    <Button variant="secondary" onClick={() => removeLoadedCourse(course.id)}>
+                      Remove
+                    </Button>
                   </div>
                 ))}
               </div>
