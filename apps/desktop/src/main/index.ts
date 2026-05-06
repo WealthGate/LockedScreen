@@ -1078,7 +1078,7 @@ app.whenReady().then(async () => {
 
     const needsNativeCompanion =
       !launchedByNativeHost &&
-      configPackage.securityMode === "full-kiosk" &&
+      (configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
       nativeCompanionRequired(snapshot.securityProfile);
 
     if (needsNativeCompanion) {

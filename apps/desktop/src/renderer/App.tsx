@@ -4814,6 +4814,9 @@ const SettingsPage = () => {
                 <option value="restricted-app">Restricted App Mode</option>
                 <option value="full-kiosk">Full Kiosk Mode</option>
               </select>
+              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                Use Full Kiosk Mode with the native Windows companion verified to block the Windows key, task switching, task manager shortcuts, and the taskbar during exams.
+              </div>
             </LabelledField>
             <LabelledField label="Package status">
               <select

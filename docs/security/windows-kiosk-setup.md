@@ -13,6 +13,19 @@ Use:
 
 In hybrid deployments, the native companion handles Windows-specific lockdown while Assigned Access or Shell Launcher reinforce shell containment.
 
+## Where to Enable Full Lockdown in Lockedscreen
+
+1. Open `Admin Console`.
+2. Open `Package basics`.
+3. Set `Security level` to `Full Kiosk Mode`.
+4. Open `Security`.
+5. Check `Native Windows lockdown companion is installed and verified`.
+6. Set `Deployment mechanism` to `Native Windows companion` or `Hybrid`.
+7. Click `Save posture`.
+8. Click `Save package`.
+
+For new app-based and link-based packages, Lockedscreen defaults to `Full Kiosk Mode`. Existing packages created before this change may still be set to `Restricted App Mode`; change those packages manually before exporting them again.
+
 ## Prerequisites
 
 - A managed Windows device
@@ -84,3 +97,9 @@ Windows Home can run LOCKEDSCREEN in two ways:
 - native-companion mode, when the Lockedscreen helper and service are installed and verified
 
 Without the native companion, Windows Home cannot provide the controls required to suppress the Windows key, task view, taskbar surfaces, or desktop switching for a desktop Electron app.
+
+## Keyboard Lockdown Boundary
+
+The native companion uses a low-level Windows keyboard hook plus an alternate desktop for full-kiosk sessions. This blocks common escape paths such as the Windows key, Alt+Tab, Alt+Esc, Alt+F4, Ctrl+Esc, Ctrl+Shift+Esc, browser hardware keys, and Print Screen while the agent is active.
+
+Windows reserves Ctrl+Alt+Del as the Secure Attention Sequence. Normal desktop applications cannot suppress it reliably on Windows Home, Pro, Enterprise, or Education. Schools that require Ctrl+Alt+Del and sign-in shell control must use official Windows kiosk controls, Assigned Access, Shell Launcher, or managed device policy in addition to Lockedscreen.

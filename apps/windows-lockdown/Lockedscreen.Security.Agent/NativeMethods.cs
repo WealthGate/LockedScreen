@@ -8,7 +8,9 @@ internal static class NativeMethods
 {
     public const int WhKeyboardLl = 13;
     public const int WmKeyDown = 0x0100;
+    public const int WmKeyUp = 0x0101;
     public const int WmSysKeyDown = 0x0104;
+    public const int WmSysKeyUp = 0x0105;
     public const int SwHide = 0;
     public const int SwShow = 5;
     public const int SwMinimize = 6;

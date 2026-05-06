@@ -18,6 +18,26 @@ Lockedscreen does not put teacher Google tokens inside exported student exam pac
 Students do not enter the Google Sheet link or endpoint URL on their devices.
 Teachers do not need to create headings. The script creates fixed student identity columns and creates new exam result columns as new tests arrive.
 
+## Getting the Apps Script Web App URL
+
+Use this option when the school wants Google Sheets grade rows without running its own server.
+
+1. Open [Google Apps Script](https://script.google.com/).
+2. Click `New project`.
+3. Paste the script in the `Gradebook Apps Script Example` section below into `Code.gs`.
+4. Click `Save`.
+5. Click `Deploy > New deployment`.
+6. Next to `Select type`, choose `Web app`.
+7. Set `Execute as` to `Me`.
+8. Set access to `Anyone` or the broadest option allowed by the school Google Workspace policy.
+9. Click `Deploy` and approve the requested Google Sheets permissions.
+10. Copy the deployed web app URL. It normally looks like `https://script.google.com/macros/s/.../exec`.
+11. Paste that URL into Lockedscreen `Admin Console > Google Classroom > Advanced admin Google setup > Default Google Sheets sync URL`, then save settings.
+
+Do not test the script by clicking `Run` inside the Apps Script editor. `doPost(e)` receives `e.postData` only when Lockedscreen or another HTTP client sends a POST request to the deployed web app URL.
+
+Google's Apps Script documentation states that web apps need a `doGet(e)` or `doPost(e)` function and are deployed from `Deploy > New deployment > Web app`: https://developers.google.com/apps-script/guides/web
+
 ## Expected Payload
 
 The endpoint receives JSON shaped like this:

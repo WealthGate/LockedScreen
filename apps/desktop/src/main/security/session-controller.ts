@@ -113,7 +113,10 @@ export const clearHostedPartitionData = async (): Promise<void> => {
 
 const activeShortcutBlocked = (input: Input): boolean => {
   const lowerKey = input.key.toLowerCase();
-  if (input.key === "F5" || input.meta) {
+  if (
+    input.meta ||
+    ["f5", "f11", "f12", "printscreen", "snapshot", "super", "meta", "os", "apps", "contextmenu"].includes(lowerKey)
+  ) {
     return true;
   }
 

@@ -270,7 +270,7 @@ const normalizeSubmission = (submission: SubmissionResult, destinations: ResultD
 
 export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
   const now = new Date().toISOString();
-  const securityMode = exam.mode === "link" ? "full-kiosk" : "restricted-app";
+  const securityMode = "full-kiosk";
   const allowedDomains =
     exam.mode === "link" ? exam.linkConfig?.allowedDomains ?? [] : [];
   const startUrl = exam.mode === "link" ? exam.linkConfig?.url : undefined;
@@ -281,7 +281,7 @@ export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
     description:
       exam.mode === "link"
         ? "Controlled hosted-exam package with URL filtering and kiosk guidance."
-        : "Native exam package with local runtime and restricted-session defaults.",
+        : "Native exam package with local runtime and full-kiosk lockdown defaults.",
     status: "active",
     packageVersion: 1,
     sourceMode: exam.mode,
