@@ -13,9 +13,10 @@ Lockedscreen does not put teacher Google tokens inside exported student exam pac
 7. Teacher exports or posts the test package.
 8. Students open the exported package on their own machines.
 9. On submission, the app sends the grade to the endpoint from the package.
-10. The endpoint writes the row to the Sheet and sorts by student last name.
+10. The endpoint creates headings automatically, writes the grade, and sorts by student last name.
 
 Students do not enter the Google Sheet link or endpoint URL on their devices.
+Teachers do not need to create headings. The script creates fixed student identity columns and creates new exam result columns as new tests arrive.
 
 ## Expected Payload
 
@@ -50,57 +51,105 @@ The endpoint receives JSON shaped like this:
 }
 ```
 
-## Minimal Apps Script Example
+## Gradebook Apps Script Example
 
 Deploy this as a Google Apps Script web app with access to the teacher/school Google account that owns the Sheet.
+It keeps one row per student. If the same student takes another test in the same Sheet, the script adds new columns for that exam instead of adding a duplicate student row.
 
 ```javascript
 function doPost(e) {
   const body = JSON.parse(e.postData.contents);
-  const spreadsheetId = body.destination.sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)[1];
+  const match = body.destination.sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match || !match[1]) {
+    return jsonResponse({ message: "Invalid Google Sheet URL." });
+  }
+
+  const spreadsheetId = match[1];
   const sheetName = body.destination.sheetName || "Sheet1";
   const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
   const sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
 
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow([
-      "Last Name",
-      "First Name",
-      "Student Name",
-      "Candidate ID",
-      "Class",
-      "Exam",
-      "Subject",
-      "Score",
-      "Total",
-      "Percentage",
-      "Submitted At"
-    ]);
-  }
+  const identityHeaders = ["Last Name", "First Name", "Student Name", "Candidate ID", "Class"];
+  ensureHeaders(sheet, identityHeaders);
 
-  sheet.appendRow([
-    body.student.lastName,
-    body.student.firstName,
-    body.student.name,
-    body.student.candidateId,
-    body.student.className,
-    body.exam.title,
-    body.exam.subject,
-    body.grade.score,
-    body.grade.totalPoints,
-    body.grade.percentage,
-    body.grade.submittedAt
-  ]);
+  const examLabel = safeHeader(body.exam.title || "Untitled Exam");
+  const examHeaders = [
+    examLabel + " Score",
+    examLabel + " Total",
+    examLabel + " Percentage",
+    examLabel + " Submitted At"
+  ];
+  const headerMap = ensureHeaders(sheet, identityHeaders.concat(examHeaders));
+  const studentRow = findOrCreateStudentRow(sheet, body, headerMap);
+
+  sheet.getRange(studentRow, headerMap[examHeaders[0]]).setValue(body.grade.score);
+  sheet.getRange(studentRow, headerMap[examHeaders[1]]).setValue(body.grade.totalPoints);
+  sheet.getRange(studentRow, headerMap[examHeaders[2]]).setValue(body.grade.percentage);
+  sheet.getRange(studentRow, headerMap[examHeaders[3]]).setValue(body.grade.submittedAt);
 
   if (body.destination.sortByLastName !== false && sheet.getLastRow() > 2) {
     sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).sort([
-      { column: 1, ascending: true },
-      { column: 2, ascending: true }
+      { column: headerMap["Last Name"], ascending: true },
+      { column: headerMap["First Name"], ascending: true }
     ]);
   }
 
+  return jsonResponse({ referenceId: sheet.getName() + "!" + studentRow });
+}
+
+function ensureHeaders(sheet, requiredHeaders) {
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(requiredHeaders);
+  }
+
+  const currentHeaders = sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getValues()[0];
+  requiredHeaders.forEach(function (header) {
+    if (currentHeaders.indexOf(header) === -1) {
+      currentHeaders.push(header);
+      sheet.getRange(1, currentHeaders.length).setValue(header);
+    }
+  });
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return headers.reduce(function (map, header, index) {
+    map[header] = index + 1;
+    return map;
+  }, {});
+}
+
+function findOrCreateStudentRow(sheet, body, headerMap) {
+  const lastRow = sheet.getLastRow();
+  const candidateId = String(body.student.candidateId || "").trim();
+  const studentName = String(body.student.name || "").trim();
+
+  if (lastRow > 1) {
+    const values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+    for (let index = 0; index < values.length; index++) {
+      const row = values[index];
+      const rowCandidateId = String(row[headerMap["Candidate ID"] - 1] || "").trim();
+      const rowStudentName = String(row[headerMap["Student Name"] - 1] || "").trim();
+      if ((candidateId && rowCandidateId === candidateId) || (!candidateId && rowStudentName === studentName)) {
+        return index + 2;
+      }
+    }
+  }
+
+  const nextRow = sheet.getLastRow() + 1;
+  sheet.getRange(nextRow, headerMap["Last Name"]).setValue(body.student.lastName || "");
+  sheet.getRange(nextRow, headerMap["First Name"]).setValue(body.student.firstName || "");
+  sheet.getRange(nextRow, headerMap["Student Name"]).setValue(body.student.name || "");
+  sheet.getRange(nextRow, headerMap["Candidate ID"]).setValue(body.student.candidateId || "");
+  sheet.getRange(nextRow, headerMap["Class"]).setValue(body.student.className || "");
+  return nextRow;
+}
+
+function safeHeader(value) {
+  return String(value).replace(/\s+/g, " ").trim().slice(0, 80) || "Untitled Exam";
+}
+
+function jsonResponse(value) {
   return ContentService
-    .createTextOutput(JSON.stringify({ referenceId: sheet.getName() + "!" + sheet.getLastRow() }))
+    .createTextOutput(JSON.stringify(value))
     .setMimeType(ContentService.MimeType.JSON);
 }
 ```

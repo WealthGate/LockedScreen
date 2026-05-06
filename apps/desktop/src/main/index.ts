@@ -1326,6 +1326,10 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle("help:openGoogleAppsScript", async () => {
+    await shell.openExternal("https://script.google.com/home/projects/create");
+  });
+
   await createWindow();
   checkForAppUpdatesAfterStartup();
   await recordSecurityEvent("kiosk", "info", "Lockedscreen kiosk component initialized.", `Platform ${runtimeEnvironment.platform}`);

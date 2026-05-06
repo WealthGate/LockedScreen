@@ -3674,6 +3674,25 @@ const SettingsPage = () => {
                 Admin configures this once. Teachers can then paste only the Google Sheet link when preparing a test; both values are exported inside the test package for students.
               </div>
             </LabelledField>
+
+            <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950 dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-50">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">Google Sheets sync setup guide</div>
+                  <div className="mt-1 text-teal-900 dark:text-teal-100">
+                    Create one Google Apps Script web app, deploy it, then paste its `/exec` URL above. The script creates headings automatically and adds new exam columns for repeat tests.
+                  </div>
+                  <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-teal-900 dark:text-teal-100">
+                    <li>Open Google Apps Script and create a new project.</li>
+                    <li>Paste the Lockedscreen Sheets sync script from the admin guide.</li>
+                    <li>Deploy as a Web app, execute as the school/admin account, then copy the Web app URL.</li>
+                  </ol>
+                </div>
+                <Button variant="secondary" onClick={() => void window.lockedscreenApi.openGoogleAppsScript()}>
+                  Open Google Apps Script
+                </Button>
+              </div>
+            </div>
           </div>
         </AdvancedAdminSection>
 

@@ -161,7 +161,8 @@ Recommended flow:
 5. Teacher enables auto-sync and exports or posts the test package.
 6. The exported `.lscp` package carries the Sheet link and sync URL to student machines.
 7. When students submit, LOCKEDSCREEN sends the grade to the endpoint.
-8. The endpoint writes the row to the Sheet and sorts by student last name.
+8. The endpoint creates headings automatically, writes grades, and sorts by student last name.
+9. For another test in the same subject/class Sheet, the endpoint keeps the same student rows and adds new exam columns.
 
 Do not put teacher Google tokens or service account secrets into exported student packages. See `docs/google-sheets-sync-endpoint.md` for the endpoint payload and a minimal Apps Script example.
 
