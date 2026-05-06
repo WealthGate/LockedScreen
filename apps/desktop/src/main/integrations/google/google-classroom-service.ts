@@ -1,4 +1,4 @@
-import type { GoogleIntegrationSettings, LmsCourse, LmsCourseWork, LmsStudent } from "@lockedscreen/shared-types";
+import type { GoogleClassroomPublishResult, GoogleIntegrationSettings, LmsCourse, LmsCourseWork, LmsStudent } from "@lockedscreen/shared-types";
 
 import { googleClassroomDesktopOAuth } from "./google-integration-settings";
 import type { GoogleOAuthFlow } from "./google-oauth-service";
@@ -7,6 +7,18 @@ export interface GoogleClassroomApi {
   listCourses(connectionId: string, settings: GoogleIntegrationSettings): Promise<LmsCourse[]>;
   listCourseWork(connectionId: string, settings: GoogleIntegrationSettings, courseId: string): Promise<LmsCourseWork[]>;
   listStudents(connectionId: string, settings: GoogleIntegrationSettings, courseId: string): Promise<LmsStudent[]>;
+  publishPackageCourseWork(
+    connectionId: string,
+    settings: GoogleIntegrationSettings,
+    request: {
+      courseId: string;
+      title: string;
+      description: string;
+      fileName: string;
+      packageJson: string;
+      maxPoints?: number;
+    }
+  ): Promise<GoogleClassroomPublishResult>;
 }
 
 const classroomApiError = (status: number, payload: unknown): Error => {
@@ -31,7 +43,7 @@ const classroomApiError = (status: number, payload: unknown): Error => {
     (detail.includes("insufficient") || detail.includes("scope") || detail.includes("permission"))
   ) {
     return new Error(
-      "Lockedscreen does not have permission to read this Google Classroom information. Ask an admin to confirm the Classroom read-only permissions, then reconnect Google Classroom."
+      "Lockedscreen does not have the needed Google Classroom permission. Ask an admin to confirm the Classroom and Drive permissions, then reconnect Google Classroom."
     );
   }
 
@@ -42,6 +54,30 @@ const classroomApiError = (status: number, payload: unknown): Error => {
   }
 
   return new Error("Google Classroom could not load classes right now. Check your connection and try again.");
+};
+
+const parseCourseWork = (item: Record<string, unknown>, courseId: string): LmsCourseWork => {
+  const dueDate = item.dueDate as Record<string, unknown> | undefined;
+  const dueTime = item.dueTime as Record<string, unknown> | undefined;
+  const year = Number(dueDate?.year ?? 0);
+  const month = Number(dueDate?.month ?? 0);
+  const day = Number(dueDate?.day ?? 0);
+  const hours = Number(dueTime?.hours ?? 0);
+  const minutes = Number(dueTime?.minutes ?? 0);
+  const seconds = Number(dueTime?.seconds ?? 0);
+  const dueAt =
+    year > 0 && month > 0 && day > 0
+      ? new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds)).toISOString()
+      : undefined;
+
+  return {
+    id: String(item.id ?? ""),
+    courseId,
+    title: String(item.title ?? "Untitled coursework"),
+    alternateLink: typeof item.alternateLink === "string" ? item.alternateLink : undefined,
+    dueAt,
+    state: typeof item.state === "string" ? item.state : undefined
+  };
 };
 
 const readClassroomJson = async <T>(response: Response): Promise<T> => {
@@ -105,29 +141,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       }
     );
     const payload = await readClassroomJson<{ courseWork?: Array<Record<string, unknown>> }>(response);
-    return (payload.courseWork ?? []).map((item) => {
-      const dueDate = item.dueDate as Record<string, unknown> | undefined;
-      const dueTime = item.dueTime as Record<string, unknown> | undefined;
-      const year = Number(dueDate?.year ?? 0);
-      const month = Number(dueDate?.month ?? 0);
-      const day = Number(dueDate?.day ?? 0);
-      const hours = Number(dueTime?.hours ?? 0);
-      const minutes = Number(dueTime?.minutes ?? 0);
-      const seconds = Number(dueTime?.seconds ?? 0);
-      const dueAt =
-        year > 0 && month > 0 && day > 0
-          ? new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds)).toISOString()
-          : undefined;
-
-      return {
-        id: String(item.id ?? ""),
-        courseId: normalizedCourseId,
-        title: String(item.title ?? "Untitled coursework"),
-        alternateLink: typeof item.alternateLink === "string" ? item.alternateLink : undefined,
-        dueAt,
-        state: typeof item.state === "string" ? item.state : undefined
-      };
-    });
+    return (payload.courseWork ?? []).map((item) => parseCourseWork(item, normalizedCourseId));
   }
 
   async listStudents(connectionId: string, settings: GoogleIntegrationSettings, courseId: string): Promise<LmsStudent[]> {
@@ -153,5 +167,100 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         email: typeof profile?.emailAddress === "string" ? profile.emailAddress : undefined
       };
     });
+  }
+
+  async publishPackageCourseWork(
+    connectionId: string,
+    settings: GoogleIntegrationSettings,
+    request: {
+      courseId: string;
+      title: string;
+      description: string;
+      fileName: string;
+      packageJson: string;
+      maxPoints?: number;
+    }
+  ): Promise<GoogleClassroomPublishResult> {
+    const normalizedCourseId = request.courseId.trim();
+    if (!normalizedCourseId) {
+      throw new Error("Select a Google Classroom class before posting the package.");
+    }
+
+    const accessToken = await this.oauth.getAccessToken(connectionId, settings);
+    const boundary = `lockedscreen-${Date.now().toString(36)}`;
+    const metadata = {
+      name: request.fileName,
+      mimeType: "application/json"
+    };
+    const uploadBody = [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify(metadata),
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      request.packageJson,
+      `--${boundary}--`,
+      ""
+    ].join("\r\n");
+
+    const uploadResponse = await fetch(
+      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`
+        },
+        body: uploadBody
+      }
+    );
+    const driveFile = await readClassroomJson<Record<string, unknown>>(uploadResponse);
+    const driveFileId = String(driveFile.id ?? "");
+    if (!driveFileId) {
+      throw new Error("Google Drive did not return a file id for the exported package.");
+    }
+
+    const courseWorkBody: Record<string, unknown> = {
+      title: request.title,
+      description: request.description,
+      workType: "ASSIGNMENT",
+      state: "PUBLISHED",
+      materials: [
+        {
+          driveFile: {
+            driveFile: {
+              id: driveFileId,
+              title: request.fileName
+            },
+            shareMode: "VIEW"
+          }
+        }
+      ]
+    };
+    if (typeof request.maxPoints === "number" && request.maxPoints > 0) {
+      courseWorkBody.maxPoints = request.maxPoints;
+    }
+
+    const courseWorkResponse = await fetch(
+      `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(courseWorkBody)
+      }
+    );
+    const courseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
+
+    return {
+      courseWork: parseCourseWork(courseWork, normalizedCourseId),
+      driveFileId,
+      driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
+      driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined
+    };
   }
 }

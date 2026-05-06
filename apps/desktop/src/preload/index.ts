@@ -4,9 +4,11 @@ import type {
   Candidate,
   AppSettings,
   AppStateSnapshot,
+  AppUpdateState,
   Exam,
   ExamConfigPackage,
   ExamSession,
+  GoogleClassroomPublishResult,
   ImportPreview,
   LaunchContext,
   LmsConnection,
@@ -23,6 +25,11 @@ import type {
 
 export interface LockedscreenApi {
   getSnapshot: () => Promise<AppStateSnapshot>;
+  getUpdateState: () => Promise<AppUpdateState>;
+  checkForUpdates: () => Promise<AppUpdateState>;
+  downloadUpdate: () => Promise<AppUpdateState>;
+  installUpdate: () => Promise<void>;
+  onUpdateStateChanged: (callback: (state: AppUpdateState) => void) => () => void;
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
@@ -45,6 +52,10 @@ export interface LockedscreenApi {
   deleteConfigPackage: (packageId: string) => Promise<AppStateSnapshot>;
   duplicateConfigPackage: (packageId: string) => Promise<AppStateSnapshot>;
   exportConfigPackage: (payload: { packageId: string }) => Promise<string | null>;
+  publishConfigPackageToClassroom: (payload: { packageId: string }) => Promise<{
+    snapshot: AppStateSnapshot;
+    published: GoogleClassroomPublishResult;
+  }>;
   importConfigPackage: (payload?: { filePath?: string; password?: string }) => Promise<AppStateSnapshot | null>;
   importQuestions: () => Promise<ImportPreview | null>;
   exportQuestionTemplate: () => Promise<string | null>;
@@ -70,6 +81,15 @@ export interface LockedscreenApi {
 
 const api: LockedscreenApi = {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
+  getUpdateState: () => ipcRenderer.invoke("updates:getState"),
+  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  downloadUpdate: () => ipcRenderer.invoke("updates:download"),
+  installUpdate: () => ipcRenderer.invoke("updates:install"),
+  onUpdateStateChanged: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: AppUpdateState) => callback(state);
+    ipcRenderer.on("app:updateStateChanged", listener);
+    return () => ipcRenderer.removeListener("app:updateStateChanged", listener);
+  },
   getLaunchContext: () => ipcRenderer.invoke("app:getLaunchContext"),
   onLaunchContextChanged: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, context: LaunchContext) => callback(context);
@@ -96,6 +116,7 @@ const api: LockedscreenApi = {
   deleteConfigPackage: (packageId) => ipcRenderer.invoke("configPackage:delete", packageId),
   duplicateConfigPackage: (packageId) => ipcRenderer.invoke("configPackage:duplicate", packageId),
   exportConfigPackage: (payload) => ipcRenderer.invoke("configPackage:export", payload),
+  publishConfigPackageToClassroom: (payload) => ipcRenderer.invoke("configPackage:publishToClassroom", payload),
   importConfigPackage: (payload) => ipcRenderer.invoke("configPackage:import", payload),
   importQuestions: () => ipcRenderer.invoke("import:questions"),
   exportQuestionTemplate: () => ipcRenderer.invoke("import:exportQuestionTemplate"),

@@ -148,6 +148,23 @@ Typical setup:
 
 In this model, the external school service writes the data into the LMS.
 
+## Google Sheets Grade Table
+
+Teachers do not configure Google Sheets on each student machine.
+
+Recommended flow:
+
+1. School IT deploys one Google Sheets sync endpoint, such as a Google Apps Script web app.
+2. Admin enters that URL once in `Admin Console > Google Classroom > Advanced admin Google setup > Default Google Sheets sync URL`.
+3. Teacher creates a Google Sheet for the test results.
+4. Teacher opens `Grade sync`, chooses `Google Sheets`, and pastes the Sheet link.
+5. Teacher enables auto-sync and exports or posts the test package.
+6. The exported `.lscp` package carries the Sheet link and sync URL to student machines.
+7. When students submit, LOCKEDSCREEN sends the grade to the endpoint.
+8. The endpoint writes the row to the Sheet and sorts by student last name.
+
+Do not put teacher Google tokens or service account secrets into exported student packages. See `docs/google-sheets-sync-endpoint.md` for the endpoint payload and a minimal Apps Script example.
+
 ## Troubleshooting
 
 `Error 401: invalid_client` means the provider rejected the app registration, not the teacher password.

@@ -74,6 +74,12 @@ const friendlyGoogleOAuthError = (error: string, description?: string): Error =>
 const tokenExchangeError = (payload: Record<string, unknown>): Error => {
   const error = typeof payload.error === "string" ? payload.error : "";
   const description = typeof payload.error_description === "string" ? payload.error_description : undefined;
+  const detail = [error, description].filter(Boolean).join(" ").toLowerCase();
+  if (detail.includes("invalid_scope") || detail.includes("bad request")) {
+    return new Error(
+      "Google Classroom needs you to reconnect so Lockedscreen can receive the latest Classroom and Drive permissions."
+    );
+  }
   return friendlyGoogleOAuthError(error, description);
 };
 
@@ -192,8 +198,7 @@ const refreshToken = async (
   const body = new URLSearchParams({
     client_id: settings.clientId,
     grant_type: "refresh_token",
-    refresh_token: refreshTokenValue,
-    scope: googleScopesToString(settings)
+    refresh_token: refreshTokenValue
   });
   if (settings.clientSecret?.trim()) {
     body.set("client_secret", settings.clientSecret.trim());

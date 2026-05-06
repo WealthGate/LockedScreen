@@ -1,6 +1,6 @@
 {
   "name": "@lockedscreen/desktop",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "private": true,
   "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
   "author": {
@@ -27,6 +27,14 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "WealthGate",
+        "repo": "LockedScreen",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "out/**/*",
       "package.json"
@@ -144,6 +152,7 @@
     "@lockedscreen/storage": "file:../../packages/storage",
     "@lockedscreen/ui": "file:../../packages/ui",
     "dompurify": "^3.2.3",
+    "electron-updater": "^6.8.3",
     "framer-motion": "^12.7.2",
     "katex": "^0.16.11",
     "lucide-react": "^0.511.0",
@@ -159,8 +168,8 @@
     "@vitejs/plugin-react-swc": "^3.7.2",
     "autoprefixer": "^10.4.20",
     "electron": "36.0.0",
-    "electron-vite": "^3.1.0",
     "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",

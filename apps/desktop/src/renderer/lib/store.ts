@@ -7,6 +7,7 @@ import type {
   Exam,
   ExamConfigPackage,
   ExamSession,
+  GoogleClassroomPublishResult,
   ImportPreview,
   LmsConnection,
   LmsCourse,
@@ -43,6 +44,7 @@ interface LockedscreenStore {
   deleteConfigPackage: (packageId: string) => Promise<AppStateSnapshot | null>;
   duplicateConfigPackage: (packageId: string) => Promise<AppStateSnapshot | null>;
   exportConfigPackage: (payload: { packageId: string }) => Promise<string | null>;
+  publishConfigPackageToClassroom: (payload: { packageId: string }) => Promise<GoogleClassroomPublishResult | null>;
   importConfigPackage: (payload?: { filePath?: string; password?: string }) => Promise<AppStateSnapshot | null>;
   importQuestions: () => Promise<ImportPreview | null>;
   exportQuestionTemplate: () => Promise<string | null>;
@@ -231,6 +233,14 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
   },
   exportConfigPackage: async (payload) =>
     withGuard(() => window.lockedscreenApi.exportConfigPackage(payload), (error) => set({ error })),
+  publishConfigPackageToClassroom: async (payload) => {
+    const response = await withGuard(() => window.lockedscreenApi.publishConfigPackageToClassroom(payload), (error) => set({ error }));
+    if (response) {
+      set({ snapshot: response.snapshot, error: null });
+      return response.published;
+    }
+    return null;
+  },
   importConfigPackage: async (payload) => {
     const snapshot = await withGuard(() => window.lockedscreenApi.importConfigPackage(payload), (error) => set({ error }));
     if (snapshot) {

@@ -36,7 +36,9 @@ const defaultGoogleClassroomScopes = [
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
-  "https://www.googleapis.com/auth/classroom.rosters.readonly"
+  "https://www.googleapis.com/auth/classroom.rosters.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/spreadsheets"
 ];
 
 const defaultGoogleIntegration = (): GoogleIntegrationSettings => ({
@@ -58,6 +60,7 @@ const defaultSettings: AppSettings = {
   allowElectronKioskAssist: true,
   allowNonKioskTestingMode: false,
   approvedDomains: ["docs.google.com", "classroom.google.com", "forms.gle", "app.formative.com"],
+  defaultGoogleSheetsSyncEndpoint: "",
   googleIntegration: defaultGoogleIntegration()
 };
 
@@ -72,6 +75,7 @@ const defaultTeacherOptions = (): TeacherOptions => ({
   showSchoolBranding: true,
   showCandidateId: true,
   showTimer: true,
+  showScoreAfterSubmit: false,
   supportMessage: "Contact the invigilator if you need help during the session."
 });
 
@@ -151,6 +155,16 @@ const defaultStudentLmsBinding = (): StudentLmsBinding => ({
   assignmentLabel: ""
 });
 
+const normalizeResultDestination = (destination: ResultDestination): ResultDestination => ({
+  ...destination,
+  authMode: destination.authMode ?? "none",
+  examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
+  connectionId: destination.connectionId?.trim() || undefined,
+  bridgeEndpointUrl: destination.bridgeEndpointUrl?.trim() || undefined,
+  sortByLastName: destination.sortByLastName === true,
+  includeResponses: destination.includeResponses ?? true
+});
+
 const normalizeExam = (exam: Exam): Exam => ({
   ...exam,
   form: exam.form ?? ""
@@ -175,15 +189,15 @@ const normalizeStudentAccessPolicy = (policy: StudentAccessPolicy | null | undef
 
 const normalizeConfigPackage = (configPackage: ExamConfigPackage): ExamConfigPackage => ({
   ...configPackage,
+  teacherOptions: {
+    ...defaultTeacherOptions(),
+    ...(configPackage.teacherOptions ?? {})
+  },
   studentLmsBinding: normalizeStudentLmsBinding(configPackage.studentLmsBinding),
+  resultDestinations: Array.isArray(configPackage.resultDestinations)
+    ? configPackage.resultDestinations.map(normalizeResultDestination)
+    : [],
   studentAccessPolicy: normalizeStudentAccessPolicy(configPackage.studentAccessPolicy)
-});
-
-const normalizeResultDestination = (destination: ResultDestination): ResultDestination => ({
-  ...destination,
-  authMode: destination.authMode ?? "none",
-  examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
-  includeResponses: destination.includeResponses ?? true
 });
 
 const normalizeLmsConnection = (connection: LmsConnection): LmsConnection => ({
@@ -334,6 +348,7 @@ export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
     },
     branding: defaultBranding(exam),
     studentLmsBinding: defaultStudentLmsBinding(),
+    resultDestinations: [],
     createdAt: now,
     updatedAt: now,
     integrity: {
@@ -535,6 +550,7 @@ const hydrateSnapshot = (raw: Partial<AppStateSnapshot> | null | undefined): App
       ...defaultSettings,
       ...(raw?.settings ?? {}),
       adminUnlockPin: raw?.settings?.adminUnlockPin ?? raw?.settings?.invigilatorUnlockPin ?? defaultSettings.adminUnlockPin,
+      defaultGoogleSheetsSyncEndpoint: raw?.settings?.defaultGoogleSheetsSyncEndpoint?.trim() ?? "",
       googleIntegration: normalizeGoogleIntegration(raw?.settings?.googleIntegration)
     },
     securityProfile: {

@@ -5,6 +5,7 @@ import { URL, URLSearchParams } from "node:url";
 import { shell } from "electron";
 
 import type {
+  GoogleClassroomPublishResult,
   GoogleIntegrationSettings,
   LmsConnection,
   LmsCourse,
@@ -73,7 +74,9 @@ const providerDefaultScope = (provider: LmsProviderType): string =>
         "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
         "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
-        "https://www.googleapis.com/auth/classroom.rosters.readonly"
+        "https://www.googleapis.com/auth/classroom.rosters.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/spreadsheets"
       ].join(" ")
     : provider === "microsoft-365"
       ? [
@@ -226,8 +229,7 @@ const refreshConnectionToken = async (
   const body = new URLSearchParams({
     client_id: connection.clientId,
     grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    scope: connection.scope.trim() || providerDefaultScope(connection.provider)
+    refresh_token: refreshToken
   });
   if (connection.clientSecret?.trim()) {
     body.set("client_secret", connection.clientSecret.trim());
@@ -324,6 +326,7 @@ export const beginLmsOAuthConnection = async (
     const result = await oauth.beginTeacherSignIn(connection.id, settings);
     return {
       ...connection,
+      label: result.profile.name || result.profile.email || connection.label,
       status: "connected",
       clientId: settings.clientId,
       clientSecret: settings.clientSecret,
@@ -532,4 +535,26 @@ export const listConnectionStudents = async (
   }
 
   return [];
+};
+
+export const publishConnectionCourseWork = async (
+  connection: LmsConnection,
+  request: {
+    courseId: string;
+    title: string;
+    description: string;
+    fileName: string;
+    packageJson: string;
+    maxPoints?: number;
+  },
+  vault: OAuthVault,
+  googleSettings?: GoogleIntegrationSettings
+): Promise<GoogleClassroomPublishResult> => {
+  if (connection.provider !== "google-classroom") {
+    throw new Error("Posting a Lockedscreen package is currently supported for Google Classroom connections.");
+  }
+
+  const oauth = new GoogleDesktopOAuthService(vault);
+  const classroom = new GoogleClassroomService(oauth);
+  return classroom.publishPackageCourseWork(connection.id, googleSettingsFromConnection(connection, googleSettings), request);
 };

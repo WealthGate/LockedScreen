@@ -13,6 +13,7 @@ import type {
   Exam,
   ExamConfigPackage,
   ExamSession,
+  GoogleClassroomPublishResult,
   LaunchContext,
   InstalledAppRole,
   LmsConnection,
@@ -36,6 +37,7 @@ import {
   listConnectionCourses,
   listConnectionCourseWork,
   listConnectionStudents,
+  publishConnectionCourseWork,
   signOutLmsConnection
 } from "./lms-oauth";
 import { OAuthVault } from "./oauth-vault";
@@ -108,6 +110,7 @@ import {
   urlAllowedByGuard
 } from "./security/session-controller";
 import { turnInSubmissionToLms } from "./student-lms-turnin";
+import { checkForAppUpdatesAfterStartup, configureAppUpdates } from "./update-service";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const storage = createStorageService(app.getPath("userData"));
@@ -325,7 +328,7 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
 
 const syncSubmissionResultsInternal = async (
   submissionId: string,
-  options?: { autoOnly?: boolean }
+  options?: { autoOnly?: boolean; packageDestinations?: ResultDestination[] }
 ): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
   const submission = snapshot.submissions.find((candidate) => candidate.id === submissionId);
@@ -338,14 +341,38 @@ const syncSubmissionResultsInternal = async (
     throw new Error("Exam not found for this submission.");
   }
 
-  const destinations = snapshot.resultDestinations.filter((destination) =>
-    options?.autoOnly ? destination.trigger === "auto-on-submit" : true
-  );
+  const destinationMap = new Map<string, ResultDestination>();
+  [...snapshot.resultDestinations, ...(options?.packageDestinations ?? [])].forEach((destination) => {
+    if (options?.autoOnly && destination.trigger !== "auto-on-submit") {
+      return;
+    }
+    destinationMap.set(destination.id, destination);
+  });
+  const destinations = Array.from(destinationMap.values());
 
   for (const destination of destinations) {
+    let googleAccessToken: string | undefined;
+    if (destination.type === "google-sheets") {
+      const googleConnection =
+        snapshot.lmsConnections.find((connection) => connection.id === destination.connectionId) ??
+        snapshot.lmsConnections.find((connection) => connection.provider === "google-classroom" && connection.status === "connected");
+
+      if (googleConnection?.provider === "google-classroom" && googleConnection.status === "connected") {
+        try {
+          googleAccessToken = await getConnectionAccessToken(
+            googleConnection,
+            oauthVault,
+            snapshot.settings.googleIntegration
+          );
+        } catch {
+          googleAccessToken = undefined;
+        }
+      }
+    }
+
     const nextState =
       destination.enabled && destination.endpointUrl.trim().length > 0
-        ? await syncSubmissionToDestination(destination, exam, submission)
+        ? await syncSubmissionToDestination(destination, exam, submission, { googleAccessToken })
         : createDisabledSyncState(destination, destination.enabled ? "Destination endpoint is empty." : "Destination disabled.");
 
     await storage.updateSubmissionSyncState(submission.id, nextState);
@@ -359,6 +386,36 @@ const syncSubmissionResultsInternal = async (
 
   return withRuntime(storage.getSnapshot());
 };
+
+const sanitizePackageResultDestination = (destination: ResultDestination): ResultDestination | null => {
+  if (!destination.enabled || destination.trigger !== "auto-on-submit") {
+    return null;
+  }
+
+  if (destination.type === "google-sheets" && !destination.bridgeEndpointUrl?.trim()) {
+    return null;
+  }
+
+  return {
+    ...destination,
+    authToken: undefined,
+    apiKeyHeader: destination.authMode === "api-key" ? destination.apiKeyHeader : undefined,
+    connectionId: undefined,
+    endpointUrl: destination.endpointUrl.trim(),
+    bridgeEndpointUrl: destination.bridgeEndpointUrl?.trim() || undefined,
+    sortByLastName: destination.sortByLastName === true,
+    notes: destination.notes?.trim() || undefined
+  };
+};
+
+const packageResultDestinationsForExport = (
+  snapshot: AppStateSnapshot,
+  configPackage: ExamConfigPackage
+): ResultDestination[] =>
+  snapshot.resultDestinations
+    .filter((destination) => destination.examIds.length === 0 || destination.examIds.includes(configPackage.examId))
+    .map(sanitizePackageResultDestination)
+    .filter((destination): destination is ResultDestination => destination !== null);
 
 const syncPendingResultsInternal = async (): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
@@ -481,6 +538,8 @@ app.whenReady().then(async () => {
   if (initialPackageImportPath) {
     await queuePackageImportLaunch(initialPackageImportPath);
   }
+
+  configureAppUpdates(() => mainWindow);
 
   ipcMain.handle("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
   ipcMain.handle("app:getLaunchContext", async () => pendingLaunchContext);
@@ -772,7 +831,12 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const protectedFile = protectConfigPackage({ ...configPackage, passwordHint: undefined }, automaticPackagePassword, exam);
+    const exportPackage: ExamConfigPackage = {
+      ...configPackage,
+      passwordHint: undefined,
+      resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
+    };
+    const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
 
     const output = await dialog.showSaveDialog({
       defaultPath: `${configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package"}.lscp`,
@@ -786,6 +850,85 @@ app.whenReady().then(async () => {
     await writeFile(output.filePath, JSON.stringify(protectedFile, null, 2), "utf-8");
     await recordSecurityEvent("package", "info", `Exported configuration package "${configPackage.label}".`, output.filePath);
     return output.filePath;
+  });
+
+  ipcMain.handle("configPackage:publishToClassroom", async (_event, payload: unknown): Promise<{
+    snapshot: AppStateSnapshot;
+    published: GoogleClassroomPublishResult;
+  }> => {
+    if (!isRecord(payload) || typeof payload.packageId !== "string") {
+      throw new Error("Invalid Classroom publish request.");
+    }
+
+    const snapshot = await storage.getSnapshot();
+    const configPackage = snapshot.configPackages.find((candidate) => candidate.id === payload.packageId);
+    if (!configPackage) {
+      throw new Error("Configuration package not found.");
+    }
+
+    const binding = configPackage.studentLmsBinding;
+    if (!binding.enabled || binding.provider !== "google-classroom" || !binding.connectionId || !binding.courseId) {
+      throw new Error("Select a connected Google Classroom class before posting this package.");
+    }
+
+    const connection = snapshot.lmsConnections.find((candidate) => candidate.id === binding.connectionId);
+    if (!connection || connection.status !== "connected") {
+      throw new Error("Reconnect the teacher Google Classroom account before posting this package.");
+    }
+
+    const exam = snapshot.exams.find((candidate) => candidate.id === configPackage.examId);
+    if (!exam) {
+      throw new Error("Linked exam not found for this configuration package.");
+    }
+
+    const exportPackage: ExamConfigPackage = {
+      ...configPackage,
+      passwordHint: undefined,
+      resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
+    };
+    const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
+    const safePackageLabel = configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package";
+    const fileName = `${safePackageLabel}.lscp`;
+    const totalPoints = exam.questions.reduce((sum, question) => sum + question.points, 0);
+    const published = await publishConnectionCourseWork(
+      connection,
+      {
+        courseId: binding.courseId,
+        title: exam.title || configPackage.label || "Lockedscreen exam",
+        description: [
+          "Open the attached Lockedscreen exam package on the school device to begin.",
+          "Double-click the .lscp attachment if Lockedscreen is installed.",
+          configPackage.description.trim()
+        ].filter(Boolean).join("\n\n"),
+        fileName,
+        packageJson: JSON.stringify(protectedFile, null, 2),
+        maxPoints: totalPoints > 0 ? totalPoints : undefined
+      },
+      oauthVault,
+      snapshot.settings.googleIntegration
+    );
+
+    const nextPackage: ExamConfigPackage = {
+      ...configPackage,
+      studentLmsBinding: {
+        ...binding,
+        assignmentId: published.courseWork.id,
+        assignmentLabel: published.courseWork.title
+      },
+      updatedAt: new Date().toISOString()
+    };
+    const nextSnapshot = await storage.saveConfigPackage(nextPackage);
+    await recordSecurityEvent(
+      "package",
+      "info",
+      `Posted configuration package "${configPackage.label}" to Google Classroom.`,
+      published.courseWork.alternateLink ?? binding.courseLabel ?? binding.courseId
+    );
+
+    return {
+      snapshot: await withRuntime(Promise.resolve(nextSnapshot)),
+      published
+    };
   });
 
   ipcMain.handle("configPackage:import", async (_event, payload: unknown) => {
@@ -1050,7 +1193,25 @@ app.whenReady().then(async () => {
       result.studentLmsTurnIn = pendingTurnInState;
     }
 
-    void syncSubmissionResultsInternal(result.id, { autoOnly: true }).catch(() => {
+    const packageAutoDestinations = activePackage?.resultDestinations.filter((destination) => destination.trigger === "auto-on-submit") ?? [];
+    for (const destination of packageAutoDestinations) {
+      const pendingSyncState = {
+        destinationId: destination.id,
+        destinationLabel: destination.label,
+        destinationType: destination.type,
+        status: destination.enabled ? "pending" : "disabled"
+      } as const;
+      snapshot = await storage.updateSubmissionSyncState(result.id, pendingSyncState);
+      result.syncStates = [
+        ...result.syncStates.filter((state) => state.destinationId !== destination.id),
+        pendingSyncState
+      ];
+    }
+
+    void syncSubmissionResultsInternal(result.id, {
+      autoOnly: true,
+      packageDestinations: packageAutoDestinations
+    }).catch(() => {
       // Best-effort auto-sync must never block local submission completion.
     });
     return {
@@ -1166,6 +1327,7 @@ app.whenReady().then(async () => {
   });
 
   await createWindow();
+  checkForAppUpdatesAfterStartup();
   await recordSecurityEvent("kiosk", "info", "Lockedscreen kiosk component initialized.", `Platform ${runtimeEnvironment.platform}`);
 
   app.on("activate", async () => {

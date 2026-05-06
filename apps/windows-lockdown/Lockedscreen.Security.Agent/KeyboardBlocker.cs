@@ -44,10 +44,11 @@ internal sealed class KeyboardBlocker : IDisposable
         var ctrlPressed = (NativeMethods.GetAsyncKeyState((int)Keys.ControlKey) & 0x8000) != 0;
 
         var shouldBlock =
-            key is Keys.LWin or Keys.RWin ||
-            key is Keys.PrintScreen ||
-            (altPressed && key is Keys.Tab or Keys.Escape or Keys.F4) ||
-            (ctrlPressed && key == Keys.Escape);
+            key is Keys.LWin or Keys.RWin or Keys.Apps ||
+            key is Keys.PrintScreen or Keys.Snapshot ||
+            (altPressed && (key is Keys.Tab or Keys.Escape or Keys.F4 or Keys.Space)) ||
+            (ctrlPressed && (key is Keys.Escape or Keys.LWin or Keys.RWin)) ||
+            (ctrlPressed && altPressed && (key is Keys.Delete or Keys.Escape));
 
         if (shouldBlock)
         {

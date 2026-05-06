@@ -26,6 +26,7 @@ import type {
   Candidate,
   AppSettings,
   AppStateSnapshot,
+  AppUpdateState,
   BrowserDisplayMode,
   ExamConfigPackage,
   Exam,
@@ -88,7 +89,11 @@ const clampExamZoom = (value: number) =>
 const isHostedFormCompletionUrl = (candidateUrl: string) => {
   try {
     const parsed = new URL(candidateUrl);
-    return parsed.hostname === "docs.google.com" && parsed.pathname.includes("/forms/") && parsed.pathname.includes("/formResponse");
+    return (
+      parsed.hostname === "docs.google.com" &&
+      parsed.pathname.includes("/forms/") &&
+      (parsed.pathname.includes("/formResponse") || parsed.searchParams.has("submit") || parsed.search.includes("form_confirm"))
+    );
   } catch {
     return false;
   }
@@ -159,6 +164,9 @@ const blankResultDestination = (): ResultDestination => {
     apiKeyHeader: "x-api-key",
     className: "",
     courseId: "",
+    connectionId: "",
+    bridgeEndpointUrl: "",
+    sortByLastName: true,
     sheetName: "",
     examIds: [],
     includeResponses: true,
@@ -177,7 +185,9 @@ const defaultLmsScope = (provider: LmsProviderType): string =>
         "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
         "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
-        "https://www.googleapis.com/auth/classroom.rosters.readonly"
+        "https://www.googleapis.com/auth/classroom.rosters.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/spreadsheets"
       ].join(" ")
     : provider === "microsoft-365"
       ? [
@@ -539,6 +549,7 @@ type AdminActionState =
   | "load-lms-students"
   | "duplicate-package"
   | "delete-package"
+  | "publish-classroom-package"
   | "export-package"
   | "import-package";
 
@@ -546,6 +557,29 @@ interface ActionFeedback {
   tone: "success" | "error" | "info";
   text: string;
 }
+
+type SettingsTab =
+  | "overview"
+  | "google"
+  | "turnin"
+  | "results"
+  | "package"
+  | "student-access"
+  | "runtime"
+  | "controls"
+  | "security";
+
+const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "google", label: "Google Classroom" },
+  { id: "turnin", label: "Student turn-in" },
+  { id: "results", label: "Grade sync" },
+  { id: "package", label: "Package basics" },
+  { id: "student-access", label: "Student access" },
+  { id: "runtime", label: "Runtime" },
+  { id: "controls", label: "Controls" },
+  { id: "security", label: "Security" }
+];
 
 const resultSyncTone = (status: ResultSyncStatus): string =>
   status === "success"
@@ -568,7 +602,9 @@ const studentTurnInTone = (status?: "pending" | "success" | "failed" | "skipped"
 const providerLabel = (type: ResultDestinationType | LmsProviderType): string =>
   type === "google-classroom"
     ? "Google Classroom"
-    : type === "microsoft-teams"
+    : type === "google-classroom-grade-sync"
+      ? "Google Classroom grade sync"
+      : type === "microsoft-teams"
       ? "Microsoft Teams"
       : type === "microsoft-365"
         ? "Microsoft 365"
@@ -596,10 +632,35 @@ const hasAdminLmsSetup = (connection: LmsConnection): boolean =>
   (connection.provider !== "generic-oauth-lms" ||
     ((connection.authorizeUrl?.trim().length ?? 0) > 0 && (connection.tokenUrl?.trim().length ?? 0) > 0));
 
+const lmsAccountDisplayName = (connection: LmsConnection): string => {
+  const account = connection.accountName?.trim() || connection.accountEmail?.trim();
+  if (account) {
+    return account;
+  }
+
+  return connection.label.trim() || providerLabel(connection.provider);
+};
+
+const blankResultDestinationWithDefaults = (settings?: AppSettings | null): ResultDestination => ({
+  ...blankResultDestination(),
+  bridgeEndpointUrl: settings?.defaultGoogleSheetsSyncEndpoint?.trim() ?? ""
+});
+
+const lmsAccountOptionLabel = (connection: LmsConnection): string => {
+  const accountName = connection.accountName?.trim();
+  const accountEmail = connection.accountEmail?.trim();
+  if (accountName && accountEmail && accountName !== accountEmail) {
+    return `${accountName} (${accountEmail})`;
+  }
+
+  return accountName || accountEmail || connection.label || providerLabel(connection.provider);
+};
+
 const AppFrame = () => {
   const location = useLocation();
   const { snapshot, loading, error, load } = useLockedscreenStore();
   const [launchContext, setLaunchContext] = useState<LaunchContext | null>(null);
+  const [updateState, setUpdateState] = useState<AppUpdateState | null>(null);
   const installedRole: InstalledAppRole = launchContext?.installedRole ?? "teacher";
   const isStudentRoute =
     installedRole === "student" ||
@@ -607,6 +668,7 @@ const AppFrame = () => {
     location.pathname.startsWith("/session/") ||
     location.pathname.startsWith("/link/") ||
     location.pathname.startsWith("/package-import");
+  const canShowUpdates = !location.pathname.startsWith("/session/") && !location.pathname.startsWith("/link/");
 
   useEffect(() => {
     void load();
@@ -614,6 +676,12 @@ const AppFrame = () => {
     const unsubscribe = window.lockedscreenApi.onLaunchContextChanged(setLaunchContext);
     return unsubscribe;
   }, [load]);
+
+  useEffect(() => {
+    void window.lockedscreenApi.getUpdateState().then(setUpdateState);
+    const unsubscribe = window.lockedscreenApi.onUpdateStateChanged(setUpdateState);
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     document.documentElement.className = themeClass(snapshot?.settings.defaultTheme ?? "system");
@@ -633,6 +701,7 @@ const AppFrame = () => {
 
   return (
     <div className={`min-h-screen text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-4 sm:p-6"}`}>
+      {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
         <Routes>
           <Route path="/" element={<StudentPortalPage />} />
@@ -875,12 +944,13 @@ const StudentPortalPage = () => {
         }
       } catch (error) {
         setLaunchFeedback({
-          tone: "info",
+          tone: "error",
           text:
             error instanceof Error
-              ? `${error.message} Starting the exam in this Lockedscreen window instead.`
-              : "Alternate desktop launch failed. Starting the exam in this Lockedscreen window instead."
+              ? `${error.message} This full-kiosk exam cannot start until native Windows lockdown is active.`
+              : "Native lockdown launch failed. This full-kiosk exam cannot start until the Windows lockdown companion is active."
         });
+        return;
       }
     }
 
@@ -1181,12 +1251,13 @@ const DashboardPage = () => {
         }
       } catch (error) {
         setLaunchFeedback({
-          tone: "info",
+          tone: "error",
           text:
             error instanceof Error
-              ? `${error.message} Starting the exam in the current Lockedscreen window instead.`
-              : "Alternate desktop launch failed. Starting the exam in the current Lockedscreen window instead."
+              ? `${error.message} This full-kiosk exam cannot start until native Windows lockdown is active.`
+              : "Native lockdown launch failed. This full-kiosk exam cannot start until the Windows lockdown companion is active."
         });
+        return;
       }
     }
 
@@ -2489,6 +2560,7 @@ const SettingsPage = () => {
     deleteConfigPackage,
     duplicateConfigPackage,
     exportConfigPackage,
+    publishConfigPackageToClassroom,
     importConfigPackage,
     refreshSecurityOverview
   } = useLockedscreenStore();
@@ -2515,6 +2587,7 @@ const SettingsPage = () => {
   const [adminAdvancedUnlocked, setAdminAdvancedUnlocked] = useState(false);
   const [adminPinAttempt, setAdminPinAttempt] = useState("");
   const [adminUnlockError, setAdminUnlockError] = useState<string | null>(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("overview");
   const autoTestingMode = snapshot?.runtime?.canOnlyUseTestingMode === true;
 
   useEffect(() => {
@@ -2565,7 +2638,7 @@ const SettingsPage = () => {
     if (snapshot.resultDestinations.length === 0) {
       if (!destinationDirty) {
         setSelectedDestinationId("");
-        setDestinationDraft(blankResultDestination());
+        setDestinationDraft(blankResultDestinationWithDefaults(snapshot.settings));
       }
     } else {
       const selectedDestination =
@@ -2612,6 +2685,53 @@ const SettingsPage = () => {
     snapshot
   ]);
 
+  useEffect(() => {
+    if (!snapshot || !packageDraft || packageDirty) {
+      return;
+    }
+
+    const binding = packageDraft.studentLmsBinding;
+    if (binding.provider !== "google-classroom" || binding.connectionId) {
+      return;
+    }
+
+    const connectedGoogleAccounts = snapshot.lmsConnections.filter(
+      (connection) => connection.provider === "google-classroom" && connection.status === "connected"
+    );
+
+    if (connectedGoogleAccounts.length !== 1) {
+      return;
+    }
+
+    const teacherConnection = connectedGoogleAccounts[0];
+    if (!teacherConnection) {
+      return;
+    }
+    setPackageDirty(true);
+    setPackageDraft((current) =>
+      current
+        ? {
+            ...current,
+            studentLmsBinding: {
+              ...current.studentLmsBinding,
+              connectionId: teacherConnection.id,
+              provider: "google-classroom",
+              clientId: teacherConnection.clientId,
+              clientSecret: teacherConnection.clientSecret,
+              tenantId: "",
+              scope: teacherConnection.scope?.trim() || defaultStudentLmsScope("google-classroom")
+            }
+          }
+        : current
+    );
+  }, [
+    packageDirty,
+    packageDraft?.id,
+    packageDraft?.studentLmsBinding.connectionId,
+    packageDraft?.studentLmsBinding.provider,
+    snapshot
+  ]);
+
   if (!settings || !security || !packageDraft || !destinationDraft || !connectionDraft || !snapshot) {
     return null;
   }
@@ -2648,6 +2768,10 @@ const SettingsPage = () => {
     settings.googleIntegration.enabled && settings.googleIntegration.clientId.trim().length > 0;
   const connectionHasAdminSetup =
     connectionDraft.provider === "google-classroom" ? googleIntegrationReady : hasAdminLmsSetup(connectionDraft);
+  // Video/demo note: these tabs turn the Admin Console from one long page into smaller teacher/admin pages.
+  const settingsTabClass = (tab: SettingsTab): string => (settingsTab === tab ? "space-y-6" : "hidden");
+  const settingsTabStyle = (tab: SettingsTab): CSSProperties =>
+    settingsTab === tab ? {} : { display: "none" };
   const adminUnlockPin = settings.adminUnlockPin.trim();
   const adminUnlockRequiresPin = adminUnlockPin.length > 0;
 
@@ -2683,7 +2807,7 @@ const SettingsPage = () => {
 
   const selectDestination = (nextDestination: ResultDestination | null) => {
     setSelectedDestinationId(nextDestination?.id ?? "");
-    setDestinationDraft(nextDestination ?? blankResultDestination());
+    setDestinationDraft(nextDestination ?? blankResultDestinationWithDefaults(settings));
     setDestinationDirty(false);
   };
 
@@ -2765,8 +2889,10 @@ const SettingsPage = () => {
                             ? "Loading classes..."
                             : action === "load-lms-coursework"
                               ? "Loading assignments..."
-                              : action === "load-lms-students"
-                                ? "Loading students..."
+                : action === "load-lms-students"
+                  ? "Loading students..."
+                  : action === "publish-classroom-package"
+                    ? "Posting package to Google Classroom..."
                 : action === "duplicate-package"
                   ? "Duplicating package..."
                   : action === "delete-package"
@@ -2825,6 +2951,7 @@ const SettingsPage = () => {
       ...settings,
       adminUnlockPin: settings.adminUnlockPin.trim(),
       invigilatorUnlockPin: settings.invigilatorUnlockPin.trim(),
+      defaultGoogleSheetsSyncEndpoint: settings.defaultGoogleSheetsSyncEndpoint?.trim() ?? "",
       googleIntegration: {
         ...settings.googleIntegration,
         clientId: settings.googleIntegration.clientId.trim(),
@@ -2857,6 +2984,9 @@ const SettingsPage = () => {
       endpointUrl: destinationDraft.endpointUrl.trim(),
       className: destinationDraft.className?.trim() || undefined,
       courseId: destinationDraft.courseId?.trim() || undefined,
+      connectionId: destinationDraft.connectionId?.trim() || undefined,
+      bridgeEndpointUrl: destinationDraft.bridgeEndpointUrl?.trim() || undefined,
+      sortByLastName: destinationDraft.sortByLastName === true,
       sheetName: destinationDraft.sheetName?.trim() || undefined,
       authToken: destinationDraft.authToken?.trim() || undefined,
       apiKeyHeader: destinationDraft.apiKeyHeader?.trim() || undefined,
@@ -2881,7 +3011,7 @@ const SettingsPage = () => {
       success: "Result destination deleted.",
       empty: "Result destination deletion did not complete.",
       onSuccess: (nextSnapshot) => {
-        selectDestination(nextSnapshot.resultDestinations[0] ?? blankResultDestination());
+        selectDestination(nextSnapshot.resultDestinations[0] ?? blankResultDestinationWithDefaults(settings));
       }
     });
 
@@ -3023,6 +3153,56 @@ const SettingsPage = () => {
       onSuccess: (courses) => setConnectionCourses(courses)
     });
 
+  const selectBindingCourse = (course: LmsCourse) => {
+    setBindingCourseWork([]);
+    setBindingStudents([]);
+    updatePackage((current) => ({
+      ...current,
+      studentLmsBinding: {
+        ...current.studentLmsBinding,
+        courseId: course.id,
+        courseLabel: course.name,
+        assignmentId: "",
+        assignmentLabel: ""
+      },
+      studentAccessPolicy: {
+        ...current.studentAccessPolicy,
+        assignedClassNames: course.name ? [course.name] : current.studentAccessPolicy.assignedClassNames,
+        assignedCandidateIds: []
+      }
+    }));
+
+    const connectionId = packageDraft.studentLmsBinding.connectionId?.trim();
+    if (connectionId) {
+      void loadBindingCourseWork(connectionId, course.id);
+    }
+  };
+
+  const removeLoadedCourse = (courseId: string) => {
+    setConnectionCourses((courses) => courses.filter((course) => course.id !== courseId));
+    if (packageDraft.studentLmsBinding.courseId !== courseId) {
+      return;
+    }
+
+    setBindingCourseWork([]);
+    setBindingStudents([]);
+    updatePackage((current) => ({
+      ...current,
+      studentLmsBinding: {
+        ...current.studentLmsBinding,
+        courseId: "",
+        courseLabel: "",
+        assignmentId: "",
+        assignmentLabel: ""
+      },
+      studentAccessPolicy: {
+        ...current.studentAccessPolicy,
+        assignedClassNames: [],
+        assignedCandidateIds: []
+      }
+    }));
+  };
+
   const loadBindingCourseWork = async (connectionId: string, courseId: string) => {
     if (!connectionId || !courseId.trim()) {
       setActionFeedback({
@@ -3112,6 +3292,59 @@ const SettingsPage = () => {
     }));
   };
 
+  const applyClassroomBindingToGradeSync = () => {
+    const binding = packageDraft.studentLmsBinding;
+    if (!binding.connectionId || !binding.courseId) {
+      setActionFeedback({
+        tone: "error",
+        text: "Choose a connected Google Classroom account and class before setting up grade sync."
+      });
+      return;
+    }
+
+    const teacherConnection = snapshot.lmsConnections.find((connection) => connection.id === binding.connectionId);
+    const courseLabel = binding.courseLabel || binding.courseId;
+    const examIds = selectedExam?.id ? Array.from(new Set([...(destinationDraft.examIds ?? []), selectedExam.id])) : destinationDraft.examIds;
+    const notes = [
+      `Google Classroom account: ${teacherConnection ? lmsAccountOptionLabel(teacherConnection) : binding.connectionId}`,
+      `Class: ${courseLabel}`,
+      `Course ID: ${binding.courseId}`,
+      binding.assignmentId ? `Assignment: ${binding.assignmentLabel || binding.assignmentId}` : "",
+      binding.assignmentId ? `Assignment ID: ${binding.assignmentId}` : "",
+      "Server-side grade sync writes scores through the school-owned bridge after local submission."
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setSelectedDestinationId(destinationDraft.id);
+    setDestinationDirty(true);
+    setDestinationDraft((current) =>
+      current
+        ? {
+            ...current,
+            type: "google-classroom-grade-sync",
+            label:
+              current.label === "New destination" || current.label === providerLabel(current.type)
+                ? `Classroom grade sync - ${courseLabel}`
+                : current.label,
+            enabled: true,
+            trigger: "auto-on-submit",
+            className: courseLabel,
+            courseId: binding.courseId,
+            connectionId: binding.connectionId,
+            examIds,
+            includeResponses: true,
+            notes
+          }
+        : current
+    );
+    setSettingsTab("results");
+    setActionFeedback({
+      tone: "success",
+      text: "Classroom class and assignment details were copied into Grade sync. Add the grade-sync server endpoint, then save the destination."
+    });
+  };
+
   const handleDuplicatePackage = async () => {
     const previousIds = new Set(snapshot.configPackages.map((candidate) => candidate.id));
     await runAdminAction("duplicate-package", () => duplicateConfigPackage(packageDraft.id), {
@@ -3146,6 +3379,33 @@ const SettingsPage = () => {
         empty: "Package export was cancelled or did not complete."
       }
     );
+
+  const handlePublishPackageToClassroom = async () => {
+    if (packageDirty) {
+      await handleSavePackage();
+    }
+
+    await runAdminAction(
+      "publish-classroom-package",
+      () => publishConfigPackageToClassroom({ packageId: packageDraft.id }),
+      {
+        success: (published) =>
+          `Posted "${published.courseWork.title}" to Google Classroom${published.driveFileName ? ` with ${published.driveFileName}` : ""}.`,
+        empty: "Google Classroom post did not complete.",
+        onSuccess: (published) => {
+          setPackageDraft((current) => current ? ({
+            ...current,
+            studentLmsBinding: {
+              ...current.studentLmsBinding,
+              assignmentId: published.courseWork.id,
+              assignmentLabel: published.courseWork.title
+            }
+          }) : current);
+          setPackageDirty(false);
+        }
+      }
+    );
+  };
 
   const handleImportPackage = async () => {
     const previousPackages = new Map(
@@ -3200,6 +3460,24 @@ const SettingsPage = () => {
         <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(actionFeedback.tone)}`}>{actionFeedback.text}</div>
       ) : null}
 
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900">
+        {settingsTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              settingsTab === tab.id
+                ? "bg-teal-600 text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            }`}
+            onClick={() => setSettingsTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className={settingsTabClass("overview")} style={settingsTabStyle("overview")}>
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3266,7 +3544,9 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("google")} style={settingsTabStyle("google")}> 
       <Card className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -3377,6 +3657,22 @@ const SettingsPage = () => {
                   }))
                 }
               />
+            </LabelledField>
+
+            <LabelledField label="Default Google Sheets sync URL">
+              <Input
+                placeholder="https://script.google.com/macros/s/.../exec"
+                value={settings.defaultGoogleSheetsSyncEndpoint ?? ""}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    defaultGoogleSheetsSyncEndpoint: event.target.value
+                  }))
+                }
+              />
+              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                Admin configures this once. Teachers can then paste only the Google Sheet link when preparing a test; both values are exported inside the test package for students.
+              </div>
             </LabelledField>
           </div>
         </AdvancedAdminSection>
@@ -3708,7 +4004,9 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("turnin")} style={settingsTabStyle("turnin")}> 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3758,7 +4056,7 @@ const SettingsPage = () => {
                 <option value="microsoft-365">Microsoft 365</option>
               </select>
             </LabelledField>
-            <LabelledField label="Teacher school account">
+            <LabelledField label="Connected Google Classroom account">
               <select
                 className={selectClassName}
                 value={packageDraft.studentLmsBinding.connectionId ?? ""}
@@ -3790,13 +4088,30 @@ const SettingsPage = () => {
                   }));
                 }}
               >
-                <option value="">Choose a connected account</option>
+                <option value="">Choose the teacher's connected Google account</option>
                 {bindingConnections.map((connection) => (
                   <option key={connection.id} value={connection.id}>
-                    {connection.label}
+                    {lmsAccountOptionLabel(connection)}
                   </option>
                 ))}
               </select>
+              {bindingConnections.length === 0 ? (
+                <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">
+                  Connect Google Classroom in the Google Classroom tab first. The teacher's signed-in name will appear here after
+                  authorization succeeds.
+                </div>
+              ) : packageDraft.studentLmsBinding.connectionId ? (
+                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                  Student submissions will use {lmsAccountDisplayName(
+                    bindingConnections.find((connection) => connection.id === packageDraft.studentLmsBinding.connectionId) ??
+                      bindingConnections[0]!
+                  )} for this Classroom link.
+                </div>
+              ) : (
+                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                  Choose the teacher's signed-in Google account for this package.
+                </div>
+              )}
             </LabelledField>
           </div>
 
@@ -3851,6 +4166,53 @@ const SettingsPage = () => {
             </Button>
           </div>
 
+          {connectionCourses.length > 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Loaded Google Classroom classes</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-300">
+                    Choose the class for this test. Remove only hides a class from this Lockedscreen list; it does not delete it from Google Classroom.
+                  </div>
+                </div>
+                <Badge>{connectionCourses.length} loaded</Badge>
+              </div>
+              <div className="grid gap-2">
+                {connectionCourses.map((course) => {
+                  const selected = packageDraft.studentLmsBinding.courseId === course.id;
+                  return (
+                    <div
+                      key={course.id}
+                      className={`grid gap-3 rounded-xl border px-4 py-3 text-sm md:grid-cols-[1fr_auto] md:items-center ${
+                        selected
+                          ? "border-teal-300 bg-teal-50 text-teal-950 dark:border-teal-700 dark:bg-teal-950/30 dark:text-teal-50"
+                          : "border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{course.name}</span>
+                          {selected ? <Badge className="bg-teal-100 text-teal-900">Selected</Badge> : null}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                          {course.section ? `${course.section} / ${course.id}` : course.id}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant={selected ? "primary" : "secondary"} onClick={() => selectBindingCourse(course)}>
+                          {selected ? "Using class" : "Use class"}
+                        </Button>
+                        <Button variant="secondary" onClick={() => removeLoadedCourse(course.id)}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
             <LabelledField label="Assignment">
               <select
@@ -3875,6 +4237,9 @@ const SettingsPage = () => {
                   </option>
                 ))}
               </select>
+              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                Use the teacher's existing school Google account. No new Lockedscreen account is needed.
+              </div>
             </LabelledField>
             <Button
               variant="secondary"
@@ -3888,6 +4253,37 @@ const SettingsPage = () => {
           {packageDraft.studentLmsBinding.courseLabel ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
               Selected class: <span className="font-semibold text-slate-900 dark:text-slate-50">{packageDraft.studentLmsBinding.courseLabel}</span>
+              <div className="mt-3">
+                <Button variant="secondary" onClick={applyClassroomBindingToGradeSync}>
+                  Set up grade sync for this class
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {packageDraft.studentLmsBinding.provider === "google-classroom" ? (
+            <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950">
+              <div className="font-semibold">Post this test to Google Classroom</div>
+              <p className="mt-1">
+                Lockedscreen will upload the protected `.lscp` package to the teacher's Google Drive and publish it as
+                classwork in the selected class: {packageDraft.studentLmsBinding.courseLabel || "choose a class above first"}.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  onClick={() => void handlePublishPackageToClassroom()}
+                  disabled={
+                    adminBusy ||
+                    !packageDraft.studentLmsBinding.enabled ||
+                    !packageDraft.studentLmsBinding.connectionId ||
+                    !packageDraft.studentLmsBinding.courseId
+                  }
+                >
+                  {isPending("publish-classroom-package") ? "Posting..." : "Post package to class"}
+                </Button>
+                {packageDraft.studentLmsBinding.assignmentLabel ? (
+                  <Badge className="bg-white text-teal-900">Connected to {packageDraft.studentLmsBinding.assignmentLabel}</Badge>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -4019,7 +4415,9 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("results")} style={settingsTabStyle("results")}> 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -4032,6 +4430,29 @@ const SettingsPage = () => {
             <Badge>{snapshot.resultDestinations.length} destination(s)</Badge>
           </div>
 
+          <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950 dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-50">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="font-semibold">Use selected Google Classroom setup</div>
+                <div className="mt-1 text-teal-900 dark:text-teal-100">
+                  Import the teacher account, class, assignment, and exam scope from Student turn-in into this grade-sync destination.
+                </div>
+                <div className="mt-3 grid gap-1 text-xs">
+                  <span>Class: {packageDraft.studentLmsBinding.courseLabel || "Select a class in Student turn-in"}</span>
+                  <span>Assignment: {packageDraft.studentLmsBinding.assignmentLabel || "Optional, or post the package to class first"}</span>
+                  <span>Exam: {selectedExam?.title || packageDraft.label}</span>
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={applyClassroomBindingToGradeSync}
+                disabled={!packageDraft.studentLmsBinding.connectionId || !packageDraft.studentLmsBinding.courseId}
+              >
+                Import Classroom details
+              </Button>
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
             <LabelledField label="Selected destination">
               <select
@@ -4039,7 +4460,7 @@ const SettingsPage = () => {
                 value={snapshot.resultDestinations.some((candidate) => candidate.id === selectedDestinationId) ? selectedDestinationId : "__new__"}
                 onChange={(event) => {
                   if (event.target.value === "__new__") {
-                    selectDestination(blankResultDestination());
+                    selectDestination(blankResultDestinationWithDefaults(settings));
                     return;
                   }
 
@@ -4087,6 +4508,7 @@ const SettingsPage = () => {
                 }
               >
                 <option value="google-classroom">Google Classroom</option>
+                <option value="google-classroom-grade-sync">Google Classroom grade sync server</option>
                 <option value="microsoft-teams">Microsoft Teams</option>
                 <option value="google-sheets">Google Sheets</option>
                 <option value="generic-lms">Generic LMS</option>
@@ -4121,13 +4543,45 @@ const SettingsPage = () => {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <LabelledField label="Endpoint URL">
+            <LabelledField label={destinationDraft.type === "google-sheets" ? "Google Sheet link" : "Endpoint URL"}>
               <Input
-                placeholder="https://..."
+                placeholder={destinationDraft.type === "google-sheets" ? "https://docs.google.com/spreadsheets/d/..." : "https://..."}
                 value={destinationDraft.endpointUrl}
                 onChange={(event) => updateDestination((current) => ({ ...current, endpointUrl: event.target.value }))}
               />
             </LabelledField>
+            {destinationDraft.type === "google-sheets" ? (
+              <LabelledField label="Teacher Google account">
+                <select
+                  className={selectClassName}
+                  value={destinationDraft.connectionId ?? ""}
+                  onChange={(event) => updateDestination((current) => ({ ...current, connectionId: event.target.value }))}
+                >
+                  <option value="">Use connected Classroom account</option>
+                  {snapshot.lmsConnections
+                    .filter((connection) => connection.provider === "google-classroom" && connection.status === "connected")
+                    .map((connection) => (
+                      <option key={connection.id} value={connection.id}>
+                        {lmsAccountOptionLabel(connection)}
+                      </option>
+                    ))}
+                </select>
+              </LabelledField>
+            ) : null}
+            {destinationDraft.type === "google-sheets" ? (
+              <LabelledField label="School/Apps Script sync URL">
+                <Input
+                  placeholder={settings.defaultGoogleSheetsSyncEndpoint ? "Using admin default unless changed" : "https://script.google.com/macros/s/.../exec"}
+                  value={destinationDraft.bridgeEndpointUrl ?? ""}
+                  onChange={(event) =>
+                    updateDestination((current) => ({ ...current, bridgeEndpointUrl: event.target.value }))
+                  }
+                />
+                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                  This is saved into the exported test package. Students do not enter it on their machines.
+                </div>
+              </LabelledField>
+            ) : null}
             <LabelledField label="Auth mode">
               <select
                 className={selectClassName}
@@ -4168,9 +4622,9 @@ const SettingsPage = () => {
                 onChange={(event) => updateDestination((current) => ({ ...current, className: event.target.value }))}
               />
             </LabelledField>
-            <LabelledField label="Provider reference">
+            <LabelledField label={destinationDraft.type === "google-sheets" ? "Sheet tab name" : "Provider reference"}>
               <Input
-                placeholder={destinationDraft.type === "google-sheets" ? "Sheet name" : "Course / channel / LMS id"}
+                placeholder={destinationDraft.type === "google-sheets" ? "Leave blank for first sheet" : "Course / channel / LMS id"}
                 value={destinationDraft.type === "google-sheets" ? destinationDraft.sheetName ?? "" : destinationDraft.courseId ?? ""}
                 onChange={(event) =>
                   updateDestination((current) => ({
@@ -4212,6 +4666,14 @@ const SettingsPage = () => {
             onChange={(checked) => updateDestination((current) => ({ ...current, includeResponses: checked }))}
           />
 
+          {destinationDraft.type === "google-sheets" ? (
+            <ToggleField
+              label="Sort Google Sheet by student last name"
+              checked={destinationDraft.sortByLastName !== false}
+              onChange={(checked) => updateDestination((current) => ({ ...current, sortByLastName: checked }))}
+            />
+          ) : null}
+
           <LabelledField label="Notes">
             <Textarea
               className="min-h-[110px]"
@@ -4225,10 +4687,13 @@ const SettingsPage = () => {
           <CardTitle>Integration guidance</CardTitle>
           <div className="grid gap-3">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              Google Sheets: point the endpoint URL to an Apps Script web app or another sheet-ingest service.
+              Google Sheets: teachers paste the Sheet link once while preparing the test. The exported package carries the Sheet target and sync URL to student machines; students do not configure Sheets.
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              Google Classroom and Microsoft Teams: use a school-owned middleware endpoint, webhook, or automation flow that receives Lockedscreen results and pushes them into the LMS.
+              Google Classroom grade sync server: point the endpoint URL to the school-owned grade-sync bridge. The app sends the local score; the server owns the teacher authorization and writes the grade into Classroom.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Microsoft Teams or generic LMS: use a school-owned middleware endpoint, webhook, or automation flow that receives Lockedscreen results and pushes them into the LMS.
             </div>
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               Security boundary: destination sync runs after submission from the teacher/admin side. It does not weaken the secure student session or change kiosk restrictions.
@@ -4236,7 +4701,9 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("package")} style={settingsTabStyle("package")}> 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>General</CardTitle>
@@ -4384,7 +4851,9 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("student-access")} style={settingsTabStyle("student-access")}>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Student Assignment</CardTitle>
@@ -4484,7 +4953,9 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("runtime")} style={settingsTabStyle("runtime")}>
       <div className="grid gap-6 xl:grid-cols-3">
         <Card className="space-y-5">
           <CardTitle>Student Interface</CardTitle>
@@ -4523,6 +4994,19 @@ const SettingsPage = () => {
                 teacherOptions: {
                   ...current.teacherOptions,
                   showTimer: checked
+                }
+              }))
+            }
+          />
+          <ToggleField
+            label="Show student score after submission"
+            checked={packageDraft.teacherOptions.showScoreAfterSubmit}
+            onChange={(checked) =>
+              updatePackage((current) => ({
+                ...current,
+                teacherOptions: {
+                  ...current.teacherOptions,
+                  showScoreAfterSubmit: checked
                 }
               }))
             }
@@ -4681,7 +5165,9 @@ const SettingsPage = () => {
           </LabelledField>
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("controls")} style={settingsTabStyle("controls")}>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Applications</CardTitle>
@@ -4940,7 +5426,9 @@ const SettingsPage = () => {
           ) : null}
         </Card>
       </div>
+      </div>
 
+      <div className={settingsTabClass("security")} style={settingsTabStyle("security")}>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Security posture</CardTitle>
@@ -5067,7 +5555,75 @@ const SettingsPage = () => {
           </div>
         </Card>
       </div>
+      </div>
     </motion.div>
+  );
+};
+
+const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
+  const visible =
+    state.status === "available" ||
+    state.status === "downloading" ||
+    state.status === "downloaded" ||
+    state.status === "error";
+
+  if (!visible || dismissedVersion === `${state.status}:${state.availableVersion ?? state.message ?? ""}`) {
+    return null;
+  }
+
+  const title =
+    state.status === "available"
+      ? `Lockedscreen ${state.availableVersion} is available`
+      : state.status === "downloaded"
+        ? "Update ready to install"
+        : state.status === "downloading"
+          ? "Downloading Lockedscreen update"
+          : "Update check needs attention";
+  const message =
+    state.message ??
+    (state.status === "available"
+      ? "Download the update when this device is not in an active exam."
+      : "Lockedscreen could not complete the update check.");
+
+  return (
+    <div className="mb-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-950 shadow-sm dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-50">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-semibold">{title}</div>
+          <div className="mt-1 text-teal-900 dark:text-teal-100">{message}</div>
+          {state.status === "downloading" ? (
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-teal-100 dark:bg-teal-900">
+              <div className="h-full rounded-full bg-teal-600" style={{ width: `${Math.max(0, Math.min(100, state.percent ?? 0))}%` }} />
+            </div>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {state.status === "available" ? (
+            <Button variant="secondary" onClick={() => void window.lockedscreenApi.downloadUpdate()}>
+              <Download className="size-4" />
+              Download update
+            </Button>
+          ) : null}
+          {state.status === "downloaded" ? (
+            <Button onClick={() => void window.lockedscreenApi.installUpdate()}>
+              Install now
+            </Button>
+          ) : null}
+          {state.status === "error" ? (
+            <Button variant="secondary" onClick={() => void window.lockedscreenApi.checkForUpdates()}>
+              Check again
+            </Button>
+          ) : null}
+          <Button
+            variant="secondary"
+            onClick={() => setDismissedVersion(`${state.status}:${state.availableVersion ?? state.message ?? ""}`)}
+          >
+            Later
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -5265,11 +5821,19 @@ const StudentExamPage = () => {
           <Card className="space-y-4 border-emerald-200 bg-emerald-50">
             <Badge className="bg-emerald-100 text-emerald-800">Submission recorded</Badge>
             <CardTitle>Your exam has been submitted.</CardTitle>
-            <CardDescription className="text-slate-700 dark:text-emerald-100">
-              Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen. If this
-              package requires invigilator-controlled exit, the session remains locked until the invigilator unlocks it.
-            </CardDescription>
-          </Card>
+              <CardDescription className="text-slate-700 dark:text-emerald-100">
+                Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen. If this
+                package requires invigilator-controlled exit, the session remains locked until the invigilator unlocks it.
+              </CardDescription>
+              {configPackage?.teacherOptions.showScoreAfterSubmit && submissionResult ? (
+                <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-emerald-950">
+                  <div className="text-sm font-semibold">Score</div>
+                  <div className="mt-1 text-2xl font-bold">
+                    {submissionResult.score}/{submissionResult.totalPoints} ({submissionResult.percentage}%)
+                  </div>
+                </div>
+              ) : null}
+            </Card>
           <StudentLmsTurnInPanel
             configPackage={configPackage}
             submission={submissionResult}
@@ -5662,7 +6226,7 @@ const LinkExamPage = () => {
           src={configPackage?.browserPolicy.startUrl ?? exam.linkConfig?.url}
           partition="persist:lockedscreen-link"
           useragent={hostedExamUserAgent}
-          allowpopups={false}
+          allowpopups={true}
         />
       </div>
     </StudentShell>
@@ -5772,6 +6336,12 @@ const StudentShell = ({
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "u") {
+        event.preventDefault();
+        setUnlockOpen(true);
+        return;
+      }
+
       if (isEditableTarget(event.target)) {
         return;
       }
@@ -5796,6 +6366,7 @@ const StudentShell = ({
         unlockInputRef.current?.focus();
         unlockInputRef.current?.select();
       });
+      window.setTimeout(() => unlockInputRef.current?.focus(), 100);
     }
 
     onUnlockDialogChange?.(unlockOpen);
@@ -5973,7 +6544,8 @@ const StudentShell = ({
       ) : null}
 
       {unlockOpen ? (
-        <Card className="border-amber-200 bg-white p-4">
+        <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/75 p-4 pt-20 backdrop-blur-sm">
+        <Card className="w-full max-w-3xl border-amber-200 bg-white p-4 shadow-2xl">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
               <div className="flex items-center gap-3">
@@ -6035,6 +6607,7 @@ const StudentShell = ({
             </div>
           </div>
         </Card>
+        </div>
       ) : null}
 
       <div
@@ -6288,3 +6861,4 @@ export default function App() {
     </MemoryRouter>
   );
 }
+

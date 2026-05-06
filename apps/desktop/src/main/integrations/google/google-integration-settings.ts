@@ -3,7 +3,8 @@ import type { GoogleIntegrationSettings, LmsConnectionStatus } from "@lockedscre
 export const googleClassroomDesktopOAuth = {
   authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
   tokenUrl: "https://oauth2.googleapis.com/token",
-  classroomApiBaseUrl: "https://classroom.googleapis.com/v1"
+  classroomApiBaseUrl: "https://classroom.googleapis.com/v1",
+  driveUploadBaseUrl: "https://www.googleapis.com/upload/drive/v3"
 } as const;
 
 export const defaultGoogleClassroomScopes = [
@@ -13,7 +14,9 @@ export const defaultGoogleClassroomScopes = [
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
-  "https://www.googleapis.com/auth/classroom.rosters.readonly"
+  "https://www.googleapis.com/auth/classroom.rosters.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/spreadsheets"
 ] as const;
 
 export const createDefaultGoogleIntegrationSettings = (): GoogleIntegrationSettings => ({

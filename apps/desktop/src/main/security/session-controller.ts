@@ -20,6 +20,48 @@ let activeSession: ActiveSessionState | null = null;
 let activePackage: ExamConfigPackage | null = null;
 let navigationGuard: NavigationGuard | null = null;
 
+const hostedAuthDomains = [
+  "accounts.google.com",
+  "accounts.youtube.com",
+  "myaccount.google.com",
+  "www.google.com",
+  "oauth2.googleapis.com",
+  "apis.google.com",
+  "content.googleapis.com",
+  "ssl.gstatic.com",
+  "www.gstatic.com",
+  "fonts.gstatic.com",
+  "fonts.googleapis.com",
+  "lh3.googleusercontent.com",
+  "lh4.googleusercontent.com",
+  "lh5.googleusercontent.com",
+  "lh6.googleusercontent.com",
+  "ogs.google.com",
+  "googleusercontent.com"
+];
+
+const isHostedGoogleFormsUrl = (target: URL): boolean => {
+  if (target.hostname === "forms.gle" || target.hostname === "forms.google.com") {
+    return true;
+  }
+
+  return target.hostname === "docs.google.com" && target.pathname.includes("/forms/");
+};
+
+const isHostedGoogleFormsScoreUrl = (target: URL): boolean => {
+  if (target.hostname !== "docs.google.com" || !target.pathname.includes("/forms/")) {
+    return false;
+  }
+
+  return (
+    target.pathname.includes("/viewscore") ||
+    target.pathname.includes("/viewanalytics") ||
+    target.searchParams.has("viewscore") ||
+    target.searchParams.has("score") ||
+    target.search.includes("viewscore")
+  );
+};
+
 export const getActiveSession = (): ActiveSessionState | null => activeSession;
 export const getActivePackage = (): ExamConfigPackage | null => activePackage;
 
@@ -37,8 +79,18 @@ export const urlAllowedByGuard = (targetUrl: string): boolean => {
     const domainAllowed = navigationGuard.allowedDomains.some(
       (domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)
     );
+    // Video/demo note: Google Forms sign-in opens Google auth pages outside the original form URL.
+    // These trusted Google domains let students sign in without disabling the exam URL guard.
+    const googleAuthAllowed =
+      navigationGuard.mode === "link" &&
+      hostedAuthDomains.some((domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`));
+    // Google Forms posts the final response to docs.google.com/forms/.../formResponse, then may open
+    // docs.google.com/forms/.../viewscore so students can see grades released by the teacher.
+    // Both routes stay inside Google Forms and are allowed without opening the unrestricted browser.
+    const googleFormsAllowed = navigationGuard.mode === "link" && isHostedGoogleFormsUrl(target);
+    const googleFormsScoreAllowed = navigationGuard.mode === "link" && isHostedGoogleFormsScoreUrl(target);
     const prefixAllowed = navigationGuard.allowedPrefixes?.some((prefix) => targetUrl.startsWith(prefix)) ?? false;
-    return domainAllowed || prefixAllowed;
+    return domainAllowed || googleAuthAllowed || googleFormsAllowed || googleFormsScoreAllowed || prefixAllowed;
   } catch {
     return false;
   }
@@ -61,15 +113,22 @@ export const clearHostedPartitionData = async (): Promise<void> => {
 
 const activeShortcutBlocked = (input: Input): boolean => {
   const lowerKey = input.key.toLowerCase();
-  if (input.key === "F5") {
+  if (input.key === "F5" || input.meta) {
     return true;
   }
 
-  if (input.control && ["r", "w", "n", "p", "l"].includes(lowerKey)) {
+  if (
+    input.control &&
+    ["a", "c", "f", "i", "j", "l", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x"].includes(lowerKey)
+  ) {
     return true;
   }
 
-  if (input.alt && ["left", "right"].includes(lowerKey)) {
+  if (input.control && input.shift && ["delete", "escape", "i", "j", "r"].includes(lowerKey)) {
+    return true;
+  }
+
+  if (input.alt && ["escape", "f4", "left", "right", "tab"].includes(lowerKey)) {
     return true;
   }
 
@@ -81,7 +140,16 @@ const activeShortcutBlocked = (input: Input): boolean => {
 };
 
 export const configureWebContents = (contents: WebContents, recordSecurityEvent: SecurityEventRecorder): void => {
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.setWindowOpenHandler(({ url }) => {
+    if (urlAllowedByGuard(url)) {
+      // Keep approved sign-in popups inside the locked exam webview instead of opening a normal browser window.
+      void contents.loadURL(url);
+    } else {
+      void recordSecurityEvent("navigation", "warning", "Blocked hosted-exam popup to an unapproved URL.", url);
+    }
+
+    return { action: "deny" };
+  });
   contents.on("before-input-event", (event, input) => {
     if (!activeSession) {
       return;

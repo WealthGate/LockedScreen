@@ -15,7 +15,12 @@ export type SessionTimeoutAction = "submit" | "restart" | "lock" | "open-exit-li
 export type ProcessViolationAction = "log-only" | "review-recommended";
 export type ApprovedAppSupervision = "launch-and-monitor" | "monitor-only";
 export type NativeLockdownFeatureLevel = "none" | "partial" | "desktop-lockdown";
-export type ResultDestinationType = "google-classroom" | "microsoft-teams" | "google-sheets" | "generic-lms";
+export type ResultDestinationType =
+  | "google-classroom"
+  | "google-classroom-grade-sync"
+  | "microsoft-teams"
+  | "google-sheets"
+  | "generic-lms";
 export type ResultSyncTrigger = "manual" | "auto-on-submit";
 export type ResultSyncAuthMode = "none" | "bearer" | "api-key";
 export type ResultSyncStatus = "pending" | "success" | "failed" | "disabled";
@@ -38,6 +43,14 @@ export type SecurityLogCategory =
   | "results";
 export type SecurityLogSeverity = "info" | "warning" | "error";
 export type ProcessDisposition = "allowed" | "review" | "disallowed";
+export type AppUpdateStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
 
 export interface SchoolBranding {
   schoolName: string;
@@ -142,6 +155,9 @@ export interface ResultDestination {
   apiKeyHeader?: string;
   className?: string;
   courseId?: string;
+  connectionId?: string;
+  bridgeEndpointUrl?: string;
+  sortByLastName?: boolean;
   sheetName?: string;
   examIds: string[];
   includeResponses: boolean;
@@ -183,6 +199,13 @@ export interface LmsCourseWork {
   alternateLink?: string;
   dueAt?: string;
   state?: string;
+}
+
+export interface GoogleClassroomPublishResult {
+  courseWork: LmsCourseWork;
+  driveFileId?: string;
+  driveFileName?: string;
+  driveFileLink?: string;
 }
 
 export interface LmsStudent {
@@ -318,6 +341,7 @@ export interface TeacherOptions {
   showSchoolBranding: boolean;
   showCandidateId: boolean;
   showTimer: boolean;
+  showScoreAfterSubmit: boolean;
   supportMessage?: string;
 }
 
@@ -374,6 +398,7 @@ export interface ExamConfigPackage {
   quitUnlockPolicy: QuitUnlockPolicy;
   branding: SchoolBranding;
   studentLmsBinding: StudentLmsBinding;
+  resultDestinations: ResultDestination[];
   createdAt: string;
   updatedAt: string;
   passwordHint?: string;
@@ -387,7 +412,19 @@ export interface AppSettings {
   allowElectronKioskAssist: boolean;
   allowNonKioskTestingMode: boolean;
   approvedDomains: string[];
+  defaultGoogleSheetsSyncEndpoint?: string;
   googleIntegration: GoogleIntegrationSettings;
+}
+
+export interface AppUpdateState {
+  status: AppUpdateStatus;
+  currentVersion: string;
+  availableVersion?: string;
+  releaseName?: string;
+  releaseDate?: string;
+  percent?: number;
+  bytesPerSecond?: number;
+  message?: string;
 }
 
 export interface SecurityProfile {
