@@ -505,7 +505,7 @@ const statusTone = (status: VerificationStatus): string =>
       ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/60 dark:text-amber-100"
       : status === "fail"
         ? "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/60 dark:text-rose-100"
-        : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
+        : "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100";
 
 const feedbackTone = (tone: "success" | "error" | "info"): string =>
   tone === "success"
@@ -589,7 +589,7 @@ const resultSyncTone = (status: ResultSyncStatus): string =>
       ? "bg-rose-100 text-rose-900"
       : status === "pending"
         ? "bg-amber-100 text-amber-900"
-        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200";
+        : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100";
 
 const studentTurnInTone = (status?: "pending" | "success" | "failed" | "skipped"): string =>
   status === "success"
@@ -598,7 +598,7 @@ const studentTurnInTone = (status?: "pending" | "success" | "failed" | "skipped"
       ? "bg-rose-100 text-rose-900"
       : status === "pending"
         ? "bg-amber-100 text-amber-900"
-        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200";
+        : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100";
 
 const providerLabel = (type: ResultDestinationType | LmsProviderType): string =>
   type === "google-classroom"
@@ -689,7 +689,7 @@ const AppFrame = () => {
   }, [snapshot?.settings.defaultTheme]);
 
   if (loading && !snapshot) {
-    return <div className="flex min-h-screen items-center justify-center text-sm text-slate-600 dark:text-slate-300">Loading workspace...</div>;
+    return <div className="flex min-h-screen items-center justify-center text-sm text-slate-800 dark:text-slate-100">Loading workspace...</div>;
   }
 
   if (!snapshot) {
@@ -801,8 +801,8 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-600 dark:text-slate-300">Teacher / School</div>
-            <div className="text-sm text-slate-700 dark:text-slate-100">Use Back, Forward, or Dashboard to move around the admin workspace.</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-800 dark:text-slate-100">Teacher / School</div>
+            <div className="text-sm text-slate-900 dark:text-slate-100">Use Back, Forward, or Dashboard to move around the admin workspace.</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => navigate(-1)}>
@@ -873,7 +873,7 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
 
         <Card className="space-y-4 bg-gradient-to-b from-white to-slate-50">
           <CardTitle>Quick start</CardTitle>
-          <div className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+          <div className="space-y-3 text-sm text-slate-900 dark:text-slate-100">
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
               Students: open <span className="font-semibold">Student</span>, enter your name, candidate ID, and class, then start your assigned exam.
             </div>
@@ -1021,7 +1021,7 @@ const StudentPortalPage = () => {
 
         <Card className="space-y-4 bg-gradient-to-b from-white to-teal-50">
           <CardTitle>Before you start</CardTitle>
-          <div className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+          <div className="space-y-3 text-sm text-slate-900 dark:text-slate-100">
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">Enter your name, candidate ID, and class exactly as assigned by your teacher or school.</div>
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">Only matching exams will appear. If you already completed one, it will be grayed out and locked.</div>
             {!isSecureSessionReady(snapshot) ? (
@@ -1049,7 +1049,7 @@ const StudentPortalPage = () => {
             <CardTitle>Student details</CardTitle>
             <CardDescription>Use these details to load the exams assigned to this student or class.</CardDescription>
           </div>
-          <Badge className={identifiedCandidate ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}>
+          <Badge className={identifiedCandidate ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-900"}>
             {identifiedCandidate ? `${assignedExamCards.length} assigned exam(s)` : "Enter details to continue"}
           </Badge>
         </div>
@@ -1107,7 +1107,7 @@ const StudentPortalPage = () => {
                     .join(" - ")}
                 </CardDescription>
                 {exam.instructions ? (
-                  <div className="text-sm text-slate-700 dark:text-slate-100">{exam.instructions}</div>
+                  <div className="text-sm text-slate-900 dark:text-slate-100">{exam.instructions}</div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
                   {policy.assignedClassNames.length > 0 ? (
@@ -1165,7 +1165,7 @@ const StudentPortalPage = () => {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2">
               <CardTitle className="text-slate-950 dark:text-slate-950">Student login</CardTitle>
-              <CardDescription className="max-w-2xl text-slate-700 dark:text-slate-700">
+              <CardDescription className="max-w-2xl text-slate-900 dark:text-slate-900">
                 Confirm your details to begin <span className="font-semibold">{selectedExam.title || "this exam"}</span>.
               </CardDescription>
             </div>
@@ -1338,7 +1338,7 @@ const DashboardPage = () => {
                   .filter(Boolean)
                   .join(" - ")}
               </CardDescription>
-              <div className="text-sm text-slate-600 dark:text-slate-300">
+              <div className="text-sm text-slate-800 dark:text-slate-100">
                 {exam.mode === "app"
                   ? `${exam.questions.length} questions ready for auto-grading`
                   : exam.linkConfig?.url || "External exam URL not set"}
@@ -1406,7 +1406,7 @@ const DashboardPage = () => {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2">
               <CardTitle className="text-slate-950 dark:text-slate-950">Candidate details</CardTitle>
-              <CardDescription className="max-w-2xl text-slate-700 dark:text-slate-700">
+              <CardDescription className="max-w-2xl text-slate-900 dark:text-slate-900">
                 Enter the student name and optional candidate ID before launching{" "}
                 {launchCandidateExam.title || "this exam"}.
               </CardDescription>
@@ -1464,7 +1464,7 @@ const BuilderPage = () => {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">{existing ? "Edit exam" : "Create exam"}</h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
             Configure teacher settings, compose questions, and preview the student-facing environment.
           </p>
         </div>
@@ -1771,7 +1771,7 @@ const QuestionEditor = ({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Badge>Question {index + 1}</Badge>
-          <span className="text-sm text-slate-500">{total} total</span>
+          <span className="text-sm text-slate-900">{total} total</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => onMove("up")} disabled={index === 0}>
@@ -1816,7 +1816,7 @@ const QuestionEditor = ({
           {question.options.map((option) => (
             <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Option {option.label}</span>
+                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Option {option.label}</span>
                 <input
                   type="radio"
                   name={`correct-${question.id}`}
@@ -1931,7 +1931,7 @@ const ImportPage = () => {
     <motion.div key="import" {...animation} className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Import questions</h1>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+        <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
           Upload `.doc`, `.docx`, `.pdf`, `.txt`, or scanned image exam papers, review the extracted heading and metadata, then select the correct option for each question before saving.
         </p>
       </div>
@@ -1975,7 +1975,7 @@ B
           </div>
         </div>
 
-        <div className="grid gap-3 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-3">
+        <div className="grid gap-3 text-sm text-slate-900 dark:text-slate-100 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-700">
             <span className="font-semibold text-slate-950 dark:text-slate-50">Questions: </span>
             Start with `Q1.`, `1.`, or `Question:`.
@@ -1990,7 +1990,7 @@ B
           </div>
         </div>
 
-        <div className="text-sm text-slate-600 dark:text-slate-300">
+        <div className="text-sm text-slate-800 dark:text-slate-100">
           Header labels such as `Title:`, `Subject:`, `Class:`, `Form:`, `Duration:`, and `Instructions:` are
           copied into the exam details for teacher review before saving. OCR works best with straight, high-contrast
           scans that still use the question and option labels shown above.
@@ -2240,7 +2240,7 @@ const ImportedQuestionReviewCard = ({
           {question.options.map((option) => (
             <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Option {option.label}</span>
+                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Option {option.label}</span>
                 <input
                   type="radio"
                   name={`import-correct-${question.id}`}
@@ -2339,7 +2339,7 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
     <motion.div key="package-import" {...animation} className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Open exam package</h1>
-        <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+        <p className="mt-2 max-w-2xl text-sm text-slate-800 dark:text-slate-100">
           Double-clicked Lockedscreen packages import automatically and open in the student exam environment.
         </p>
       </div>
@@ -2415,7 +2415,7 @@ const ResultsPage = () => {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Results</h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
             App-based exams auto-grade locally first, then can sync safely to Google Classroom, Microsoft Teams, Google Sheets, or another LMS endpoint from the admin side.
           </p>
         </div>
@@ -2443,7 +2443,7 @@ const ResultsPage = () => {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           {snapshot.resultDestinations.length === 0 ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               No LMS or sheet destination configured yet.
             </div>
           ) : (
@@ -2452,11 +2452,11 @@ const ResultsPage = () => {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-slate-900 dark:text-slate-50">{destination.label}</span>
                   <Badge>{providerLabel(destination.type)}</Badge>
-                  <Badge className={destination.enabled ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-700"}>
+                  <Badge className={destination.enabled ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-900"}>
                     {destination.enabled ? destination.trigger : "disabled"}
                   </Badge>
                 </div>
-                <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                <div className="mt-2 text-sm text-slate-800 dark:text-slate-100">
                   {destination.className || "All classes"} / {destination.endpointUrl || "Endpoint pending"}
                 </div>
               </div>
@@ -2466,7 +2466,7 @@ const ResultsPage = () => {
       </Card>
 
       <Card className="space-y-4">
-        <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 border-b border-slate-200 px-1 pb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+        <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 border-b border-slate-200 px-1 pb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-900">
           <span>Candidate</span>
           <span>Exam</span>
           <span>Score</span>
@@ -2475,11 +2475,11 @@ const ResultsPage = () => {
           <span>Action</span>
         </div>
         {snapshot.submissions.length === 0 ? (
-          <div className="py-10 text-sm text-slate-500 dark:text-slate-400">No submissions yet.</div>
+          <div className="py-10 text-sm text-slate-900 dark:text-slate-100">No submissions yet.</div>
         ) : (
           snapshot.submissions.map((result) => (
             <div key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-              <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 text-sm text-slate-700 dark:text-slate-200">
+              <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 text-sm text-slate-900 dark:text-slate-100">
                 <span>{result.candidateName}</span>
                 <span>{result.examTitle}</span>
                 <span>
@@ -2493,7 +2493,7 @@ const ResultsPage = () => {
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {result.syncStates.length === 0 ? (
-                  <Badge className="bg-slate-100 text-slate-700">No destinations</Badge>
+                  <Badge className="bg-slate-100 text-slate-900">No destinations</Badge>
                 ) : (
                   result.syncStates.map((state) => (
                     <Badge key={`${result.id}-${state.destinationId}`} className={resultSyncTone(state.status)}>
@@ -3461,7 +3461,7 @@ const SettingsPage = () => {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Admin Console</h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
             Manage the Lockedscreen kiosk component, exam runtime packages, diagnostics, and Windows deployment posture from one workflow.
           </p>
         </div>
@@ -3497,7 +3497,7 @@ const SettingsPage = () => {
             className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
               settingsTab === tab.id
                 ? "bg-teal-600 text-white shadow-sm"
-                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                : "text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
             }`}
             onClick={() => setSettingsTab(tab.id)}
           >
@@ -3516,7 +3516,7 @@ const SettingsPage = () => {
                 Exam packages carry the exam and runtime policy for student devices. Students can open exported `.lscp` files directly from File Explorer.
               </CardDescription>
             </div>
-            <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">{snapshot.configPackages.length} package(s)</Badge>
+            <Badge className="bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">{snapshot.configPackages.length} package(s)</Badge>
           </div>
           <LabelledField label="Active package">
             <select
@@ -3556,7 +3556,7 @@ const SettingsPage = () => {
               {isPending("import-package") ? "Importing..." : "Import"}
             </Button>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             Exported package files do not require a PIN or password. Double-clicking a package on a student install imports it and opens the exam environment.
           </div>
         </Card>
@@ -3699,7 +3699,7 @@ const SettingsPage = () => {
                   }))
                 }
               />
-              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+              <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                 Admin configures this once. Teachers can then paste only the Google Sheet link when preparing a test; both values are exported inside the test package for students.
               </div>
             </LabelledField>
@@ -3726,7 +3726,7 @@ const SettingsPage = () => {
         </AdvancedAdminSection>
 
         {settings.googleIntegration.lastConnectedAt ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             Last connected: {formatDateTime(settings.googleIntegration.lastConnectedAt) ?? settings.googleIntegration.lastConnectedAt}
           </div>
         ) : null}
@@ -3844,7 +3844,7 @@ const SettingsPage = () => {
           </AdvancedAdminSection>
 
           {connectionDraft.provider === "google-classroom" ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Teachers only need to connect their school Google account. If the button is disabled, ask an admin to finish the Google Classroom setup above.
             </div>
           ) : (
@@ -3998,12 +3998,12 @@ const SettingsPage = () => {
                       : "Admin setup is optional. To use LMS turn-in, a school admin must first add the app registration in the admin/developer setup section."}
             </div>
             {connectionDraft.accountEmail ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                 Account: {connectionDraft.accountName || "Connected user"} / {connectionDraft.accountEmail}
               </div>
             ) : null}
             {isPending("load-lms-courses") && connectionDraft.provider === "google-classroom" ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                 Loading Google Classroom classes...
               </div>
             ) : connectionCourses.length > 0 ? (
@@ -4019,7 +4019,7 @@ const SettingsPage = () => {
                   >
                     <div>
                       <div className="font-semibold text-slate-900 dark:text-slate-50">{course.name}</div>
-                      <div className="mt-1 text-slate-600 dark:text-slate-300">{course.section || course.id}</div>
+                      <div className="mt-1 text-slate-800 dark:text-slate-100">{course.section || course.id}</div>
                     </div>
                     <Button variant="secondary" onClick={() => removeLoadedCourse(course.id)}>
                       Remove
@@ -4161,14 +4161,14 @@ const SettingsPage = () => {
                   authorization succeeds.
                 </div>
               ) : packageDraft.studentLmsBinding.connectionId ? (
-                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                   Student submissions will use {lmsAccountDisplayName(
                     bindingConnections.find((connection) => connection.id === packageDraft.studentLmsBinding.connectionId) ??
                       bindingConnections[0]!
                   )} for this Classroom link.
                 </div>
               ) : (
-                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                   Choose the teacher's signed-in Google account for this package.
                 </div>
               )}
@@ -4231,7 +4231,7 @@ const SettingsPage = () => {
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Loaded Google Classroom classes</div>
-                  <div className="text-xs text-slate-600 dark:text-slate-300">
+                  <div className="text-xs text-slate-800 dark:text-slate-100">
                     Choose the class for this test. Remove only hides a class from this Lockedscreen list; it does not delete it from Google Classroom.
                   </div>
                 </div>
@@ -4254,7 +4254,7 @@ const SettingsPage = () => {
                           <span className="font-semibold">{course.name}</span>
                           {selected ? <Badge className="bg-teal-100 text-teal-900">Selected</Badge> : null}
                         </div>
-                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                        <div className="mt-1 text-xs text-slate-800 dark:text-slate-100">
                           {course.section ? `${course.section} / ${course.id}` : course.id}
                         </div>
                       </div>
@@ -4297,7 +4297,7 @@ const SettingsPage = () => {
                   </option>
                 ))}
               </select>
-              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+              <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                 Use the teacher's existing school Google account. No new Lockedscreen account is needed.
               </div>
             </LabelledField>
@@ -4311,7 +4311,7 @@ const SettingsPage = () => {
           </div>
 
           {packageDraft.studentLmsBinding.courseLabel ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Selected class: <span className="font-semibold text-slate-900 dark:text-slate-50">{packageDraft.studentLmsBinding.courseLabel}</span>
               <div className="mt-3">
                 <Button variant="secondary" onClick={applyClassroomBindingToGradeSync}>
@@ -4348,7 +4348,7 @@ const SettingsPage = () => {
           ) : null}
 
           {isPending("load-lms-coursework") ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Loading assignments for the selected class...
             </div>
           ) : bindingCourseWork.length > 0 ? (
@@ -4362,7 +4362,7 @@ const SettingsPage = () => {
                     className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
                       selected
                         ? "border-teal-500 bg-teal-50 text-teal-950 dark:border-teal-400 dark:bg-teal-950 dark:text-teal-50"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        : "border-slate-200 bg-slate-50 text-slate-900 hover:border-teal-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                     }`}
                     onClick={() => selectBindingAssignment(item)}
                   >
@@ -4384,7 +4384,7 @@ const SettingsPage = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Students</div>
-                <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                <div className="mt-1 text-xs text-slate-800 dark:text-slate-100">
                   All students in the selected class are assigned by default. Uncheck names to send the test to a smaller group.
                 </div>
               </div>
@@ -4431,20 +4431,20 @@ const SettingsPage = () => {
                       />
                       <span>
                         <span className="block font-semibold text-slate-900 dark:text-slate-50">{student.name}</span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400">{student.email || student.id}</span>
+                        <span className="block text-xs text-slate-900 dark:text-slate-100">{student.email || student.id}</span>
                       </span>
                     </label>
                   );
                 })}
               </div>
             ) : (
-              <div className="text-sm text-slate-600 dark:text-slate-300">
+              <div className="text-sm text-slate-800 dark:text-slate-100">
                 Load students after selecting a connected teacher account and class.
               </div>
             )}
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             Google and Microsoft app details are managed in the Admin Console connection settings. This package keeps only
             the selected teacher account, class, assignment, and student access list.
           </div>
@@ -4453,19 +4453,19 @@ const SettingsPage = () => {
         <Card className="space-y-5">
           <CardTitle>Turn-in notes</CardTitle>
           <div className="grid gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Exported packages carry only public LMS app settings plus the class and assignment IDs. Teacher access tokens never leave the admin device.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               The student signs in only after Lockedscreen has already recorded the local submission. LMS delivery is additive and can be retried from the post-submit screen.
             </div>
             {packageDraft.studentLmsBinding.courseLabel ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                 Selected class: {packageDraft.studentLmsBinding.courseLabel}
               </div>
             ) : null}
             {packageDraft.studentLmsBinding.assignmentLabel ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                 Selected assignment: {packageDraft.studentLmsBinding.assignmentLabel}
               </div>
             ) : null}
@@ -4627,7 +4627,7 @@ const SettingsPage = () => {
                 onChange={(event) => updateDestination((current) => ({ ...current, endpointUrl: event.target.value }))}
               />
               {destinationDraft.type === "google-classroom-grade-sync" ? (
-                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                   This is not used for posting the package to Classroom. It is the school-owned server address that receives student scores after submission and writes grades back to Classroom.
                 </div>
               ) : null}
@@ -4659,7 +4659,7 @@ const SettingsPage = () => {
                     updateDestination((current) => ({ ...current, bridgeEndpointUrl: event.target.value }))
                   }
                 />
-                <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                   This is saved into the exported test package. Students do not enter it on their machines.
                 </div>
               </LabelledField>
@@ -4722,7 +4722,7 @@ const SettingsPage = () => {
           <LabelledField label="Exam scope">
             <div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
               {snapshot.exams.map((exam) => (
-                <label key={exam.id} className="flex items-center gap-3 text-sm text-slate-800 dark:text-slate-200">
+                <label key={exam.id} className="flex items-center gap-3 text-sm text-slate-800 dark:text-slate-100">
                   <input
                     type="checkbox"
                     className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -4768,16 +4768,16 @@ const SettingsPage = () => {
         <Card className="space-y-5">
           <CardTitle>Integration guidance</CardTitle>
           <div className="grid gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Google Sheets: teachers paste the Sheet link once while preparing the test. The exported package carries the Sheet target and sync URL to student machines; students do not configure Sheets.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Google Classroom grade sync server: point the endpoint URL to the school-owned grade-sync bridge. The app sends the local score; the server owns the teacher authorization and writes the grade into Classroom.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               The endpoint URL comes from the school IT/admin after they deploy the grade-sync bridge or Apps Script web app. It is usually a secure HTTPS address ending in an API route or `/exec`.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Microsoft Teams or generic LMS: use a school-owned middleware endpoint, webhook, or automation flow that receives Lockedscreen results and pushes them into the LMS.
             </div>
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -4817,7 +4817,7 @@ const SettingsPage = () => {
                 <option value="restricted-app">Restricted App Mode</option>
                 <option value="full-kiosk">Full Kiosk Mode</option>
               </select>
-              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+              <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                 Use Full Kiosk Mode with the native Windows companion verified to block the Windows key, task switching, task manager shortcuts, and the taskbar during exams.
               </div>
             </LabelledField>
@@ -4862,7 +4862,7 @@ const SettingsPage = () => {
               ))}
             </select>
           </LabelledField>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             Package checksum: <span className="font-mono text-xs">{packageDraft.integrity.checksum}</span>
           </div>
         </Card>
@@ -5029,13 +5029,13 @@ const SettingsPage = () => {
         <Card className="space-y-5">
           <CardTitle>Assignment Notes</CardTitle>
           <div className="grid gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Matching rule: a student sees the exam when their class matches an assigned class, or their candidate ID matches an assigned student ID.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Completed exams stay visible but locked so the student cannot restart them.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               If you set a hide date, the exam disappears from the student portal after that time.
             </div>
           </div>
@@ -5472,7 +5472,7 @@ const SettingsPage = () => {
               <option value="system">System</option>
             </select>
           </LabelledField>
-          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             <input
               type="checkbox"
               className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -5504,7 +5504,7 @@ const SettingsPage = () => {
               : "Allow testing sessions when native lockdown or official kiosk deployment is not verified"}
           </label>
           {snapshot?.runtime ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Runtime: {snapshot.runtime.platform}
               {snapshot.runtime.platform === "windows" ? ` / ${snapshot.runtime.windowsEdition ?? "unknown"} edition` : ""}
               . Native companion {snapshot.runtime.nativeLockdown.lockdownCapable ? "active" : snapshot.runtime.nativeLockdown.featureLevel === "partial" ? "partial" : "not detected"}.
@@ -5520,7 +5520,7 @@ const SettingsPage = () => {
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Security posture</CardTitle>
-          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             <input
               type="checkbox"
               className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -5534,7 +5534,7 @@ const SettingsPage = () => {
             />
             Official Windows kiosk deployment is configured when used
           </label>
-          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             <input
               type="checkbox"
               className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -5548,7 +5548,7 @@ const SettingsPage = () => {
             />
             Native Windows lockdown companion is installed and verified
           </label>
-          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             <input
               type="checkbox"
               className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -5625,19 +5625,19 @@ const SettingsPage = () => {
               />
             ))}
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
             Process monitor: {securityOverview?.processSummary.monitored ? "active" : "not active"}.
             Allowed {securityOverview?.processSummary.allowed ?? 0}, review {securityOverview?.processSummary.review ?? 0},
             disallowed {securityOverview?.processSummary.disallowed ?? 0}.
           </div>
           <div className="max-h-[220px] space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
             {snapshot.securityLogs.slice(0, 10).map((entry) => (
-              <div key={entry.id} className="rounded-2xl border border-white bg-white px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+              <div key={entry.id} className="rounded-2xl border border-white bg-white px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
                 <div className="font-medium text-slate-900 dark:text-slate-50">
                   {entry.category} · {entry.severity}
                 </div>
                 <div className="mt-1">{entry.message}</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{new Date(entry.timestamp).toLocaleString()}</div>
+                <div className="mt-1 text-xs text-slate-900 dark:text-slate-100">{new Date(entry.timestamp).toLocaleString()}</div>
               </div>
             ))}
           </div>
@@ -5741,7 +5741,7 @@ const StudentLmsTurnInPanel = ({
         <div>
           <Badge className={studentTurnInTone(status)}>{providerLabel(binding.provider)} turn-in</Badge>
           <CardTitle className="mt-3">{binding.assignmentLabel || binding.assignmentId || "Assignment link ready"}</CardTitle>
-          <CardDescription className="mt-2 text-slate-700 dark:text-slate-300">
+          <CardDescription className="mt-2 text-slate-900 dark:text-slate-100">
             Sign in with the student LMS account to attach the Lockedscreen submission and complete the turn-in.
           </CardDescription>
         </div>
@@ -5750,7 +5750,7 @@ const StudentLmsTurnInPanel = ({
         </Button>
       </div>
       {binding.courseLabel || binding.courseId ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
           Class: {binding.courseLabel || binding.courseId}
         </div>
       ) : null}
@@ -5764,7 +5764,7 @@ const StudentLmsTurnInPanel = ({
               ? "border-emerald-200 bg-emerald-50 text-emerald-900"
               : state.gradeSyncStatus === "failed"
                 ? "border-amber-200 bg-amber-50 text-amber-900"
-                : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                : "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           }`}
         >
           Grade sync: {state.gradeSyncStatus}
@@ -5773,7 +5773,7 @@ const StudentLmsTurnInPanel = ({
         </div>
       ) : null}
       {state?.externalReference ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-all text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-all text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
           LMS reference: {state.externalReference}
         </div>
       ) : null}
@@ -5996,7 +5996,7 @@ const StudentExamPage = () => {
                     className={`mt-1.5 ${
                       response?.selectedOptionId === option.id
                         ? "text-teal-900 dark:text-teal-50"
-                        : "text-slate-700 dark:text-slate-100"
+                        : "text-slate-900 dark:text-slate-100"
                     }`}
                   />
                 </button>
@@ -6292,7 +6292,7 @@ const LinkExamPage = () => {
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-100">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-900 dark:text-slate-100">
             <span>
               Controlled hosted runtime. Navigation is limited to package-approved domains and URL rules.
             </span>
@@ -6572,7 +6572,7 @@ const StudentShell = ({
               {!secureMode ? <Badge className="bg-amber-100 text-amber-900">{testingModeName}</Badge> : null}
             </div>
             {exam.instructions ? (
-              <p className="mt-1.5 max-w-5xl text-sm leading-5 text-slate-700 dark:text-slate-100">{exam.instructions}</p>
+              <p className="mt-1.5 max-w-5xl text-sm leading-5 text-slate-900 dark:text-slate-100">{exam.instructions}</p>
             ) : null}
           </div>
 
@@ -6762,7 +6762,7 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
         <div className="mt-5 rounded-[24px] bg-white px-5 py-4 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
           {exam.mode === "app" ? (
             <>
-              <div className="mb-3 text-sm font-semibold text-slate-500 dark:text-slate-400">Question card</div>
+              <div className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">Question card</div>
               <RichContent
                 content={exam.questions[0]?.prompt || "The first question preview appears here."}
                 className="text-base leading-7 text-slate-900 dark:text-slate-100"
@@ -6770,8 +6770,8 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
             </>
           ) : (
             <div className="space-y-2">
-              <div className="text-sm font-semibold text-slate-500 dark:text-slate-400">Embedded link session</div>
-              <div className="text-sm text-slate-700 dark:text-slate-200">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Embedded link session</div>
+              <div className="text-sm text-slate-900 dark:text-slate-100">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
             </div>
           )}
         </div>
@@ -6782,7 +6782,7 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
 
 const StatCard = ({ label, value }: { label: string; value: string }) => (
   <div className="rounded-[24px] bg-slate-50 p-4 dark:bg-slate-800/80">
-    <div className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</div>
+    <div className="text-xs uppercase tracking-[0.18em] text-slate-900 dark:text-slate-100">{label}</div>
     <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">{value}</div>
   </div>
 );
@@ -6797,7 +6797,7 @@ const LabelledField = ({
   labelClassName?: string;
 }) => (
   <div className="grid gap-2">
-    <span className={`text-sm font-semibold ${labelClassName ?? "text-slate-800 dark:text-slate-200"}`}>{label}</span>
+    <span className={`text-sm font-semibold ${labelClassName ?? "text-slate-800 dark:text-slate-100"}`}>{label}</span>
     {children}
   </div>
 );
@@ -6811,7 +6811,7 @@ const ToggleField = ({
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) => (
-  <label className="flex items-center gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+  <label className="flex items-center gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
     <input
       type="checkbox"
       className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -6884,7 +6884,7 @@ const AdvancedAdminSection = ({
               />
             </LabelledField>
           ) : (
-            <div className="text-sm text-slate-600 dark:text-slate-300">
+            <div className="text-sm text-slate-800 dark:text-slate-100">
               Unlocking will expose admin-only configuration on this screen.
             </div>
           )}
@@ -6904,7 +6904,7 @@ const AdvancedAdminSection = ({
         <span>{title}</span>
         <button
           type="button"
-          className="rounded-xl border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
           onClick={(event) => {
             event.preventDefault();
             onLock();

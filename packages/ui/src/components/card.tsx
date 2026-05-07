@@ -17,5 +17,5 @@ export const CardTitle = ({ className, ...props }: HTMLAttributes<HTMLHeadingEle
 );
 
 export const CardDescription = ({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) => (
-  <p className={cn("text-sm leading-6 text-slate-700 dark:text-slate-200", className)} {...props} />
+  <p className={cn("text-sm leading-6 text-slate-900 dark:text-slate-100", className)} {...props} />
 );
