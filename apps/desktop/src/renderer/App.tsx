@@ -50,6 +50,7 @@ import type {
   ResultSyncStatus,
   SecurityOverview,
   SecurityProfile,
+  StudentAccessPolicy,
   StudentLmsBinding,
   StudentLmsProviderType,
   ThemePreference,
@@ -432,6 +433,37 @@ const splitScopes = (value: string): string[] =>
 
 const mergeGoogleDefaultScopes = (scopes: string[]): string[] =>
   Array.from(new Set([...scopes.map((scope) => scope.trim()).filter(Boolean), ...defaultLmsScope("google-classroom").split(/\s+/)]));
+
+const normalizeStartCode = (value: string): string => value.trim();
+
+const hasExamStartCode = (policy?: StudentAccessPolicy | null): boolean =>
+  Boolean(policy?.startCodeHash && policy.startCodeSalt);
+
+const createStartCodeSalt = (): string => {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+const sha256Hex = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+const hashExamStartCode = (code: string, salt: string): Promise<string> =>
+  sha256Hex(`${salt}:${normalizeStartCode(code)}`);
+
+const verifyExamStartCode = async (code: string, policy: StudentAccessPolicy): Promise<boolean> => {
+  if (!hasExamStartCode(policy) || !policy.startCodeHash || !policy.startCodeSalt) {
+    return true;
+  }
+
+  if (normalizeStartCode(code).length === 0) {
+    return false;
+  }
+
+  return (await hashExamStartCode(code, policy.startCodeSalt)) === policy.startCodeHash;
+};
 
 const serializeUrlRules = (rules: PackageUrlRule[]): string =>
   rules
@@ -900,6 +932,8 @@ const StudentPortalPage = () => {
   const [candidateName, setCandidateName] = useState("");
   const [candidateId, setCandidateId] = useState("");
   const [candidateClassName, setCandidateClassName] = useState("");
+  const [examStartCodeAttempt, setExamStartCodeAttempt] = useState("");
+  const [examStartCodeError, setExamStartCodeError] = useState<string | null>(null);
   const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
   const identifiedCandidate =
     candidateName.trim().length > 0 ? normalizeCandidate(candidateName, candidateId, candidateClassName) : null;
@@ -926,22 +960,32 @@ const StudentPortalPage = () => {
     return null;
   }
 
-  const launchExam = async (exam: Exam, candidate: Candidate) => {
+  const launchExam = async (exam: Exam, candidate: Candidate): Promise<boolean> => {
     setLaunchFeedback(null);
+    setExamStartCodeError(null);
+
+    const configPackage = getConfigPackageForExam(snapshot, exam.id);
+    if (configPackage?.studentAccessPolicy && hasExamStartCode(configPackage.studentAccessPolicy)) {
+      const startCodeValid = await verifyExamStartCode(examStartCodeAttempt, configPackage.studentAccessPolicy);
+      if (!startCodeValid) {
+        setExamStartCodeError("Enter the exam start code provided by your teacher or invigilator.");
+        return false;
+      }
+    }
 
     if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
       setLaunchFeedback({
         tone: "error",
         text: "This device is not ready for the exam yet. Ask the teacher or invigilator to prepare the exam workstation before starting."
       });
-      return;
+      return false;
     }
 
     if (isNativeFullKioskExam(snapshot, exam.id)) {
       try {
         const handedOff = await launchAlternateDesktopSession({ examId: exam.id, candidate });
         if (handedOff) {
-          return;
+          return true;
         }
       } catch (error) {
         setLaunchFeedback({
@@ -951,11 +995,12 @@ const StudentPortalPage = () => {
               ? `${error.message} This full-kiosk exam cannot start until native Windows lockdown is active.`
               : "Native lockdown launch failed. This full-kiosk exam cannot start until the Windows lockdown companion is active."
         });
-        return;
+        return false;
       }
     }
 
     navigate(buildExamRoute(exam, candidate));
+    return true;
   };
 
   const assignedExamCards = !snapshot || !identifiedCandidate
@@ -1138,6 +1183,8 @@ const StudentPortalPage = () => {
                 <Button
                   onClick={() => {
                     setSelectedExam(exam);
+                    setExamStartCodeAttempt("");
+                    setExamStartCodeError(null);
                     setLaunchFeedback(null);
                   }}
                   disabled={Boolean(completedSubmission) || !canStartNow}
@@ -1180,15 +1227,38 @@ const StudentPortalPage = () => {
                 <Input value={candidateClassName} onChange={(event) => setCandidateClassName(event.target.value)} />
               </LabelledField>
             </div>
+            {hasExamStartCode(getConfigPackageForExam(snapshot, selectedExam.id)?.studentAccessPolicy) ? (
+              <div className="w-full max-w-md space-y-2">
+                <LabelledField label="Exam start code" labelClassName="text-slate-800 dark:text-slate-800">
+                  <Input
+                    type="password"
+                    value={examStartCodeAttempt}
+                    onChange={(event) => {
+                      setExamStartCodeAttempt(event.target.value);
+                      setExamStartCodeError(null);
+                    }}
+                    placeholder="Enter teacher-provided code"
+                  />
+                </LabelledField>
+                {getConfigPackageForExam(snapshot, selectedExam.id)?.studentAccessPolicy.startCodeHint ? (
+                  <div className="text-sm font-medium text-slate-800">
+                    Hint: {getConfigPackageForExam(snapshot, selectedExam.id)?.studentAccessPolicy.startCodeHint}
+                  </div>
+                ) : null}
+                {examStartCodeError ? <div className="text-sm font-semibold text-rose-700">{examStartCodeError}</div> : null}
+              </div>
+            ) : null}
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => setSelectedExam(null)}>
                 Cancel
               </Button>
               <Button
-                onClick={() => {
+                onClick={async () => {
                   const candidate = normalizeCandidate(candidateName, candidateId, candidateClassName || selectedExam.className);
-                  void launchExam(selectedExam, candidate);
-                  setSelectedExam(null);
+                  const launched = await launchExam(selectedExam, candidate);
+                  if (launched) {
+                    setSelectedExam(null);
+                  }
                 }}
                 disabled={candidateName.trim().length === 0}
               >
@@ -2760,6 +2830,31 @@ const SettingsPage = () => {
     setPackageDirty(true);
     setPackageDraft((current) => (current ? updater(current) : current));
   };
+  const setPackageStartCode = async (value: string) => {
+    const code = normalizeStartCode(value);
+    if (!code) {
+      updatePackage((current) => ({
+        ...current,
+        studentAccessPolicy: {
+          ...current.studentAccessPolicy,
+          startCodeHash: undefined,
+          startCodeSalt: undefined
+        }
+      }));
+      return;
+    }
+
+    const salt = createStartCodeSalt();
+    const hash = await hashExamStartCode(code, salt);
+    updatePackage((current) => ({
+      ...current,
+      studentAccessPolicy: {
+        ...current.studentAccessPolicy,
+        startCodeHash: hash,
+        startCodeSalt: salt
+      }
+    }));
+  };
   const updateDestination = (updater: (current: ResultDestination) => ResultDestination) => {
     setDestinationDirty(true);
     setDestinationDraft((current) => (current ? updater(current) : current));
@@ -2838,7 +2933,10 @@ const SettingsPage = () => {
       assignedClassNames: packageDraft.studentAccessPolicy.assignedClassNames.map((entry) => entry.trim()).filter(Boolean),
       assignedCandidateIds: packageDraft.studentAccessPolicy.assignedCandidateIds.map((entry) => entry.trim()).filter(Boolean),
       availableFrom: packageDraft.studentAccessPolicy.availableFrom?.trim() || undefined,
-      availableUntil: packageDraft.studentAccessPolicy.availableUntil?.trim() || undefined
+      availableUntil: packageDraft.studentAccessPolicy.availableUntil?.trim() || undefined,
+      startCodeHash: packageDraft.studentAccessPolicy.startCodeHash?.trim() || undefined,
+      startCodeSalt: packageDraft.studentAccessPolicy.startCodeSalt?.trim() || undefined,
+      startCodeHint: packageDraft.studentAccessPolicy.startCodeHint?.trim() || undefined
     },
     studentLmsBinding: {
       ...packageDraft.studentLmsBinding,
@@ -5011,6 +5109,64 @@ const SettingsPage = () => {
               />
             </LabelledField>
           </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Exam start code</div>
+                <div className="mt-1 text-xs text-slate-800 dark:text-slate-100">
+                  Optional. Students must enter this teacher-provided code before app-based or link-based exams can start.
+                </div>
+              </div>
+              <Badge className={hasExamStartCode(packageDraft.studentAccessPolicy) ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}>
+                {hasExamStartCode(packageDraft.studentAccessPolicy) ? "Start code required" : "No start code"}
+              </Badge>
+            </div>
+            <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+              <LabelledField label="Set or replace start code">
+                <Input
+                  type="password"
+                  placeholder={hasExamStartCode(packageDraft.studentAccessPolicy) ? "Enter a new code to replace" : "Enter code students will use"}
+                  onChange={(event) => void setPackageStartCode(event.target.value)}
+                />
+              </LabelledField>
+              <LabelledField label="Code hint shown to students">
+                <Input
+                  placeholder="Example: Ask your invigilator"
+                  value={packageDraft.studentAccessPolicy.startCodeHint ?? ""}
+                  onChange={(event) =>
+                    updatePackage((current) => ({
+                      ...current,
+                      studentAccessPolicy: {
+                        ...current.studentAccessPolicy,
+                        startCodeHint: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </LabelledField>
+              <Button
+                variant="secondary"
+                className="px-3 py-2"
+                onClick={() =>
+                  updatePackage((current) => ({
+                    ...current,
+                    studentAccessPolicy: {
+                      ...current.studentAccessPolicy,
+                      startCodeHash: undefined,
+                      startCodeSalt: undefined,
+                      startCodeHint: ""
+                    }
+                  }))
+                }
+                disabled={!hasExamStartCode(packageDraft.studentAccessPolicy) && !packageDraft.studentAccessPolicy.startCodeHint}
+              >
+                Clear code
+              </Button>
+            </div>
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-950">
+              The exported exam package includes only a salted hash of the start code, never the plain code.
+            </div>
+          </div>
           <ToggleField
             label="Allow students to remove completed exams from their own list"
             checked={packageDraft.studentAccessPolicy.allowStudentDeletionAfterCompletion}
@@ -6152,7 +6308,7 @@ const LinkExamPage = () => {
   }, [expired, hostedZoom, submitted]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || submitted) {
       return;
     }
 
@@ -6165,11 +6321,12 @@ const LinkExamPage = () => {
           return;
         }
         setExpired(true);
+        void finalize();
       }
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session]);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted]);
 
   const finalize = async () => {
     if (submitted || submitting || !exam || !session) {

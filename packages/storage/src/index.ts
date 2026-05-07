@@ -84,7 +84,10 @@ const defaultStudentAccessPolicy = (): StudentAccessPolicy => ({
   assignedCandidateIds: [],
   availableFrom: undefined,
   availableUntil: undefined,
-  allowStudentDeletionAfterCompletion: true
+  allowStudentDeletionAfterCompletion: true,
+  startCodeHash: undefined,
+  startCodeSalt: undefined,
+  startCodeHint: undefined
 });
 
 const defaultEnvironmentPolicy = (): EnvironmentPolicy => ({
@@ -184,7 +187,10 @@ const normalizeStudentAccessPolicy = (policy: StudentAccessPolicy | null | undef
   ...defaultStudentAccessPolicy(),
   ...(policy ?? {}),
   assignedClassNames: Array.isArray(policy?.assignedClassNames) ? policy.assignedClassNames : [],
-  assignedCandidateIds: Array.isArray(policy?.assignedCandidateIds) ? policy.assignedCandidateIds : []
+  assignedCandidateIds: Array.isArray(policy?.assignedCandidateIds) ? policy.assignedCandidateIds : [],
+  startCodeHash: policy?.startCodeHash?.trim() || undefined,
+  startCodeSalt: policy?.startCodeSalt?.trim() || undefined,
+  startCodeHint: policy?.startCodeHint?.trim() || undefined
 });
 
 const normalizeConfigPackage = (configPackage: ExamConfigPackage): ExamConfigPackage => ({

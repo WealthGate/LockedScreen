@@ -351,6 +351,9 @@ export interface StudentAccessPolicy {
   availableFrom?: string;
   availableUntil?: string;
   allowStudentDeletionAfterCompletion: boolean;
+  startCodeHash?: string;
+  startCodeSalt?: string;
+  startCodeHint?: string;
 }
 
 export interface QuitUnlockPolicy {
