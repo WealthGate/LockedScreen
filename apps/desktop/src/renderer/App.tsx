@@ -871,13 +871,13 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
           </div>
         </Card>
 
-        <Card className="space-y-4 bg-gradient-to-b from-white to-slate-50">
-          <CardTitle>Quick start</CardTitle>
-          <div className="space-y-3 text-sm text-slate-900 dark:text-slate-100">
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+        <Card className="space-y-4 bg-gradient-to-b from-white to-slate-50 text-slate-950 dark:text-slate-950">
+          <CardTitle className="text-slate-950 dark:text-slate-950">Quick start</CardTitle>
+          <div className="space-y-3 text-sm text-slate-950">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">
               Students: open <span className="font-semibold">Student</span>, enter your name, candidate ID, and class, then start your assigned exam.
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">
               Teachers: open <span className="font-semibold">Teacher / School</span> to create exams, import papers, configure packages, and review results.
             </div>
             {launchContext?.packageImport ? (
@@ -1019,11 +1019,11 @@ const StudentPortalPage = () => {
           </div>
         </Card>
 
-        <Card className="space-y-4 bg-gradient-to-b from-white to-teal-50">
-          <CardTitle>Before you start</CardTitle>
-          <div className="space-y-3 text-sm text-slate-900 dark:text-slate-100">
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">Enter your name, candidate ID, and class exactly as assigned by your teacher or school.</div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">Only matching exams will appear. If you already completed one, it will be grayed out and locked.</div>
+        <Card className="space-y-4 bg-gradient-to-b from-white to-teal-50 text-slate-950 dark:text-slate-950">
+          <CardTitle className="text-slate-950 dark:text-slate-950">Before you start</CardTitle>
+          <div className="space-y-3 text-sm text-slate-950">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">Enter your name, candidate ID, and class exactly as assigned by your teacher or school.</div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">Only matching exams will appear. If you already completed one, it will be grayed out and locked.</div>
             {!isSecureSessionReady(snapshot) ? (
               <div className={`rounded-2xl border px-4 py-3 ${canUseTestingMode(snapshot) ? "border-amber-200 bg-amber-50 text-amber-950" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
                 {canUseTestingMode(snapshot)
@@ -1031,7 +1031,7 @@ const StudentPortalPage = () => {
                   : "This workstation still needs teacher setup before a secure exam can begin."}
               </div>
             ) : (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-950">
                 This workstation is ready for secure exam launch.
               </div>
             )}
@@ -1293,8 +1293,8 @@ const DashboardPage = () => {
           </div>
         </Card>
 
-        <Card className="bg-gradient-to-b from-white to-teal-50">
-          <CardTitle>Workspace summary</CardTitle>
+        <Card className="bg-gradient-to-b from-white to-teal-50 text-slate-950 dark:text-slate-950">
+          <CardTitle className="text-slate-950 dark:text-slate-950">Workspace summary</CardTitle>
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <StatCard label="Saved exams" value={String(snapshot.exams.length)} />
             <StatCard label="Submissions" value={String(snapshot.submissions.length)} />

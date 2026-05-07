@@ -1,6 +1,6 @@
 {
   "name": "@lockedscreen/desktop",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
   "author": {
