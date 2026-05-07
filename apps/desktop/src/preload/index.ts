@@ -32,6 +32,7 @@ export interface LockedscreenApi {
   onUpdateStateChanged: (callback: (state: AppUpdateState) => void) => () => void;
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
+  onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
   deleteExam: (examId: string) => Promise<AppStateSnapshot>;
@@ -96,6 +97,11 @@ const api: LockedscreenApi = {
     const listener = (_event: Electron.IpcRendererEvent, context: LaunchContext) => callback(context);
     ipcRenderer.on("app:launchContextChanged", listener);
     return () => ipcRenderer.removeListener("app:launchContextChanged", listener);
+  },
+  onSessionExitBlocked: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { reason?: string }) => callback(payload);
+    ipcRenderer.on("session:exitBlocked", listener);
+    return () => ipcRenderer.removeListener("session:exitBlocked", listener);
   },
   refreshSecurityOverview: () => ipcRenderer.invoke("security:refreshOverview"),
   saveExam: (exam) => ipcRenderer.invoke("exam:save", exam),

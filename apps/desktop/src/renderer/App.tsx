@@ -71,9 +71,10 @@ const teacherNavItems = [
 ];
 
 const animation = {
-  initial: { opacity: 0, y: 18 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -12 }
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.16 }
 };
 
 const hostedExamUserAgent =
@@ -785,23 +786,23 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
           })}
         </nav>
 
-        <Card className="mt-10 border-none bg-white/10 p-5 text-white">
+        <Card className="mt-10 border-none bg-slate-900 p-5 text-white">
           <CardTitle className="text-white">Deployment note</CardTitle>
-          <CardDescription className="mt-2 text-slate-300">
+          <CardDescription className="mt-2 text-slate-100">
             Real lockdown depends on a verified native Windows lockdown companion or official Windows kiosk deployment. The in-app window assist only reinforces the active exam window.
           </CardDescription>
         </Card>
       </aside>
 
-      <main className="overflow-hidden rounded-[36px] border border-white/80 bg-white/78 p-6 shadow-[0_50px_100px_-48px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/60">
+      <main className="overflow-hidden rounded-[36px] border border-white bg-white p-6 shadow-[0_50px_100px_-48px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-950">
         {error ? (
           <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
         ) : null}
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-slate-200 bg-white/90 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">Teacher / School</div>
-            <div className="text-sm text-slate-600 dark:text-slate-300">Use Back, Forward, or Dashboard to move around the admin workspace.</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-600 dark:text-slate-300">Teacher / School</div>
+            <div className="text-sm text-slate-700 dark:text-slate-100">Use Back, Forward, or Dashboard to move around the admin workspace.</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => navigate(-1)}>
@@ -1081,13 +1082,15 @@ const StudentPortalPage = () => {
             <Card
               key={exam.id}
               className={`grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center ${
-                completedSubmission || !canStartNow ? "border-slate-300 bg-slate-100/80 opacity-75" : ""
+                completedSubmission || !canStartNow
+                  ? "border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  : ""
               }`}
             >
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <CardTitle>{exam.title || "Untitled exam"}</CardTitle>
-                  <Badge className={exam.mode === "link" ? "bg-blue-100 text-blue-700" : "bg-teal-100 text-teal-700"}>
+                  <Badge className={exam.mode === "link" ? "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-100" : "bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-100"}>
                     {exam.mode === "link" ? "Hosted exam" : "App exam"}
                   </Badge>
                   {completedSubmission ? <Badge className="bg-slate-800 text-white">Completed</Badge> : null}
@@ -1104,14 +1107,14 @@ const StudentPortalPage = () => {
                     .join(" - ")}
                 </CardDescription>
                 {exam.instructions ? (
-                  <div className="text-sm text-slate-600 dark:text-slate-300">{exam.instructions}</div>
+                  <div className="text-sm text-slate-700 dark:text-slate-100">{exam.instructions}</div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
                   {policy.assignedClassNames.length > 0 ? (
-                    <Badge className="bg-slate-100 text-slate-800">Classes: {policy.assignedClassNames.join(", ")}</Badge>
+                    <Badge className="bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">Classes: {policy.assignedClassNames.join(", ")}</Badge>
                   ) : null}
                   {policy.assignedCandidateIds.length > 0 ? (
-                    <Badge className="bg-slate-100 text-slate-800">Assigned IDs: {policy.assignedCandidateIds.join(", ")}</Badge>
+                    <Badge className="bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">Assigned IDs: {policy.assignedCandidateIds.join(", ")}</Badge>
                   ) : null}
                   {formatDateTime(policy.availableUntil) ? (
                     <Badge className="bg-amber-100 text-amber-900">Visible until {formatDateTime(policy.availableUntil)}</Badge>
@@ -1121,7 +1124,7 @@ const StudentPortalPage = () => {
                   ) : null}
                 </div>
                 {completedSubmission ? (
-                  <div className="rounded-2xl border border-slate-300 bg-white/80 px-4 py-3 text-sm text-slate-700">
+                  <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
                     Submitted on {new Date(completedSubmission.submittedAt).toLocaleString()}. This exam cannot be started again.
                   </div>
                 ) : !canStartNow ? (
@@ -1764,7 +1767,7 @@ const QuestionEditor = ({
   };
 
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-5">
+    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Badge>Question {index + 1}</Badge>
@@ -2209,7 +2212,7 @@ const ImportedQuestionReviewCard = ({
     : null;
 
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-slate-50/90 p-5 dark:border-slate-700 dark:bg-slate-900/70">
+    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge>Question {index + 1}</Badge>
@@ -2475,7 +2478,7 @@ const ResultsPage = () => {
           <div className="py-10 text-sm text-slate-500 dark:text-slate-400">No submissions yet.</div>
         ) : (
           snapshot.submissions.map((result) => (
-            <div key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <div key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
               <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 text-sm text-slate-700 dark:text-slate-200">
                 <span>{result.candidateName}</span>
                 <span>{result.examTitle}</span>
@@ -5903,15 +5906,15 @@ const StudentExamPage = () => {
     >
       {submitted ? (
         <div className="space-y-4">
-          <Card className="space-y-4 border-emerald-200 bg-emerald-50">
-            <Badge className="bg-emerald-100 text-emerald-800">Submission recorded</Badge>
-            <CardTitle>Your exam has been submitted.</CardTitle>
-              <CardDescription className="text-slate-700 dark:text-emerald-100">
+          <Card className="space-y-4 border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-50">
+            <Badge className="bg-emerald-100 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100">Submission recorded</Badge>
+            <CardTitle className="text-emerald-950 dark:text-emerald-50">Your exam has been submitted.</CardTitle>
+              <CardDescription className="text-emerald-900 dark:text-emerald-100">
                 Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen. If this
                 package requires invigilator-controlled exit, the session remains locked until the invigilator unlocks it.
               </CardDescription>
               {configPackage?.teacherOptions.showScoreAfterSubmit && submissionResult ? (
-                <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-emerald-950">
+                <div className="rounded-2xl border border-emerald-300 bg-white px-4 py-3 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-900 dark:text-emerald-50">
                   <div className="text-sm font-semibold">Score</div>
                   <div className="mt-1 text-2xl font-bold">
                     {submissionResult.score}/{submissionResult.totalPoints} ({submissionResult.percentage}%)
@@ -5933,7 +5936,7 @@ const StudentExamPage = () => {
       ) : question ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(11rem,0.24fr)_minmax(0,0.76fr)]">
           <Card className="space-y-3 p-4">
-            <Badge className="bg-teal-100 text-teal-700">Question map</Badge>
+            <Badge className="bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-100">Question map</Badge>
             <div className="grid grid-cols-5 gap-1.5">
               {exam.questions.map((candidate, index) => {
                 const candidateResponse = session.responses.find((entry) => entry.questionId === candidate.id);
@@ -5943,10 +5946,10 @@ const StudentExamPage = () => {
                     key={candidate.id}
                     className={`rounded-xl px-2.5 py-2 text-sm font-semibold transition ${
                       index === currentIndex
-                        ? "bg-slate-950 text-white"
+                        ? "bg-slate-950 text-white dark:bg-white dark:text-slate-950"
                         : answered
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100"
+                          : "bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
                     }`}
                     onClick={() => setCurrentIndex(index)}
                   >
@@ -5955,7 +5958,7 @@ const StudentExamPage = () => {
                 );
               })}
             </div>
-            <div className="rounded-xl bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-xl bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100">
               Completion: {Math.round(calculateCompletion(session) * 100)}%
             </div>
           </Card>
@@ -5975,8 +5978,8 @@ const StudentExamPage = () => {
                   key={option.id}
                   className={`rounded-[20px] border px-4 py-3 text-left text-base transition ${
                     response?.selectedOptionId === option.id
-                      ? "border-teal-500 bg-teal-50 shadow-glow"
-                      : "border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600"
+                      ? "border-teal-500 bg-teal-50 text-teal-950 shadow-glow dark:border-teal-300 dark:bg-teal-950 dark:text-teal-50"
+                      : "border-slate-300 bg-white text-slate-900 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-50 dark:hover:border-slate-400"
                   }`}
                   onClick={() =>
                     setSession({
@@ -5987,8 +5990,15 @@ const StudentExamPage = () => {
                     })
                   }
                 >
-                  <div className="font-semibold text-slate-900 dark:text-slate-50">{option.label}</div>
-                  <RichContent content={option.content} className="mt-1.5 text-slate-700 dark:text-slate-200" />
+                  <div className="font-semibold">{option.label}</div>
+                  <RichContent
+                    content={option.content}
+                    className={`mt-1.5 ${
+                      response?.selectedOptionId === option.id
+                        ? "text-teal-900 dark:text-teal-50"
+                        : "text-slate-700 dark:text-slate-100"
+                    }`}
+                  />
                 </button>
               ))}
             </div>
@@ -6282,7 +6292,7 @@ const LinkExamPage = () => {
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-100">
             <span>
               Controlled hosted runtime. Navigation is limited to package-approved domains and URL rules.
             </span>
@@ -6319,10 +6329,10 @@ const LinkExamPage = () => {
 };
 
 const ExamZoomControls = ({ zoom, onChange }: { zoom: number; onChange: (zoom: number) => void }) => (
-  <div className="flex shrink-0 items-center overflow-hidden rounded-2xl border border-slate-300 bg-white text-slate-900">
+  <div className="flex shrink-0 items-center overflow-hidden rounded-2xl border border-slate-300 bg-white text-slate-950 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-50">
     <button
       type="button"
-      className="flex h-10 w-10 items-center justify-center border-r border-slate-200 text-lg font-semibold hover:bg-slate-100 disabled:opacity-40"
+      className="flex h-10 w-10 items-center justify-center border-r border-slate-200 text-lg font-semibold hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
       onClick={() => onChange(clampExamZoom(zoom - examZoomStep))}
       disabled={zoom <= minExamZoom}
       aria-label="Zoom out"
@@ -6332,7 +6342,7 @@ const ExamZoomControls = ({ zoom, onChange }: { zoom: number; onChange: (zoom: n
     </button>
     <button
       type="button"
-      className="h-10 min-w-16 border-r border-slate-200 px-3 text-sm font-semibold hover:bg-slate-100"
+      className="h-10 min-w-16 border-r border-slate-200 px-3 text-sm font-semibold hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
       onClick={() => onChange(1)}
       aria-label="Reset zoom"
       title="Reset zoom"
@@ -6341,7 +6351,7 @@ const ExamZoomControls = ({ zoom, onChange }: { zoom: number; onChange: (zoom: n
     </button>
     <button
       type="button"
-      className="flex h-10 w-10 items-center justify-center text-lg font-semibold hover:bg-slate-100 disabled:opacity-40"
+      className="flex h-10 w-10 items-center justify-center text-lg font-semibold hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
       onClick={() => onChange(clampExamZoom(zoom + examZoomStep))}
       disabled={zoom >= maxExamZoom}
       aria-label="Zoom in"
@@ -6388,9 +6398,11 @@ const StudentShell = ({
   const [captureMessage, setCaptureMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [capturePending, setCapturePending] = useState(false);
   const [contentZoom, setContentZoom] = useState(1);
+  const [closeAttemptBlocked, setCloseAttemptBlocked] = useState(false);
   const unlockInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedUnlockPin = unlockPin.trim();
   const normalizedPinAttempt = pinAttempt.trim();
+  const invigilatorPinRequired = closeAttemptBlocked || Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
   const showSchoolBranding = configPackage?.teacherOptions.showSchoolBranding !== false;
   const showCandidateId = configPackage?.teacherOptions.showCandidateId !== false;
   const showTimer = configPackage?.teacherOptions.showTimer !== false;
@@ -6418,6 +6430,16 @@ const StudentShell = ({
 
     return () => window.clearInterval(timer);
   }, [session.endsAt, sessionSubmitted]);
+
+  useEffect(() => {
+    const unsubscribe = window.lockedscreenApi.onSessionExitBlocked(() => {
+      setCloseAttemptBlocked(true);
+      setUnlockError("The exam window cannot be closed from the app menu. Enter the invigilator PIN to release this student.");
+      setUnlockOpen(true);
+    });
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -6462,10 +6484,11 @@ const StudentShell = ({
   }, [contentZoom, onZoomChange]);
 
   const attemptUnlock = () => {
-    if (!configPackage?.quitUnlockPolicy.requireInvigilatorPin) {
+    if (!invigilatorPinRequired) {
       setUnlockError(null);
       setUnlockOpen(false);
       setPinAttempt("");
+      setCloseAttemptBlocked(false);
       onUnlock();
       return;
     }
@@ -6474,11 +6497,12 @@ const StudentShell = ({
       setUnlockError(null);
       setUnlockOpen(false);
       setPinAttempt("");
+      setCloseAttemptBlocked(false);
       onUnlock();
       return;
     }
 
-    setUnlockError("Incorrect invigilator PIN.");
+    setUnlockError(normalizedUnlockPin.length === 0 ? "Invigilator PIN is not configured." : "Incorrect invigilator PIN.");
   };
 
   const captureScreenshot = async () => {
@@ -6516,7 +6540,7 @@ const StudentShell = ({
 
   return (
     <motion.div {...animation} className="space-y-3">
-      <div className="rounded-[28px] border border-white/80 bg-white/92 px-4 py-3 text-slate-950 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/92 dark:text-slate-50">
+      <div className="rounded-[28px] border border-white bg-white px-4 py-3 text-slate-950 shadow-2xl dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50">
         <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -6524,23 +6548,23 @@ const StudentShell = ({
                 {exam.title || "Exam title"}
               </h1>
               {showSchoolBranding ? (
-                <Badge className="bg-teal-100 text-teal-900">{exam.branding.schoolName || "School name"}</Badge>
+                <Badge className="bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-100">{exam.branding.schoolName || "School name"}</Badge>
               ) : null}
-              <Badge className="bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+              <Badge className="bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
                 {exam.subject || "Subject"}
               </Badge>
               {exam.className ? (
-                <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">{exam.className}</Badge>
+                <Badge className="bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">{exam.className}</Badge>
               ) : null}
               {exam.form ? (
-                <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Form {exam.form}</Badge>
+                <Badge className="bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">Form {exam.form}</Badge>
               ) : null}
-              <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+              <Badge className="bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
                 {exam.mode === "link" ? "Hosted exam" : "Native exam"}
               </Badge>
               {configPackage ? (
                 <Badge
-                  className={configPackage.securityMode === "full-kiosk" ? "bg-slate-900 text-white" : "bg-blue-100 text-blue-800"}
+                  className={configPackage.securityMode === "full-kiosk" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950" : "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-100"}
                 >
                   {configPackage.securityMode === "full-kiosk" ? "Full Kiosk Mode" : "Restricted App Mode"}
                 </Badge>
@@ -6548,7 +6572,7 @@ const StudentShell = ({
               {!secureMode ? <Badge className="bg-amber-100 text-amber-900">{testingModeName}</Badge> : null}
             </div>
             {exam.instructions ? (
-              <p className="mt-1.5 max-w-5xl text-sm leading-5 text-slate-700 dark:text-slate-200">{exam.instructions}</p>
+              <p className="mt-1.5 max-w-5xl text-sm leading-5 text-slate-700 dark:text-slate-100">{exam.instructions}</p>
             ) : null}
           </div>
 
@@ -6559,15 +6583,15 @@ const StudentShell = ({
               {showCandidateId ? <div className="text-xs text-slate-300">{session.candidate.id}</div> : null}
             </div>
             {showTimer ? (
-              <div className="rounded-[18px] border border-teal-200 bg-teal-50 px-3 py-2 text-teal-950">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-teal-700">Remaining</div>
+              <div className="rounded-[18px] border border-teal-200 bg-teal-50 px-3 py-2 text-teal-950 dark:border-teal-700 dark:bg-teal-950 dark:text-teal-50">
+                <div className="text-[10px] uppercase tracking-[0.22em] text-teal-800 dark:text-teal-200">Remaining</div>
                 <div className="text-xl font-semibold leading-none">{formatTime(remaining)}</div>
               </div>
             ) : null}
             <ExamZoomControls zoom={contentZoom} onChange={setContentZoom} />
             <Button
               variant="secondary"
-              className="shrink-0 border-slate-300 bg-white px-3 py-2 text-slate-900 hover:bg-slate-100"
+              className="shrink-0 border-slate-300 bg-white px-3 py-2 text-slate-950 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-50 dark:hover:bg-slate-800"
               onClick={() => setUnlockOpen(true)}
             >
               <Lock className="size-4" />
@@ -6603,7 +6627,7 @@ const StudentShell = ({
       ) : null}
 
       {configPackage?.allowedApplications.length ? (
-        <Card className="space-y-3 border-slate-200 bg-slate-50/80 p-4">
+        <Card className="space-y-3 border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center justify-between gap-2">
             <div>
               <CardTitle>Approved Tools</CardTitle>
@@ -6629,8 +6653,8 @@ const StudentShell = ({
       ) : null}
 
       {unlockOpen ? (
-        <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/75 p-4 pt-20 backdrop-blur-sm">
-        <Card className="w-full max-w-3xl border-amber-200 bg-white p-4 shadow-2xl">
+        <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/80 p-4 pt-20 backdrop-blur-sm">
+        <Card className="w-full max-w-3xl border-amber-200 bg-white p-4 text-slate-950 shadow-2xl dark:bg-slate-950 dark:text-slate-50">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
               <div className="flex items-center gap-3">
@@ -6640,7 +6664,7 @@ const StudentShell = ({
                 <CardTitle>{sessionSubmitted ? "Invigilator release required" : "Invigilator unlock required"}</CardTitle>
               </div>
               <CardDescription className="max-w-2xl">
-                {configPackage?.quitUnlockPolicy.requireInvigilatorPin
+                {invigilatorPinRequired
                   ? sessionSubmitted
                     ? "This exam has already been submitted. The session remains locked until the invigilator enters the PIN and releases the student."
                     : "Exit from the active exam session requires the invigilator PIN. The same PIN can be used to save an in-app screenshot without relying on blocked OS shortcuts."
@@ -6649,7 +6673,7 @@ const StudentShell = ({
                     : "Use the release action below to leave the controlled session."}{" "}
                 Complete suppression of the Windows key and task switching must still be enforced by a verified native Windows companion or official kiosk deployment.
               </CardDescription>
-              {configPackage?.quitUnlockPolicy.requireInvigilatorPin ? (
+              {invigilatorPinRequired ? (
                 <div className="mt-4 max-w-sm space-y-3">
                   <LabelledField label="Invigilator PIN">
                     <Input
@@ -6674,7 +6698,7 @@ const StudentShell = ({
                       placeholder="Enter invigilator PIN"
                     />
                   </LabelledField>
-                  {unlockError ? <div className="text-sm font-medium text-rose-700">{unlockError}</div> : null}
+                  {unlockError ? <div className="text-sm font-medium text-rose-700 dark:text-rose-300">{unlockError}</div> : null}
                 </div>
               ) : null}
             </div>
@@ -6869,7 +6893,7 @@ const AdvancedAdminSection = ({
             Unlock
           </Button>
         </div>
-        {unlockError ? <div className="mt-2 text-sm font-medium text-rose-700">{unlockError}</div> : null}
+        {unlockError ? <div className="mt-2 text-sm font-medium text-rose-700 dark:text-rose-300">{unlockError}</div> : null}
       </div>
     );
   }

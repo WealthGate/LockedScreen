@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
@@ -450,8 +450,25 @@ const createWindow = async (): Promise<void> => {
       spellcheck: false
     }
   });
+  Menu.setApplicationMenu(null);
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.on("close", (event) => {
+    if (!getActivePackage()) {
+      return;
+    }
+
+    event.preventDefault();
+    mainWindow?.webContents.send("session:exitBlocked", {
+      reason: "The app menu or window close action was used during an active exam."
+    });
+    void recordSecurityEvent(
+      "session",
+      "warning",
+      "Blocked app close request during an active exam session.",
+      "Invigilator PIN is required to release the student."
+    );
+  });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isAppUrl(url)) {
       event.preventDefault();
