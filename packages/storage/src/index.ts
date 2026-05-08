@@ -193,18 +193,29 @@ const normalizeStudentAccessPolicy = (policy: StudentAccessPolicy | null | undef
   startCodeHint: policy?.startCodeHint?.trim() || undefined
 });
 
-const normalizeConfigPackage = (configPackage: ExamConfigPackage): ExamConfigPackage => ({
-  ...configPackage,
-  teacherOptions: {
-    ...defaultTeacherOptions(),
-    ...(configPackage.teacherOptions ?? {})
-  },
-  studentLmsBinding: normalizeStudentLmsBinding(configPackage.studentLmsBinding),
-  resultDestinations: Array.isArray(configPackage.resultDestinations)
-    ? configPackage.resultDestinations.map(normalizeResultDestination)
-    : [],
-  studentAccessPolicy: normalizeStudentAccessPolicy(configPackage.studentAccessPolicy)
-});
+const normalizeConfigPackage = (configPackage: ExamConfigPackage): ExamConfigPackage => {
+  const normalized: ExamConfigPackage = {
+    ...configPackage,
+    teacherOptions: {
+      ...defaultTeacherOptions(),
+      ...(configPackage.teacherOptions ?? {})
+    },
+    studentLmsBinding: normalizeStudentLmsBinding(configPackage.studentLmsBinding),
+    resultDestinations: Array.isArray(configPackage.resultDestinations)
+      ? configPackage.resultDestinations.map(normalizeResultDestination)
+      : [],
+    studentAccessPolicy: normalizeStudentAccessPolicy(configPackage.studentAccessPolicy)
+  };
+
+  const storedChecksum = configPackage.integrity?.checksum;
+  const rawPackageWasValid = Boolean(storedChecksum) && calculateConfigPackageChecksum(configPackage) === storedChecksum;
+  const normalizedPackageIsValid = Boolean(storedChecksum) && calculateConfigPackageChecksum(normalized) === storedChecksum;
+
+  // App updates may add default package fields during normalization. If the stored package was valid
+  // before those defaults were added, restamp the normalized package instead of showing a false
+  // integrity failure after upgrade.
+  return rawPackageWasValid && !normalizedPackageIsValid ? withStampedIntegrity(normalized) : normalized;
+};
 
 const normalizeLmsConnection = (connection: LmsConnection): LmsConnection => ({
   ...connection,
