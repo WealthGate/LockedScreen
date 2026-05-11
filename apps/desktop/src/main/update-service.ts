@@ -1,7 +1,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, Notification } from "electron";
 import updater from "electron-updater";
 
 import type { AppUpdateState } from "@lockedscreen/shared-types";
@@ -9,11 +9,14 @@ import type { AppUpdateState } from "@lockedscreen/shared-types";
 const { autoUpdater } = updater;
 
 const updateCacheFilePattern = /lockedscreen.*\.(exe|blockmap|yml)$/i;
+const startupUpdateCheckDelayMs = 15000;
+const periodicUpdateCheckIntervalMs = 4 * 60 * 60 * 1000;
 
 let updateState: AppUpdateState = {
   status: "idle",
   currentVersion: app.getVersion()
 };
+let periodicUpdateCheckTimer: NodeJS.Timeout | null = null;
 
 const updateMainWindow = (window: BrowserWindow | null): void => {
   if (!window || window.isDestroyed()) {
@@ -31,6 +34,27 @@ const setUpdateState = (window: BrowserWindow | null, next: Partial<AppUpdateSta
   };
   updateMainWindow(window);
   return updateState;
+};
+
+const showUpdateNotification = (window: BrowserWindow | null, title: string, body: string): void => {
+  if (!app.isPackaged || !Notification.isSupported()) {
+    return;
+  }
+
+  const notification = new Notification({ title, body });
+  notification.on("click", () => {
+    if (!window || window.isDestroyed()) {
+      return;
+    }
+
+    if (window.isMinimized()) {
+      window.restore();
+    }
+
+    window.show();
+    window.focus();
+  });
+  notification.show();
 };
 
 const friendlyUpdateError = (error: unknown): string => {
@@ -72,6 +96,7 @@ const cleanupOldUpdateFiles = async (): Promise<void> => {
 export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): void => {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
 
   void cleanupOldUpdateFiles();
 
@@ -84,6 +109,7 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
   });
 
   autoUpdater.on("update-available", (info) => {
+    const window = getMainWindow();
     setUpdateState(getMainWindow(), {
       status: "available",
       availableVersion: info.version,
@@ -92,6 +118,7 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
       percent: undefined,
       message: `Lockedscreen ${info.version} is available.`
     });
+    showUpdateNotification(window, "Lockedscreen update available", `Version ${info.version} is ready to download.`);
   });
 
   autoUpdater.on("update-not-available", (info) => {
@@ -113,12 +140,14 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
   });
 
   autoUpdater.on("update-downloaded", (info) => {
+    const window = getMainWindow();
     setUpdateState(getMainWindow(), {
       status: "downloaded",
       availableVersion: info.version,
       percent: 100,
       message: "Update downloaded. Restart Lockedscreen to install it."
     });
+    showUpdateNotification(window, "Lockedscreen update ready", "Click Install now in Lockedscreen to finish the update.");
   });
 
   autoUpdater.on("error", (error) => {
@@ -141,6 +170,10 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
     }
 
     try {
+      if (updateState.status === "downloading") {
+        return updateState;
+      }
+
       setUpdateState(window, { status: "checking", message: "Checking for Lockedscreen updates..." });
       await autoUpdater.checkForUpdates();
     } catch (error) {
@@ -163,6 +196,10 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
     }
 
     try {
+      if (updateState.status === "downloaded") {
+        return updateState;
+      }
+
       setUpdateState(window, { status: "downloading", percent: 0, message: "Downloading update..." });
       await autoUpdater.downloadUpdate();
     } catch (error) {
@@ -181,14 +218,34 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
   });
 };
 
+const checkForUpdatesQuietly = async (): Promise<void> => {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  if (updateState.status === "checking" || updateState.status === "downloading" || updateState.status === "downloaded") {
+    return;
+  }
+
+  await autoUpdater.checkForUpdates().catch(() => {
+    // The updater emits a user-facing error state through the error handler.
+  });
+};
+
 export const checkForAppUpdatesAfterStartup = (): void => {
   if (!app.isPackaged) {
     return;
   }
 
   setTimeout(() => {
-    void autoUpdater.checkForUpdates().catch(() => {
-      // The updater emits a user-facing error state through the error handler.
-    });
-  }, 15000);
+    void checkForUpdatesQuietly();
+  }, startupUpdateCheckDelayMs);
+
+  if (periodicUpdateCheckTimer) {
+    clearInterval(periodicUpdateCheckTimer);
+  }
+
+  periodicUpdateCheckTimer = setInterval(() => {
+    void checkForUpdatesQuietly();
+  }, periodicUpdateCheckIntervalMs);
 };
