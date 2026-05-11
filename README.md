@@ -17,7 +17,7 @@ Windows packaging currently produces two main deliverables:
 - `Lockedscreen-Portable-<version>.exe`
   Portable build that can be run without a traditional install.
 
-For students and staff, prefer the standard installer unless you specifically need portable distribution.
+For students and staff, prefer the standard installer unless you specifically need portable distribution. On student-owned devices, a parent, guardian, or administrator should approve the Windows administrator prompt during setup. The installer then installs and starts the Lockedscreen Security Service automatically, which is required for Full Kiosk Mode exams.
 
 ## How To Use The App
 
