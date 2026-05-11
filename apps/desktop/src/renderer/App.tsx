@@ -279,10 +279,14 @@ const isSecureSessionReady = (snapshot: AppStateSnapshot): boolean => {
     snapshot.securityProfile.kioskConfigured &&
     snapshot.securityProfile.dedicatedExamAccount &&
     usesOfficialKiosk(snapshot.securityProfile);
+  const installedNativeLockdownReady =
+    snapshot.runtime?.platform === "windows" &&
+    snapshot.runtime.nativeLockdown.lockdownCapable === true;
   const nativeReady =
-    snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile) &&
-    snapshot.runtime?.nativeLockdown.lockdownCapable === true;
+    installedNativeLockdownReady ||
+    (snapshot.securityProfile.nativeCompanionVerified &&
+      usesNativeCompanion(snapshot.securityProfile) &&
+      snapshot.runtime?.nativeLockdown.lockdownCapable === true);
 
   return officialKioskReady || nativeReady;
 };

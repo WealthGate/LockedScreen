@@ -5,6 +5,7 @@
 Var LockedscreenInstallRole
 Var LockedscreenTeacherRadio
 Var LockedscreenStudentRadio
+Var LockedscreenServiceResult
 
 !macro customPageAfterChangeDir
   Page custom LockedscreenRolePageCreate LockedscreenRolePageLeave
@@ -46,12 +47,30 @@ FunctionEnd
   FileWrite $0 '{"role":"$LockedscreenInstallRole"}'
   FileClose $0
 
-  IfFileExists "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" 0 +8
+  IfFileExists "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" 0 serviceMissing
     nsExec::ExecToLog '"$SYSDIR\sc.exe" stop LockedscreenSecurityService'
+    Pop $LockedscreenServiceResult
     nsExec::ExecToLog '"$SYSDIR\sc.exe" delete LockedscreenSecurityService'
+    Pop $LockedscreenServiceResult
     nsExec::ExecToLog '"$SYSDIR\sc.exe" create LockedscreenSecurityService binPath= "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" start= auto DisplayName= "Lockedscreen Security Service"'
+    Pop $LockedscreenServiceResult
+    ${If} $LockedscreenServiceResult != 0
+      MessageBox MB_ICONSTOP "Lockedscreen could not install the Security Service. A parent, guardian, teacher, or administrator must approve the Windows administrator prompt. Run the standard Setup installer again and click Yes when Windows asks for permission."
+      Abort
+    ${EndIf}
     nsExec::ExecToLog '"$SYSDIR\sc.exe" description LockedscreenSecurityService "Provides the Lockedscreen native security companion service for secure exam sessions."'
+    Pop $LockedscreenServiceResult
     nsExec::ExecToLog '"$SYSDIR\sc.exe" start LockedscreenSecurityService'
+    Pop $LockedscreenServiceResult
+    ${If} $LockedscreenServiceResult != 0
+      MessageBox MB_ICONSTOP "Lockedscreen installed but could not start the Security Service. Restart Windows, then run the standard Setup installer again as administrator."
+      Abort
+    ${EndIf}
+    Goto serviceDone
+  serviceMissing:
+    MessageBox MB_ICONSTOP "Lockedscreen could not find the native Security Service files in this installer. Download and run the standard Lockedscreen Setup installer, not the portable app."
+    Abort
+  serviceDone:
 !macroend
 !endif
 

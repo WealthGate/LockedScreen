@@ -360,10 +360,11 @@ const buildValidationItems = (
       snapshot.securityProfile.kioskMode === "shell-launcher" ||
       snapshot.securityProfile.kioskMode === "hybrid");
   const nativeLockdownReady =
-    snapshot.securityProfile.nativeCompanionVerified &&
     runtime.nativeLockdown.lockdownCapable &&
-    (snapshot.securityProfile.kioskMode === "windows-native-companion" ||
-      snapshot.securityProfile.kioskMode === "hybrid");
+    (runtime.platform === "windows" ||
+      (snapshot.securityProfile.nativeCompanionVerified &&
+        (snapshot.securityProfile.kioskMode === "windows-native-companion" ||
+          snapshot.securityProfile.kioskMode === "hybrid")));
   const deploymentReady = officialKioskReady || nativeLockdownReady;
   const fullKioskRequested = snapshot.configPackages.some((candidate) => candidate.securityMode === "full-kiosk");
 

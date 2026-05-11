@@ -1093,10 +1093,12 @@ app.whenReady().then(async () => {
       throw new Error("Configuration package not found.");
     }
 
+    const windowsFullKioskPackage = process.platform === "win32" && configPackage.securityMode === "full-kiosk";
     const needsNativeCompanion =
       !launchedByNativeHost &&
-      (configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
-      nativeCompanionRequired(snapshot.securityProfile);
+      (windowsFullKioskPackage ||
+        ((configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
+          nativeCompanionRequired(snapshot.securityProfile)));
 
     if (needsNativeCompanion) {
       await beginNativeLockdownSession(request, configPackage, recordSecurityEvent);
