@@ -1,6 +1,6 @@
 {
   "name": "@lockedscreen/desktop",
-  "version": "0.6.13",
+  "version": "0.6.14",
   "private": true,
   "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
   "author": {
@@ -41,22 +41,22 @@
     ],
     "extraResources": [
       {
-        "from": "../windows-lockdown/Lockedscreen.Security.Service/bin/Release/net8.0-windows",
-        "to": "lockedscreen-security",
+        "from": "../windows-lockdown/publish/service",
+        "to": "lockedscreen-security/service",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": "../windows-lockdown/Lockedscreen.Security.Client/bin/Release/net8.0-windows",
-        "to": "lockedscreen-security",
+        "from": "../windows-lockdown/publish/client",
+        "to": "lockedscreen-security/client",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": "../windows-lockdown/Lockedscreen.Security.Agent/bin/Release/net8.0-windows",
-        "to": "lockedscreen-security",
+        "from": "../windows-lockdown/publish/agent",
+        "to": "lockedscreen-security/agent",
         "filter": [
           "**/*"
         ]

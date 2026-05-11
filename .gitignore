@@ -9,6 +9,7 @@ apps/desktop/out/
 
 apps/windows-lockdown/**/bin/
 apps/windows-lockdown/**/obj/
+apps/windows-lockdown/publish/
 
 *.tmp
 *.log

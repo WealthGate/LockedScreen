@@ -36,10 +36,13 @@ const developmentRoot = join(process.cwd(), "apps", "windows-lockdown");
 const executableDir = dirname(process.execPath);
 
 const candidateClientPaths = (): string[] => [
+  join(process.resourcesPath, "lockedscreen-security", "client", "Lockedscreen.Security.Client.exe"),
   join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
   join(process.resourcesPath, "Lockedscreen.Security.Client.exe"),
+  join(executableDir, "lockedscreen-security", "client", "Lockedscreen.Security.Client.exe"),
   join(executableDir, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
   join(executableDir, "Lockedscreen.Security.Client.exe"),
+  join(developmentRoot, "publish", "client", "Lockedscreen.Security.Client.exe"),
   join(
     developmentRoot,
     "Lockedscreen.Security.Client",
@@ -59,10 +62,13 @@ const candidateClientPaths = (): string[] => [
 ];
 
 const candidateServicePaths = (): string[] => [
+  join(process.resourcesPath, "lockedscreen-security", "service", "Lockedscreen.Security.Service.exe"),
   join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Service.exe"),
   join(process.resourcesPath, "Lockedscreen.Security.Service.exe"),
+  join(executableDir, "lockedscreen-security", "service", "Lockedscreen.Security.Service.exe"),
   join(executableDir, "lockedscreen-security", "Lockedscreen.Security.Service.exe"),
   join(executableDir, "Lockedscreen.Security.Service.exe"),
+  join(developmentRoot, "publish", "service", "Lockedscreen.Security.Service.exe"),
   join(
     developmentRoot,
     "Lockedscreen.Security.Service",
@@ -82,10 +88,13 @@ const candidateServicePaths = (): string[] => [
 ];
 
 const candidateAgentPaths = (): string[] => [
+  join(process.resourcesPath, "lockedscreen-security", "agent", "Lockedscreen.Security.Agent.exe"),
   join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Agent.exe"),
   join(process.resourcesPath, "Lockedscreen.Security.Agent.exe"),
+  join(executableDir, "lockedscreen-security", "agent", "Lockedscreen.Security.Agent.exe"),
   join(executableDir, "lockedscreen-security", "Lockedscreen.Security.Agent.exe"),
   join(executableDir, "Lockedscreen.Security.Agent.exe"),
+  join(developmentRoot, "publish", "agent", "Lockedscreen.Security.Agent.exe"),
   join(
     developmentRoot,
     "Lockedscreen.Security.Agent",

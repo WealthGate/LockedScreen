@@ -1,6 +1,6 @@
 {
   "name": "lockedscreen",
-  "version": "0.6.13",
+  "version": "0.6.14",
   "private": true,
   "packageManager": "npm@10.8.2",
   "workspaces": [
@@ -12,7 +12,7 @@
     "build:desktop": "cmd /c npm run build --workspace @lockedscreen/desktop",
     "build:desktop:mac": "npm run build --workspace @lockedscreen/desktop",
     "build:desktop:linux": "npm run build --workspace @lockedscreen/desktop",
-    "build:native": "dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Service\\Lockedscreen.Security.Service.csproj -c Release && dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Client\\Lockedscreen.Security.Client.csproj -c Release && dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Agent\\Lockedscreen.Security.Agent.csproj -c Release",
+    "build:native": "dotnet publish apps\\windows-lockdown\\Lockedscreen.Security.Service\\Lockedscreen.Security.Service.csproj -c Release -r win-x64 --self-contained true -o apps\\windows-lockdown\\publish\\service && dotnet publish apps\\windows-lockdown\\Lockedscreen.Security.Client\\Lockedscreen.Security.Client.csproj -c Release -r win-x64 --self-contained true -o apps\\windows-lockdown\\publish\\client && dotnet publish apps\\windows-lockdown\\Lockedscreen.Security.Agent\\Lockedscreen.Security.Agent.csproj -c Release -r win-x64 --self-contained true -o apps\\windows-lockdown\\publish\\agent",
     "build": "cmd /c npm run build:native && cmd /c npm run build:desktop",
     "typecheck": "cmd /c npm run typecheck --workspace @lockedscreen/desktop",
     "dist": "cmd /c npm run dist --workspace @lockedscreen/desktop",

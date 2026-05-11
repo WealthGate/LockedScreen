@@ -47,12 +47,12 @@ FunctionEnd
   FileWrite $0 '{"role":"$LockedscreenInstallRole"}'
   FileClose $0
 
-  IfFileExists "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" 0 serviceMissing
+  IfFileExists "$INSTDIR\resources\lockedscreen-security\service\Lockedscreen.Security.Service.exe" 0 serviceMissing
     nsExec::ExecToLog '"$SYSDIR\sc.exe" stop LockedscreenSecurityService'
     Pop $LockedscreenServiceResult
     nsExec::ExecToLog '"$SYSDIR\sc.exe" delete LockedscreenSecurityService'
     Pop $LockedscreenServiceResult
-    nsExec::ExecToLog '"$SYSDIR\sc.exe" create LockedscreenSecurityService binPath= "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" start= auto DisplayName= "Lockedscreen Security Service"'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" create LockedscreenSecurityService binPath= "$INSTDIR\resources\lockedscreen-security\service\Lockedscreen.Security.Service.exe" start= auto DisplayName= "Lockedscreen Security Service"'
     Pop $LockedscreenServiceResult
     ${If} $LockedscreenServiceResult != 0
       MessageBox MB_ICONSTOP "Lockedscreen could not install the Security Service. A parent, guardian, teacher, or administrator must approve the Windows administrator prompt. Run the standard Setup installer again and click Yes when Windows asks for permission."
