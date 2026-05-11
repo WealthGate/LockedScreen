@@ -546,7 +546,7 @@ const feedbackTone = (tone: "success" | "error" | "info"): string =>
       : "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/70 dark:bg-blue-950/60 dark:text-blue-100";
 
 const selectClassName =
-  "h-11 rounded-2xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/25 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-offset-slate-950";
+  "h-11 w-full min-w-0 rounded-2xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/25 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-offset-slate-950";
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) {
@@ -785,7 +785,7 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
   const navigate = useNavigate();
 
   return (
-    <div className="grid min-h-[calc(100vh-2rem)] gap-6 lg:grid-cols-[280px_1fr]">
+    <div className="grid min-h-[calc(100vh-2rem)] gap-6 xl:grid-cols-[280px_1fr]">
       <aside className="rounded-[32px] border border-white/60 bg-slate-950/90 p-6 text-white shadow-2xl shadow-slate-900/30">
         <div className="mb-10 flex items-center gap-3">
           <div className="rounded-2xl bg-teal-500/20 p-3 text-teal-200">
@@ -3603,7 +3603,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("overview")} style={settingsTabStyle("overview")}>
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+      <div className="grid gap-6 2xl:grid-cols-[1.15fr_0.85fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -3828,7 +3828,7 @@ const SettingsPage = () => {
         ) : null}
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -4163,7 +4163,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("turnin")} style={settingsTabStyle("turnin")}> 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -4577,7 +4577,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("results")} style={settingsTabStyle("results")}> 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -4885,7 +4885,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("package")} style={settingsTabStyle("package")}> 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 2xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>General</CardTitle>
           <LabelledField label="Package label">
@@ -5038,7 +5038,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("student-access")} style={settingsTabStyle("student-access")}>
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 2xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Student Assignment</CardTitle>
           <CardDescription>
@@ -5198,7 +5198,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("runtime")} style={settingsTabStyle("runtime")}>
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid gap-6 2xl:grid-cols-3">
         <Card className="space-y-5">
           <CardTitle>Student Interface</CardTitle>
           <ToggleField
@@ -5410,7 +5410,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("controls")} style={settingsTabStyle("controls")}>
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 2xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Applications</CardTitle>
           <CardDescription>
@@ -5499,7 +5499,7 @@ const SettingsPage = () => {
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid gap-6 2xl:grid-cols-3">
         <Card className="space-y-5">
           <CardTitle>Clipboard / Capture / Printing</CardTitle>
           <PolicySelect
@@ -5668,7 +5668,7 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("security")} style={settingsTabStyle("security")}>
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 2xl:grid-cols-2">
         <Card className="space-y-5">
           <CardTitle>Security posture</CardTitle>
           <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
@@ -6948,8 +6948,8 @@ const LabelledField = ({
   children: ReactNode;
   labelClassName?: string;
 }) => (
-  <div className="grid gap-2">
-    <span className={`text-sm font-semibold ${labelClassName ?? "text-slate-800 dark:text-slate-100"}`}>{label}</span>
+  <div className="grid min-w-0 gap-2">
+    <span className={`min-w-0 text-sm font-semibold leading-5 ${labelClassName ?? "text-slate-800 dark:text-slate-100"}`}>{label}</span>
     {children}
   </div>
 );
@@ -6963,14 +6963,14 @@ const ToggleField = ({
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) => (
-  <label className="flex items-center gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+  <label className="flex min-w-0 items-start gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-medium leading-5 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 sm:px-4 sm:py-3">
     <input
       type="checkbox"
-      className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+      className="mt-0.5 size-4 shrink-0 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
       checked={checked}
       onChange={(event) => onChange(event.target.checked)}
     />
-    {label}
+    <span className="min-w-0">{label}</span>
   </label>
 );
 

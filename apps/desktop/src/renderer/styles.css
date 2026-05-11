@@ -27,10 +27,23 @@ body {
   margin: 0;
   min-height: 100vh;
   background: transparent;
+  overflow-x: hidden;
 }
 
 #root {
   min-height: 100vh;
+}
+
+:where(main, section, aside, article, header, footer, div, form, label, p, span) {
+  min-width: 0;
+}
+
+:where(p, span, div) {
+  overflow-wrap: break-word;
+}
+
+:where(input, select, textarea, button) {
+  max-width: 100%;
 }
 
 ::-webkit-scrollbar {
