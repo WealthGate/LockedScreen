@@ -288,15 +288,14 @@ const isSecureSessionReady = (snapshot: AppStateSnapshot): boolean => {
 };
 
 const canUseTestingMode = (snapshot: AppStateSnapshot): boolean =>
-  snapshot.settings.allowNonKioskTestingMode || snapshot.runtime?.canOnlyUseTestingMode === true;
+  snapshot.settings.allowNonKioskTestingMode;
 
 const testingModeCopy = (snapshot: AppStateSnapshot): string =>
   snapshot.runtime?.canOnlyUseTestingMode
-    ? "will run in Windows Home testing mode because no verified native Windows lockdown companion is active on this device. The app stays full-screen and keeps the exam workflow contained, but the Windows key, task switching, and taskbar surfaces remain under OS control. This is not a secure exam deployment."
-    : "can run in testing mode on unmanaged devices, but the strongest lockdown still requires a verified native Windows companion or official Windows kiosk deployment. This is not a secure exam deployment.";
+    ? "can run in teacher-approved testing mode on this Windows Home device, but only because testing mode was explicitly enabled in Admin Console. Full Kiosk Mode still requires the native Windows lockdown companion."
+    : "can run in teacher-approved testing mode on unmanaged devices, but only because testing mode was explicitly enabled in Admin Console. This is not a secure exam deployment.";
 
-const testingModeLabel = (snapshot: AppStateSnapshot): string =>
-  snapshot.runtime?.canOnlyUseTestingMode ? "Windows Home testing mode" : "Testing mode";
+const testingModeLabel = (_snapshot: AppStateSnapshot): string => "Testing mode";
 
 const getConfigPackageForExam = (snapshot: AppStateSnapshot | null, examId: string): ExamConfigPackage | null => {
   if (!snapshot) {
@@ -1374,8 +1373,8 @@ const DashboardPage = () => {
               value={
                 isSecureSessionReady(snapshot)
                   ? "Configured"
-                  : snapshot.runtime?.canOnlyUseTestingMode
-                    ? "Home testing only"
+                  : snapshot.settings.allowNonKioskTestingMode
+                    ? "Testing allowed"
                     : "Needs setup"
               }
             />
@@ -1457,7 +1456,7 @@ const DashboardPage = () => {
                 <Button
                   onClick={() => openCandidatePrompt(launchReviewExam)}
                 >
-                  {snapshot.runtime?.canOnlyUseTestingMode ? "Launch Windows Home session" : "Launch testing session"}
+                  Launch testing session
                 </Button>
               ) : null}
               <Button variant="secondary" onClick={() => navigate("/teacher/settings")}>
@@ -2661,7 +2660,6 @@ const SettingsPage = () => {
   const [adminPinAttempt, setAdminPinAttempt] = useState("");
   const [adminUnlockError, setAdminUnlockError] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("overview");
-  const autoTestingMode = snapshot?.runtime?.canOnlyUseTestingMode === true;
 
   useEffect(() => {
     if (!snapshot) {
@@ -5646,8 +5644,7 @@ const SettingsPage = () => {
             <input
               type="checkbox"
               className="size-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
-              checked={settings.allowNonKioskTestingMode || autoTestingMode}
-              disabled={autoTestingMode}
+              checked={settings.allowNonKioskTestingMode}
               onChange={(event) =>
                 updateSettings((current) => ({
                   ...current,
@@ -5655,9 +5652,7 @@ const SettingsPage = () => {
                 }))
               }
             />
-            {autoTestingMode
-              ? "Windows Home detected without a verified native lockdown companion. Testing sessions are enabled automatically on this device."
-              : "Allow testing sessions when native lockdown or official kiosk deployment is not verified"}
+            Allow teacher-approved testing sessions when native lockdown or official kiosk deployment is not verified
           </label>
           {snapshot?.runtime ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">

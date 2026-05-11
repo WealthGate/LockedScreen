@@ -66,9 +66,9 @@ const defaultSettings: AppSettings = {
 
 const defaultSecurityProfile: SecurityProfile = {
   kioskConfigured: false,
-  kioskMode: "not-configured",
+  kioskMode: "windows-native-companion",
   dedicatedExamAccount: false,
-  nativeCompanionVerified: false
+  nativeCompanionVerified: true
 };
 
 const defaultTeacherOptions = (): TeacherOptions => ({
@@ -136,7 +136,21 @@ export const withStampedIntegrity = (candidate: ExamConfigPackage): ExamConfigPa
 const defaultBlockedShortcuts = (enforcement: EnforcementLevel): string[] =>
   enforcement === "app-enforced"
     ? ["F5", "Ctrl+R", "Ctrl+W", "Ctrl+P", "Alt+Left", "Alt+Right", "Ctrl+C", "Ctrl+V"]
-    : ["Windows-key paths require a native Windows lockdown companion or official Windows kiosk deployment"];
+    : [
+        "Windows key",
+        "Windows-key combinations",
+        "Alt+Tab",
+        "Alt+Esc",
+        "Alt+F4",
+        "Alt+Space",
+        "Alt+Enter",
+        "Ctrl+Esc",
+        "Ctrl+Shift+Esc",
+        "Print Screen",
+        "Alt+Print Screen",
+        "browser and application launch keys",
+        "media and volume overlay keys"
+      ];
 
 const defaultBranding = (exam: Exam): SchoolBranding => ({
   schoolName: exam.branding.schoolName,
@@ -351,10 +365,10 @@ export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
       enforcement: "app-enforced"
     },
     keyRestrictionPolicy: {
-      enforcement: "app-enforced",
+      enforcement: "native-companion-enforced",
       metadata:
-        "Lockedscreen blocks browser-level shortcuts in Restricted App Mode. Windows key paths require a native Windows lockdown companion or official Windows kiosk deployment.",
-      blockedShortcuts: defaultBlockedShortcuts("app-enforced")
+        "Full Kiosk Mode uses the native Windows lockdown companion to block Windows shell shortcuts, task switching, screen capture keys, application launch keys, and browser/media hardware keys. Ctrl+Alt+Del remains reserved by Windows.",
+      blockedShortcuts: defaultBlockedShortcuts("native-companion-enforced")
     },
     teacherOptions: defaultTeacherOptions(),
     studentAccessPolicy: defaultStudentAccessPolicy(),
