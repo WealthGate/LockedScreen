@@ -309,14 +309,18 @@ const getConfigPackageForExam = (snapshot: AppStateSnapshot | null, examId: stri
   );
 };
 
-const isNativeFullKioskExam = (snapshot: AppStateSnapshot, examId: string): boolean => {
+const isWindowsFullKioskExam = (snapshot: AppStateSnapshot, examId: string): boolean => {
   const configPackage = getConfigPackageForExam(snapshot, examId);
   return (
     configPackage?.securityMode === "full-kiosk" &&
-    snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile)
+    snapshot.runtime?.platform === "windows"
   );
 };
+
+const fullKioskLaunchError = (error: unknown): string =>
+  error instanceof Error
+    ? `${error.message} Full Kiosk Mode could not start the native secure exam shell on this device. Reinstall or update Lockedscreen, then start the exam again.`
+    : "Full Kiosk Mode could not start the native secure exam shell on this device. Reinstall or update Lockedscreen, then start the exam again.";
 
 const requiresInvigilatorExitAfterSubmit = (configPackage: ExamConfigPackage | null): boolean =>
   Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
@@ -972,15 +976,7 @@ const StudentPortalPage = () => {
       }
     }
 
-    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
-      setLaunchFeedback({
-        tone: "error",
-        text: "This device is not ready for the exam yet. Ask the teacher or invigilator to prepare the exam workstation before starting."
-      });
-      return false;
-    }
-
-    if (isNativeFullKioskExam(snapshot, exam.id)) {
+    if (isWindowsFullKioskExam(snapshot, exam.id)) {
       try {
         const handedOff = await launchAlternateDesktopSession({ examId: exam.id, candidate });
         if (handedOff) {
@@ -989,13 +985,18 @@ const StudentPortalPage = () => {
       } catch (error) {
         setLaunchFeedback({
           tone: "error",
-          text:
-            error instanceof Error
-              ? `${error.message} This full-kiosk exam cannot start until native Windows lockdown is active.`
-              : "Native lockdown launch failed. This full-kiosk exam cannot start until the Windows lockdown companion is active."
+          text: fullKioskLaunchError(error)
         });
         return false;
       }
+    }
+
+    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
+      setLaunchFeedback({
+        tone: "error",
+        text: "Full Kiosk Mode is required for this exam, but the secure lockdown environment could not be started on this device. Reinstall or update Lockedscreen, then start the exam again."
+      });
+      return false;
     }
 
     navigate(buildExamRoute(exam, candidate));
@@ -1310,12 +1311,7 @@ const DashboardPage = () => {
   const launchExam = async (exam: Exam, candidate: Candidate) => {
     setLaunchFeedback(null);
 
-    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
-      setLaunchReviewExam(exam);
-      return;
-    }
-
-    if (isNativeFullKioskExam(snapshot, exam.id)) {
+    if (isWindowsFullKioskExam(snapshot, exam.id)) {
       try {
         const handedOff = await launchAlternateDesktopSession({ examId: exam.id, candidate });
         if (handedOff) {
@@ -1324,13 +1320,15 @@ const DashboardPage = () => {
       } catch (error) {
         setLaunchFeedback({
           tone: "error",
-          text:
-            error instanceof Error
-              ? `${error.message} This full-kiosk exam cannot start until native Windows lockdown is active.`
-              : "Native lockdown launch failed. This full-kiosk exam cannot start until the Windows lockdown companion is active."
+          text: fullKioskLaunchError(error)
         });
         return;
       }
+    }
+
+    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
+      setLaunchReviewExam(exam);
+      return;
     }
 
     navigate(buildExamRoute(exam, candidate));

@@ -1134,7 +1134,7 @@ app.whenReady().then(async () => {
       throw new Error("Configuration package not found.");
     }
 
-    if (configPackage.securityMode !== "full-kiosk" || !nativeCompanionRequired(snapshot.securityProfile)) {
+    if (configPackage.securityMode !== "full-kiosk") {
       return false;
     }
 

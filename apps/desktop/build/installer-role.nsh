@@ -43,5 +43,17 @@ FunctionEnd
   FileOpen $0 "$INSTDIR\resources\install-role.json" w
   FileWrite $0 '{"role":"$LockedscreenInstallRole"}'
   FileClose $0
+
+  IfFileExists "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" 0 +8
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" stop LockedscreenSecurityService'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" delete LockedscreenSecurityService'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" create LockedscreenSecurityService binPath= "$INSTDIR\resources\lockedscreen-security\Lockedscreen.Security.Service.exe" start= auto DisplayName= "Lockedscreen Security Service"'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" description LockedscreenSecurityService "Provides the Lockedscreen native security companion service for secure exam sessions."'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" start LockedscreenSecurityService'
 !macroend
 !endif
+
+!macro customUnInstall
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" stop LockedscreenSecurityService'
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" delete LockedscreenSecurityService'
+!macroend

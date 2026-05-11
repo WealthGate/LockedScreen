@@ -1,6 +1,6 @@
 {
   "name": "@lockedscreen/desktop",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "private": true,
   "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
   "author": {
@@ -124,6 +124,8 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
