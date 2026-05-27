@@ -6230,7 +6230,7 @@ const LinkExamPage = () => {
   const [shellUnlockOpen, setShellUnlockOpen] = useState(false);
   const [hostedZoom, setHostedZoom] = useState(1);
   const [hostedSubmitDetected, setHostedSubmitDetected] = useState(false);
-  const [embeddedGoogleSignInBlocked, setEmbeddedGoogleSignInBlocked] = useState(false);
+  const [hostedGoogleSignInState, setHostedGoogleSignInState] = useState<"idle" | "opening" | "completed" | "cancelled">("idle");
   const webviewRef = useRef<any>(null);
   const guardDomainsKey = configPackage?.browserPolicy.allowedDomains.join("|") ?? "";
   const guardPrefixesKey =
@@ -6271,9 +6271,26 @@ const LinkExamPage = () => {
   }, [configPackage?.id, configPackage?.browserPolicy.startUrl, guardDomainsKey, guardPrefixesKey]);
 
   useEffect(() => {
-    return window.lockedscreenApi.onEmbeddedGoogleSignInBlocked(() => {
-      setEmbeddedGoogleSignInBlocked(true);
+    const unsubscribeStarted = window.lockedscreenApi.onHostedGoogleSignInStarted(() => {
+      setHostedGoogleSignInState("opening");
     });
+
+    const unsubscribeFinished = window.lockedscreenApi.onHostedGoogleSignInFinished((payload) => {
+      setHostedGoogleSignInState(payload.status === "completed" ? "completed" : "cancelled");
+      if (payload.status === "completed" && webviewRef.current) {
+        const reloadTarget = payload.url || configPackage?.browserPolicy.startUrl || exam?.linkConfig?.url;
+        if (reloadTarget) {
+          webviewRef.current.src = reloadTarget;
+        } else {
+          webviewRef.current.reload?.();
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeStarted();
+      unsubscribeFinished();
+    };
   }, []);
 
   useEffect(() => {
@@ -6288,7 +6305,7 @@ const LinkExamPage = () => {
     setTurningIn(false);
     setSubmissionResult(null);
     setHostedSubmitDetected(false);
-    setEmbeddedGoogleSignInBlocked(false);
+    setHostedGoogleSignInState("idle");
   }, [exam, location.search]);
 
   useEffect(() => {
@@ -6375,7 +6392,7 @@ const LinkExamPage = () => {
 
     webviewRef.current.src = startUrl;
     setHostedSubmitDetected(false);
-    setEmbeddedGoogleSignInBlocked(false);
+    setHostedGoogleSignInState("idle");
   };
 
   const requestHostedCompletion = () => {
@@ -6478,18 +6495,32 @@ const LinkExamPage = () => {
           </div>
         </div>
 
-        {embeddedGoogleSignInBlocked ? (
-          <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+        {hostedGoogleSignInState !== "idle" ? (
+          <div className="border-b border-blue-300 bg-blue-50 px-4 py-3 text-blue-950">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="flex gap-3">
-                <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+                {hostedGoogleSignInState === "cancelled" ? (
+                  <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-700" />
+                ) : (
+                  <ShieldCheck className="mt-0.5 size-5 shrink-0 text-blue-700" />
+                )}
                 <div className="space-y-1 text-sm">
-                  <p className="font-semibold">Google sign-in cannot open inside the locked exam browser.</p>
-                  <p>
-                    This Google Form requires students to sign in. Google blocks account sign-in inside embedded secure
-                    browsers, even after app verification. Ask the teacher to turn off the form's sign-in requirement for
-                    Lockedscreen link exams, or use an app-based Lockedscreen exam/Classroom assignment instead.
-                  </p>
+                  {hostedGoogleSignInState === "opening" ? (
+                    <>
+                      <p className="font-semibold">Google sign-in opened in a controlled Lockedscreen window.</p>
+                      <p>Complete sign-in there. When Google returns to the form, Lockedscreen will bring the exam back here.</p>
+                    </>
+                  ) : hostedGoogleSignInState === "completed" ? (
+                    <>
+                      <p className="font-semibold">Google sign-in completed.</p>
+                      <p>The form has been reloaded with the signed-in session. Continue the exam here.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold">Google sign-in was closed before completion.</p>
+                      <p>Click the Google sign-in button on the form again if your teacher requires a Google account.</p>
+                    </>
+                  )}
                 </div>
               </div>
               <Button variant="secondary" onClick={returnToStart}>

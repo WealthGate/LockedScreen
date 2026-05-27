@@ -33,7 +33,10 @@ export interface LockedscreenApi {
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
   onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
-  onEmbeddedGoogleSignInBlocked: (callback: (payload: { url?: string }) => void) => () => void;
+  onHostedGoogleSignInStarted: (callback: (payload: { url?: string }) => void) => () => void;
+  onHostedGoogleSignInFinished: (
+    callback: (payload: { status: "completed" | "cancelled"; url?: string }) => void
+  ) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
   deleteExam: (examId: string) => Promise<AppStateSnapshot>;
@@ -104,10 +107,18 @@ const api: LockedscreenApi = {
     ipcRenderer.on("session:exitBlocked", listener);
     return () => ipcRenderer.removeListener("session:exitBlocked", listener);
   },
-  onEmbeddedGoogleSignInBlocked: (callback) => {
+  onHostedGoogleSignInStarted: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { url?: string }) => callback(payload);
-    ipcRenderer.on("session:embeddedGoogleSignInBlocked", listener);
-    return () => ipcRenderer.removeListener("session:embeddedGoogleSignInBlocked", listener);
+    ipcRenderer.on("session:hostedGoogleSignInStarted", listener);
+    return () => ipcRenderer.removeListener("session:hostedGoogleSignInStarted", listener);
+  },
+  onHostedGoogleSignInFinished: (callback) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { status: "completed" | "cancelled"; url?: string }
+    ) => callback(payload);
+    ipcRenderer.on("session:hostedGoogleSignInFinished", listener);
+    return () => ipcRenderer.removeListener("session:hostedGoogleSignInFinished", listener);
   },
   refreshSecurityOverview: () => ipcRenderer.invoke("security:refreshOverview"),
   saveExam: (exam) => ipcRenderer.invoke("exam:save", exam),

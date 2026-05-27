@@ -6,6 +6,8 @@ import { BrowserWindow, clipboard, session as electronSession, type Input, type 
 import type { ExamConfigPackage, NavigationGuard, SessionStartRequest } from "@lockedscreen/shared-types";
 
 const hostedPartition = "persist:lockedscreen-link";
+const hostedBrowserUserAgent =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 
 export interface ActiveSessionState {
   examId: string;
@@ -19,6 +21,7 @@ type SecurityEventRecorder = (category: string, severity: string, message: strin
 let activeSession: ActiveSessionState | null = null;
 let activePackage: ExamConfigPackage | null = null;
 let navigationGuard: NavigationGuard | null = null;
+let hostedGoogleSignInWindow: BrowserWindow | null = null;
 
 const hostedAuthDomains = [
   "accounts.google.com",
@@ -76,10 +79,127 @@ const isEmbeddedGoogleAccountSignInUrl = (target: URL): boolean => {
   );
 };
 
-const notifyEmbeddedGoogleSignInBlocked = (url: string): void => {
+const notifyHostedGoogleSignInStarted = (url: string): void => {
   for (const browserWindow of BrowserWindow.getAllWindows()) {
-    browserWindow.webContents.send("session:embeddedGoogleSignInBlocked", { url });
+    browserWindow.webContents.send("session:hostedGoogleSignInStarted", { url });
   }
+};
+
+const notifyHostedGoogleSignInFinished = (status: "completed" | "cancelled", url?: string): void => {
+  for (const browserWindow of BrowserWindow.getAllWindows()) {
+    browserWindow.webContents.send("session:hostedGoogleSignInFinished", { status, url });
+  }
+};
+
+const urlAllowedInHostedGoogleSignIn = (targetUrl: string): boolean => {
+  try {
+    const target = new URL(targetUrl);
+    const googleSupportAllowed = hostedAuthDomains.some(
+      (domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)
+    );
+    return googleSupportAllowed || isHostedGoogleFormsUrl(target) || isHostedGoogleFormsScoreUrl(target);
+  } catch {
+    return false;
+  }
+};
+
+const openHostedGoogleSignInWindow = async (
+  url: string,
+  recordSecurityEvent: SecurityEventRecorder
+): Promise<void> => {
+  if (hostedGoogleSignInWindow && !hostedGoogleSignInWindow.isDestroyed()) {
+    hostedGoogleSignInWindow.focus();
+    return;
+  }
+
+  const parentWindow = BrowserWindow.getAllWindows()[0] ?? null;
+  let completed = false;
+
+  hostedGoogleSignInWindow = new BrowserWindow({
+    width: 1040,
+    height: 820,
+    minWidth: 900,
+    minHeight: 700,
+    parent: parentWindow ?? undefined,
+    modal: Boolean(parentWindow),
+    title: "Google sign-in",
+    autoHideMenuBar: true,
+    backgroundColor: "#ffffff",
+    alwaysOnTop: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+      partition: hostedPartition
+    }
+  });
+
+  hostedGoogleSignInWindow.webContents.setUserAgent(hostedBrowserUserAgent);
+  hostedGoogleSignInWindow.setMenu(null);
+  notifyHostedGoogleSignInStarted(url);
+
+  const finishIfReturnedToForm = (targetUrl: string): void => {
+    try {
+      const target = new URL(targetUrl);
+      if (isHostedGoogleFormsUrl(target)) {
+        completed = true;
+        notifyHostedGoogleSignInFinished("completed", targetUrl);
+        hostedGoogleSignInWindow?.close();
+      }
+    } catch {
+      // Ignore malformed URLs; the navigation guard will handle them.
+    }
+  };
+
+  hostedGoogleSignInWindow.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
+    if (urlAllowedInHostedGoogleSignIn(popupUrl)) {
+      void hostedGoogleSignInWindow?.loadURL(popupUrl);
+    } else {
+      void recordSecurityEvent("navigation", "warning", "Blocked Google sign-in popup to an unapproved URL.", popupUrl);
+    }
+    return { action: "deny" };
+  });
+
+  hostedGoogleSignInWindow.webContents.on("before-input-event", (event, input) => {
+    if (activeShortcutBlocked(input)) {
+      event.preventDefault();
+    }
+  });
+
+  hostedGoogleSignInWindow.webContents.on("context-menu", (event) => {
+    event.preventDefault();
+  });
+
+  hostedGoogleSignInWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    if (!urlAllowedInHostedGoogleSignIn(targetUrl)) {
+      event.preventDefault();
+      void recordSecurityEvent("navigation", "warning", "Blocked Google sign-in navigation to an unapproved URL.", targetUrl);
+    }
+  });
+
+  hostedGoogleSignInWindow.webContents.on("did-navigate", (_event, targetUrl) => {
+    finishIfReturnedToForm(targetUrl);
+  });
+
+  hostedGoogleSignInWindow.webContents.on("did-navigate-in-page", (_event, targetUrl) => {
+    finishIfReturnedToForm(targetUrl);
+  });
+
+  hostedGoogleSignInWindow.on("closed", () => {
+    hostedGoogleSignInWindow = null;
+    if (!completed) {
+      notifyHostedGoogleSignInFinished("cancelled");
+    }
+  });
+
+  await recordSecurityEvent(
+    "navigation",
+    "info",
+    "Opened controlled Google sign-in window for hosted exam.",
+    "The window shares the locked exam browser session and stays inside the app."
+  );
+  await hostedGoogleSignInWindow.loadURL(url);
 };
 
 export const getActiveSession = (): ActiveSessionState | null => activeSession;
@@ -174,12 +294,12 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
     try {
       const target = new URL(url);
       if (activeSession?.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
-        notifyEmbeddedGoogleSignInBlocked(url);
+        void openHostedGoogleSignInWindow(url, recordSecurityEvent);
         void recordSecurityEvent(
           "navigation",
-          "warning",
-          "Blocked Google sign-in inside the embedded exam browser.",
-          "Google requires account sign-in to happen in a supported browser outside Electron webviews."
+          "info",
+          "Routed Google sign-in to the controlled hosted sign-in window.",
+          "Google sign-in is kept inside Lockedscreen while avoiding the embedded webview."
         );
         return { action: "deny" };
       }
@@ -218,12 +338,12 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
         const target = new URL(url);
         if (activeSession?.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
           event.preventDefault();
-          notifyEmbeddedGoogleSignInBlocked(url);
+          void openHostedGoogleSignInWindow(url, recordSecurityEvent);
           void recordSecurityEvent(
             "navigation",
-            "warning",
-            "Blocked Google sign-in inside the embedded exam browser.",
-            "Google requires account sign-in to happen in a supported browser outside Electron webviews."
+            "info",
+            "Routed Google sign-in to the controlled hosted sign-in window.",
+            "Google sign-in is kept inside Lockedscreen while avoiding the embedded webview."
           );
           return;
         }
@@ -287,6 +407,9 @@ export const endManagedSession = async (
   if (activePackage?.sessionPolicy.clearSessionOnEnd && activeSession?.mode === "link") {
     await clearHostedPartitionData();
   }
+
+  hostedGoogleSignInWindow?.close();
+  hostedGoogleSignInWindow = null;
 
   activeSession = null;
   activePackage = null;
