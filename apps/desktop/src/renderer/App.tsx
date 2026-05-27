@@ -6230,6 +6230,7 @@ const LinkExamPage = () => {
   const [shellUnlockOpen, setShellUnlockOpen] = useState(false);
   const [hostedZoom, setHostedZoom] = useState(1);
   const [hostedSubmitDetected, setHostedSubmitDetected] = useState(false);
+  const [embeddedGoogleSignInBlocked, setEmbeddedGoogleSignInBlocked] = useState(false);
   const webviewRef = useRef<any>(null);
   const guardDomainsKey = configPackage?.browserPolicy.allowedDomains.join("|") ?? "";
   const guardPrefixesKey =
@@ -6270,6 +6271,12 @@ const LinkExamPage = () => {
   }, [configPackage?.id, configPackage?.browserPolicy.startUrl, guardDomainsKey, guardPrefixesKey]);
 
   useEffect(() => {
+    return window.lockedscreenApi.onEmbeddedGoogleSignInBlocked(() => {
+      setEmbeddedGoogleSignInBlocked(true);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!exam) {
       return;
     }
@@ -6281,6 +6288,7 @@ const LinkExamPage = () => {
     setTurningIn(false);
     setSubmissionResult(null);
     setHostedSubmitDetected(false);
+    setEmbeddedGoogleSignInBlocked(false);
   }, [exam, location.search]);
 
   useEffect(() => {
@@ -6367,6 +6375,7 @@ const LinkExamPage = () => {
 
     webviewRef.current.src = startUrl;
     setHostedSubmitDetected(false);
+    setEmbeddedGoogleSignInBlocked(false);
   };
 
   const requestHostedCompletion = () => {
@@ -6468,6 +6477,27 @@ const LinkExamPage = () => {
             </Button>
           </div>
         </div>
+
+        {embeddedGoogleSignInBlocked ? (
+          <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div className="flex gap-3">
+                <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+                <div className="space-y-1 text-sm">
+                  <p className="font-semibold">Google sign-in cannot open inside the locked exam browser.</p>
+                  <p>
+                    This Google Form requires students to sign in. Google blocks account sign-in inside embedded secure
+                    browsers, even after app verification. Ask the teacher to turn off the form's sign-in requirement for
+                    Lockedscreen link exams, or use an app-based Lockedscreen exam/Classroom assignment instead.
+                  </p>
+                </div>
+              </div>
+              <Button variant="secondary" onClick={returnToStart}>
+                Return to form
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <webview
           ref={webviewRef}

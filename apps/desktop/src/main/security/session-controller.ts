@@ -62,6 +62,26 @@ const isHostedGoogleFormsScoreUrl = (target: URL): boolean => {
   );
 };
 
+const isEmbeddedGoogleAccountSignInUrl = (target: URL): boolean => {
+  if (target.hostname !== "accounts.google.com") {
+    return false;
+  }
+
+  return (
+    target.pathname.includes("/signin") ||
+    target.pathname.includes("/ServiceLogin") ||
+    target.pathname.includes("/InteractiveLogin") ||
+    target.pathname.includes("/o/oauth2") ||
+    target.searchParams.has("continue")
+  );
+};
+
+const notifyEmbeddedGoogleSignInBlocked = (url: string): void => {
+  for (const browserWindow of BrowserWindow.getAllWindows()) {
+    browserWindow.webContents.send("session:embeddedGoogleSignInBlocked", { url });
+  }
+};
+
 export const getActiveSession = (): ActiveSessionState | null => activeSession;
 export const getActivePackage = (): ExamConfigPackage | null => activePackage;
 
@@ -79,8 +99,15 @@ export const urlAllowedByGuard = (targetUrl: string): boolean => {
     const domainAllowed = navigationGuard.allowedDomains.some(
       (domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)
     );
-    // Video/demo note: Google Forms sign-in opens Google auth pages outside the original form URL.
-    // These trusted Google domains let students sign in without disabling the exam URL guard.
+    // Google account sign-in is intentionally not allowed inside the embedded exam browser.
+    // Google blocks embedded OAuth/user-agent sign-in, and opening a normal browser during
+    // a locked exam would weaken the secure session.
+    if (navigationGuard.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
+      return false;
+    }
+
+    // Trusted Google support domains are allowed for Forms assets and post-submit score pages,
+    // but not for account sign-in screens.
     const googleAuthAllowed =
       navigationGuard.mode === "link" &&
       hostedAuthDomains.some((domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`));
@@ -144,8 +171,24 @@ const activeShortcutBlocked = (input: Input): boolean => {
 
 export const configureWebContents = (contents: WebContents, recordSecurityEvent: SecurityEventRecorder): void => {
   contents.setWindowOpenHandler(({ url }) => {
+    try {
+      const target = new URL(url);
+      if (activeSession?.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
+        notifyEmbeddedGoogleSignInBlocked(url);
+        void recordSecurityEvent(
+          "navigation",
+          "warning",
+          "Blocked Google sign-in inside the embedded exam browser.",
+          "Google requires account sign-in to happen in a supported browser outside Electron webviews."
+        );
+        return { action: "deny" };
+      }
+    } catch {
+      // Fall through to the normal guard for malformed popup URLs.
+    }
+
     if (urlAllowedByGuard(url)) {
-      // Keep approved sign-in popups inside the locked exam webview instead of opening a normal browser window.
+      // Keep approved popups inside the locked exam webview instead of opening a normal browser window.
       void contents.loadURL(url);
     } else {
       void recordSecurityEvent("navigation", "warning", "Blocked hosted-exam popup to an unapproved URL.", url);
@@ -171,6 +214,23 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
 
   if (contents.getType() === "webview") {
     contents.on("will-navigate", (event, url) => {
+      try {
+        const target = new URL(url);
+        if (activeSession?.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
+          event.preventDefault();
+          notifyEmbeddedGoogleSignInBlocked(url);
+          void recordSecurityEvent(
+            "navigation",
+            "warning",
+            "Blocked Google sign-in inside the embedded exam browser.",
+            "Google requires account sign-in to happen in a supported browser outside Electron webviews."
+          );
+          return;
+        }
+      } catch {
+        // Fall through to the normal guard for malformed navigation URLs.
+      }
+
       if (!urlAllowedByGuard(url)) {
         event.preventDefault();
         void recordSecurityEvent("navigation", "warning", "Blocked navigation to an unapproved URL.", url);
