@@ -4588,6 +4588,7 @@ const SettingsPage = () => {
               <CardTitle>Result destinations</CardTitle>
               <CardDescription className="mt-2">
                 Configure post-submission sync targets. Local results always remain stored in Lockedscreen first; remote delivery is additive and does not change the lockdown runtime.
+                Save more than one enabled destination for the same exam when a teacher wants both Google Classroom and Google Sheets.
               </CardDescription>
             </div>
             <Badge>{snapshot.resultDestinations.length} destination(s)</Badge>
@@ -4873,6 +4874,9 @@ const SettingsPage = () => {
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               Google Classroom grade sync server: point the endpoint URL to the school-owned grade-sync bridge. The app sends the local score; the server owns the teacher authorization and writes the grade into Classroom.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              To use both Classroom and Sheets, create one Google Classroom grade-sync server destination and one Google Sheets destination. Set both to Auto sync after submission, enable both, and select the same exam scope.
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               The endpoint URL comes from the school IT/admin after they deploy the grade-sync bridge or Apps Script web app. It is usually a secure HTTPS address ending in an API route or `/exec`.

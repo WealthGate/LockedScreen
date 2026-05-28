@@ -18,6 +18,17 @@ Lockedscreen does not put teacher Google tokens inside exported student exam pac
 Students do not enter the Google Sheet link or endpoint URL on their devices.
 Teachers do not need to create headings. The script creates fixed student identity columns and creates new exam result columns as new tests arrive.
 
+## Using Google Sheets and Google Classroom Together
+
+Google Sheets and Google Classroom are separate result destinations in Lockedscreen. A teacher can use both for the same test:
+
+1. Create a `Google Sheets` destination and paste the teacher's Sheet link.
+2. Create a `Google Classroom grade sync server` destination and select the same exam scope.
+3. Set both destinations to `Auto sync after submission`.
+4. Keep both destinations enabled before exporting or posting the package.
+
+When a student submits, Lockedscreen stores the local result first, then sends the score to every enabled auto-sync destination for that exam. This lets the school keep a spreadsheet gradebook while also writing the grade back to Google Classroom.
+
 ## Getting the Apps Script Web App URL
 
 Use this option when the school wants Google Sheets grade rows without running its own server.
