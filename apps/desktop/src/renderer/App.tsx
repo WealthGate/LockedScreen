@@ -3458,6 +3458,8 @@ const SettingsPage = () => {
             trigger: "auto-on-submit",
             className: courseLabel,
             courseId: binding.courseId,
+            assignmentId: binding.assignmentId || undefined,
+            assignmentLabel: binding.assignmentLabel || undefined,
             connectionId: binding.connectionId,
             examIds,
             includeResponses: true,

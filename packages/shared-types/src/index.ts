@@ -155,6 +155,8 @@ export interface ResultDestination {
   apiKeyHeader?: string;
   className?: string;
   courseId?: string;
+  assignmentId?: string;
+  assignmentLabel?: string;
   connectionId?: string;
   bridgeEndpointUrl?: string;
   sortByLastName?: boolean;

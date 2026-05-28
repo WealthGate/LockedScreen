@@ -177,6 +177,8 @@ const normalizeResultDestination = (destination: ResultDestination): ResultDesti
   authMode: destination.authMode ?? "none",
   examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
   connectionId: destination.connectionId?.trim() || undefined,
+  assignmentId: destination.assignmentId?.trim() || undefined,
+  assignmentLabel: destination.assignmentLabel?.trim() || undefined,
   bridgeEndpointUrl: destination.bridgeEndpointUrl?.trim() || undefined,
   sortByLastName: destination.sortByLastName === true,
   includeResponses: destination.includeResponses ?? true

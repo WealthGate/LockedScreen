@@ -530,7 +530,7 @@ const turnInGoogleClassroom = async (
     status: "success",
     lastAttemptAt: new Date().toISOString(),
     submittedAt: new Date().toISOString(),
-    externalReference: uploadedFile.webViewLink ?? `${binding.courseId}/${binding.assignmentId}/${studentSubmission.id}`,
+    externalReference: `${binding.courseId}/${binding.assignmentId}/${studentSubmission.id}`,
     ...gradeSync
   };
 };

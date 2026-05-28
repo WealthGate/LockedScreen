@@ -50,7 +50,9 @@ const buildServerGradeSyncPayload = (destination: ResultDestination, exam: Exam,
   },
   classroom: {
     courseId: destination.courseId || exam.className,
-    courseWorkId: exam.id,
+    courseWorkId: destination.assignmentId || exam.id,
+    assignmentId: destination.assignmentId,
+    assignmentLabel: destination.assignmentLabel,
     teacherConfiguredClassName: destination.className || exam.className,
     studentSubmissionId: submission.studentLmsTurnIn?.externalReference
   },
