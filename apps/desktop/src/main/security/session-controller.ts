@@ -66,10 +66,10 @@ const isHostedGoogleFormsScoreUrl = (target: URL): boolean => {
 };
 
 const isEmbeddedGoogleAccountSignInUrl = (target: URL): boolean => {
-  // Google Forms can begin account auth at /signin, /ServiceLogin, /AccountChooser,
-  // or another accounts.google.com route. Keep every Google account route out of
-  // the embedded webview and send it through the controlled sign-in window instead.
-  return target.hostname === "accounts.google.com";
+  // Google Forms sign-in must remain inside the locked exam browser so students
+  // can continue the form after authentication. The navigation guard allows only
+  // trusted Google auth/support domains; normal browser windows are still denied.
+  return false;
 };
 
 const notifyHostedGoogleSignInStarted = (url: string): void => {
@@ -212,9 +212,9 @@ export const urlAllowedByGuard = (targetUrl: string): boolean => {
     const domainAllowed = navigationGuard.allowedDomains.some(
       (domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)
     );
-    // Google account sign-in is intentionally not allowed inside the embedded exam browser.
-    // Google blocks embedded OAuth/user-agent sign-in, and opening a normal browser during
-    // a locked exam would weaken the secure session.
+    // Google account sign-in is allowed only through the locked exam browser and
+    // trusted Google support domains. This mirrors secure-browser behavior while
+    // preventing unrestricted external browser navigation.
     if (navigationGuard.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
       return false;
     }
