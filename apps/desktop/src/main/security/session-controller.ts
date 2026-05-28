@@ -66,17 +66,10 @@ const isHostedGoogleFormsScoreUrl = (target: URL): boolean => {
 };
 
 const isEmbeddedGoogleAccountSignInUrl = (target: URL): boolean => {
-  if (target.hostname !== "accounts.google.com") {
-    return false;
-  }
-
-  return (
-    target.pathname.includes("/signin") ||
-    target.pathname.includes("/ServiceLogin") ||
-    target.pathname.includes("/InteractiveLogin") ||
-    target.pathname.includes("/o/oauth2") ||
-    target.searchParams.has("continue")
-  );
+  // Google Forms can begin account auth at /signin, /ServiceLogin, /AccountChooser,
+  // or another accounts.google.com route. Keep every Google account route out of
+  // the embedded webview and send it through the controlled sign-in window instead.
+  return target.hostname === "accounts.google.com";
 };
 
 const notifyHostedGoogleSignInStarted = (url: string): void => {
