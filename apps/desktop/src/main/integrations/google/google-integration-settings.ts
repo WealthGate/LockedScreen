@@ -9,15 +9,28 @@ export const googleClassroomDesktopOAuth = {
 
 export const defaultGoogleClassroomScopes = [
   "openid",
-  "email",
-  "profile",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
   "https://www.googleapis.com/auth/classroom.rosters.readonly",
   "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/spreadsheets"
+  "https://www.googleapis.com/auth/classroom.coursework.me"
 ] as const;
+
+const supportedGoogleClassroomScopes = new Set<string>(defaultGoogleClassroomScopes);
+
+const normalizeGoogleScope = (scope: string): string => {
+  const trimmed = scope.trim();
+  if (trimmed === "email") {
+    return "https://www.googleapis.com/auth/userinfo.email";
+  }
+  if (trimmed === "profile") {
+    return "https://www.googleapis.com/auth/userinfo.profile";
+  }
+  return trimmed;
+};
 
 export const createDefaultGoogleIntegrationSettings = (): GoogleIntegrationSettings => ({
   enabled: false,
@@ -35,9 +48,11 @@ export const normalizeGoogleIntegrationSettings = (
   settings: Partial<GoogleIntegrationSettings> | null | undefined
 ): GoogleIntegrationSettings => {
   const requestedScopes = Array.isArray(settings?.requestedScopes)
-    ? settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean)
+    ? settings.requestedScopes
+        .map(normalizeGoogleScope)
+        .filter((scope) => supportedGoogleClassroomScopes.has(scope))
     : [];
-  const mergedScopes = Array.from(new Set([...(requestedScopes.length > 0 ? requestedScopes : []), ...defaultGoogleClassroomScopes]));
+  const normalizedScopes = Array.from(new Set(requestedScopes.length > 0 ? requestedScopes : defaultGoogleClassroomScopes));
 
   return {
     ...createDefaultGoogleIntegrationSettings(),
@@ -45,7 +60,7 @@ export const normalizeGoogleIntegrationSettings = (
     enabled: settings?.enabled === true,
     clientId: settings?.clientId?.trim() ?? "",
     clientSecret: settings?.clientSecret?.trim() ?? "",
-    requestedScopes: mergedScopes,
+    requestedScopes: normalizedScopes,
     connectionStatus: normalizeConnectionStatus(settings?.connectionStatus),
     accountEmail: settings?.accountEmail?.trim() ?? "",
     accountName: settings?.accountName?.trim() ?? "",

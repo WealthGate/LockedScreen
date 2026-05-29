@@ -69,14 +69,14 @@ const providerDefaultScope = (provider: LmsProviderType): string =>
   provider === "google-classroom"
     ? [
         "openid",
-        "email",
-        "profile",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
         "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
         "https://www.googleapis.com/auth/classroom.rosters.readonly",
         "https://www.googleapis.com/auth/drive.file",
-        "https://www.googleapis.com/auth/spreadsheets"
+        "https://www.googleapis.com/auth/classroom.coursework.me"
       ].join(" ")
     : provider === "microsoft-365"
       ? [

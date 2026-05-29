@@ -182,14 +182,14 @@ const defaultLmsScope = (provider: LmsProviderType): string =>
   provider === "google-classroom"
     ? [
         "openid",
-        "email",
-        "profile",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
         "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
         "https://www.googleapis.com/auth/classroom.rosters.readonly",
         "https://www.googleapis.com/auth/drive.file",
-        "https://www.googleapis.com/auth/spreadsheets"
+        "https://www.googleapis.com/auth/classroom.coursework.me"
       ].join(" ")
     : provider === "microsoft-365"
       ? [
@@ -230,8 +230,8 @@ const defaultStudentLmsScope = (provider: StudentLmsProviderType): string =>
   provider === "google-classroom"
     ? [
         "openid",
-        "email",
-        "profile",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/classroom.coursework.me",
         "https://www.googleapis.com/auth/drive.file"
       ].join(" ")
@@ -438,8 +438,23 @@ const splitScopes = (value: string): string[] =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-const mergeGoogleDefaultScopes = (scopes: string[]): string[] =>
-  Array.from(new Set([...scopes.map((scope) => scope.trim()).filter(Boolean), ...defaultLmsScope("google-classroom").split(/\s+/)]));
+const supportedGoogleClassroomScopes = new Set(defaultLmsScope("google-classroom").split(/\s+/));
+
+const normalizeGoogleScope = (scope: string): string => {
+  const trimmed = scope.trim();
+  if (trimmed === "email") {
+    return "https://www.googleapis.com/auth/userinfo.email";
+  }
+  if (trimmed === "profile") {
+    return "https://www.googleapis.com/auth/userinfo.profile";
+  }
+  return trimmed;
+};
+
+const normalizeGooglePermissionScopes = (scopes: string[]): string[] => {
+  const normalized = scopes.map(normalizeGoogleScope).filter((scope) => supportedGoogleClassroomScopes.has(scope));
+  return Array.from(new Set(normalized.length > 0 ? normalized : defaultLmsScope("google-classroom").split(/\s+/)));
+};
 
 const normalizeStartCode = (value: string): string => value.trim();
 
@@ -3060,10 +3075,7 @@ const SettingsPage = () => {
         ...settings.googleIntegration,
         clientId: settings.googleIntegration.clientId.trim(),
         clientSecret: settings.googleIntegration.clientSecret?.trim() ?? "",
-        requestedScopes:
-          settings.googleIntegration.requestedScopes.length > 0
-            ? mergeGoogleDefaultScopes(settings.googleIntegration.requestedScopes)
-            : defaultLmsScope("google-classroom").split(/\s+/),
+          requestedScopes: normalizeGooglePermissionScopes(settings.googleIntegration.requestedScopes),
         connectionStatus: settings.googleIntegration.enabled
           ? settings.googleIntegration.connectionStatus
           : "disconnected",

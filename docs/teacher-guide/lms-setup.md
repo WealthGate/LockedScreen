@@ -62,16 +62,28 @@ Google's desktop OAuth documentation explains that Windows desktop apps can use 
 - https://developers.google.com/identity/protocols/oauth2/native-app
 - https://developers.google.com/workspace/classroom/guides/auth
 
-Default teacher permission scopes currently used by LOCKEDSCREEN:
+Default teacher/admin permission scopes currently used by LOCKEDSCREEN:
 
 ```text
-openid email profile https://www.googleapis.com/auth/classroom.courses https://www.googleapis.com/auth/classroom.coursework.students https://www.googleapis.com/auth/classroom.rosters.readonly https://www.googleapis.com/auth/drive.file
+openid
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
+https://www.googleapis.com/auth/classroom.courses.readonly
+https://www.googleapis.com/auth/classroom.coursework.students
+https://www.googleapis.com/auth/classroom.coursework.students.readonly
+https://www.googleapis.com/auth/classroom.rosters.readonly
+https://www.googleapis.com/auth/drive.file
+https://www.googleapis.com/auth/classroom.coursework.me
 ```
 
 Default student permission scopes currently used by LOCKEDSCREEN:
 
 ```text
-openid email profile https://www.googleapis.com/auth/classroom.coursework.me https://www.googleapis.com/auth/drive.file
+openid
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
+https://www.googleapis.com/auth/classroom.coursework.me
+https://www.googleapis.com/auth/drive.file
 ```
 
 ### Microsoft 365 Education
