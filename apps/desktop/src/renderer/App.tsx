@@ -438,8 +438,6 @@ const splitScopes = (value: string): string[] =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-const supportedGoogleClassroomScopes = new Set(defaultLmsScope("google-classroom").split(/\s+/));
-
 const normalizeGoogleScope = (scope: string): string => {
   const trimmed = scope.trim();
   if (trimmed === "email") {
@@ -452,8 +450,7 @@ const normalizeGoogleScope = (scope: string): string => {
 };
 
 const normalizeGooglePermissionScopes = (scopes: string[]): string[] => {
-  const normalized = scopes.map(normalizeGoogleScope).filter((scope) => supportedGoogleClassroomScopes.has(scope));
-  return Array.from(new Set(normalized.length > 0 ? normalized : defaultLmsScope("google-classroom").split(/\s+/)));
+  return Array.from(new Set(scopes.map(normalizeGoogleScope).filter(Boolean)));
 };
 
 const normalizeStartCode = (value: string): string => value.trim();
@@ -3075,7 +3072,7 @@ const SettingsPage = () => {
         ...settings.googleIntegration,
         clientId: settings.googleIntegration.clientId.trim(),
         clientSecret: settings.googleIntegration.clientSecret?.trim() ?? "",
-          requestedScopes: normalizeGooglePermissionScopes(settings.googleIntegration.requestedScopes),
+        requestedScopes: normalizeGooglePermissionScopes(settings.googleIntegration.requestedScopes),
         connectionStatus: settings.googleIntegration.enabled
           ? settings.googleIntegration.connectionStatus
           : "disconnected",

@@ -41,8 +41,6 @@ const defaultGoogleClassroomScopes = [
   "https://www.googleapis.com/auth/classroom.coursework.me"
 ];
 
-const supportedGoogleClassroomScopes = new Set(defaultGoogleClassroomScopes);
-
 const normalizeGoogleScope = (scope: string): string => {
   const trimmed = scope.trim();
   if (trimmed === "email") {
@@ -257,11 +255,8 @@ const normalizeGoogleIntegration = (
   settings: Partial<GoogleIntegrationSettings> | null | undefined
 ): GoogleIntegrationSettings => {
   const requestedScopes = Array.isArray(settings?.requestedScopes)
-    ? settings.requestedScopes
-        .map(normalizeGoogleScope)
-        .filter((scope) => supportedGoogleClassroomScopes.has(scope))
-    : [];
-  const normalizedScopes = Array.from(new Set(requestedScopes.length > 0 ? requestedScopes : defaultGoogleClassroomScopes));
+    ? Array.from(new Set(settings.requestedScopes.map(normalizeGoogleScope).filter(Boolean)))
+    : [...defaultGoogleClassroomScopes];
 
   return {
     ...defaultGoogleIntegration(),
@@ -269,7 +264,7 @@ const normalizeGoogleIntegration = (
     enabled: settings?.enabled === true,
     clientId: settings?.clientId?.trim() ?? "",
     clientSecret: settings?.clientSecret?.trim() ?? "",
-    requestedScopes: normalizedScopes,
+    requestedScopes,
     connectionStatus:
       settings?.connectionStatus === "connected" || settings?.connectionStatus === "error"
         ? settings.connectionStatus
