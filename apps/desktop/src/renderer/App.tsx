@@ -4737,8 +4737,13 @@ const SettingsPage = () => {
                 onChange={(event) => updateDestination((current) => ({ ...current, endpointUrl: event.target.value }))}
               />
               {destinationDraft.type === "google-classroom-grade-sync" ? (
-                <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
-                  This is not used for posting the package to Classroom. It is the school-owned server address that receives student scores after submission and writes grades back to Classroom.
+                <div className="mt-2 space-y-2">
+                  <div className="text-xs text-slate-800 dark:text-slate-100">
+                    This is not used for posting the package to Classroom. It is the school-owned server address that receives student scores after submission and writes grades back to Classroom.
+                  </div>
+                  <Button variant="secondary" onClick={() => void window.lockedscreenApi.openGoogleAppsScript()}>
+                    Get grade-sync server URL
+                  </Button>
                 </div>
               ) : null}
             </LabelledField>
