@@ -31,3 +31,7 @@ Important fields:
 - Keep a server-side audit log of every Classroom grade write.
 
 The desktop app supports the bridge contract; the production server still needs deployment with the school's Google authorization policy and Classroom write permissions.
+
+For a simple Google Apps Script implementation, see:
+
+`docs/google-classroom-grade-sync-apps-script.md`

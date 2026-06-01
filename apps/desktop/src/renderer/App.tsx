@@ -617,6 +617,8 @@ type SetupGuide = {
   notes?: string[];
   primaryActionLabel?: string;
   onPrimaryAction?: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
 };
 
 type SettingsTab =
@@ -2896,6 +2898,8 @@ const SettingsPage = () => {
   const settingsTabStyle = (tab: SettingsTab): CSSProperties =>
     settingsTab === tab ? {} : { display: "none" };
   const openAppsScript = () => void window.lockedscreenApi.openGoogleAppsScript();
+  const openGitHubGuide = (path: string) =>
+    void window.lockedscreenApi.openExternal(`https://github.com/WealthGate/LockedScreen/blob/main/${path}`);
   const showGoogleOAuthGuide = () =>
     setSetupGuide({
       title: "Google Classroom setup",
@@ -2910,7 +2914,9 @@ const SettingsPage = () => {
       notes: [
         "Teachers do not need to see or edit OAuth client IDs.",
         "If scopes change, disconnect and reconnect Google Classroom so Google issues a fresh consent grant."
-      ]
+      ],
+      primaryActionLabel: "Open Google OAuth settings",
+      onPrimaryAction: () => void window.lockedscreenApi.openExternal("https://console.cloud.google.com/auth/overview")
     });
   const showSheetsSyncGuide = () =>
     setSetupGuide({
@@ -2928,26 +2934,33 @@ const SettingsPage = () => {
         "Students never enter this URL on their machines; it is exported inside the exam package.",
         "The Apps Script project, not the desktop OAuth app, owns the Google Sheets permission."
       ],
-      primaryActionLabel: "Open Google Apps Script",
-      onPrimaryAction: openAppsScript
+      primaryActionLabel: "Create new Apps Script project",
+      onPrimaryAction: openAppsScript,
+      secondaryActionLabel: "Open Sheets script guide",
+      onSecondaryAction: () => openGitHubGuide("docs/google-sheets-sync-endpoint.md")
     });
   const showClassroomGradeSyncGuide = () =>
     setSetupGuide({
       title: "Classroom grade-sync server URL",
       description: "Use this to get the endpoint that receives Lockedscreen scores and writes grades back to Google Classroom.",
       steps: [
-        "Open Google Apps Script or the school's grade-sync server project.",
+        "Create a separate Apps Script project named Lockedscreen Classroom Grade Sync.",
+        "Paste the Lockedscreen Classroom grade-sync script, not the Google Sheets sync script.",
         "Deploy a web app or HTTPS endpoint that accepts Lockedscreen grade-sync POST requests.",
         "Authorize it with a teacher/admin Google account that can grade the selected Classroom assignment.",
         "Copy the deployed endpoint URL ending in /exec or the school API route.",
         "Paste that URL into Grade-sync server URL, choose the matching class and exam scope, then save the destination."
       ],
       notes: [
+        "The Google Sheets sync script only writes rows to Sheets. It will not update Classroom grades.",
         "This URL is different from the Classroom class link. It is the school-owned bridge that performs the grade write.",
+        "If Google opens your existing Lockedscreen Sheets Sync project, create a new Apps Script project before pasting the Classroom grade-sync script.",
         "Use an API key or bearer token for live exams when the school endpoint supports it."
       ],
-      primaryActionLabel: "Open Google Apps Script",
-      onPrimaryAction: openAppsScript
+      primaryActionLabel: "Create new Apps Script project",
+      onPrimaryAction: openAppsScript,
+      secondaryActionLabel: "Open Classroom script guide",
+      onSecondaryAction: () => openGitHubGuide("docs/google-classroom-grade-sync-apps-script.md")
     });
   const adminUnlockPin = settings.adminUnlockPin.trim();
   const adminUnlockRequiresPin = adminUnlockPin.length > 0;
@@ -5920,8 +5933,19 @@ const SetupGuideModal = ({ guide, onClose }: { guide: SetupGuide; onClose: () =>
           ))}
         </div>
       ) : null}
-      {guide.primaryActionLabel && guide.onPrimaryAction ? (
-        <div className="mt-5 flex justify-end">
+      {(guide.primaryActionLabel && guide.onPrimaryAction) || (guide.secondaryActionLabel && guide.onSecondaryAction) ? (
+        <div className="mt-5 flex flex-wrap justify-end gap-3">
+          {guide.secondaryActionLabel && guide.onSecondaryAction ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                guide.onSecondaryAction?.();
+              }}
+            >
+              {guide.secondaryActionLabel}
+            </Button>
+          ) : null}
+          {guide.primaryActionLabel && guide.onPrimaryAction ? (
           <Button
             onClick={() => {
               guide.onPrimaryAction?.();
@@ -5929,6 +5953,7 @@ const SetupGuideModal = ({ guide, onClose }: { guide: SetupGuide; onClose: () =>
           >
             {guide.primaryActionLabel}
           </Button>
+          ) : null}
         </div>
       ) : null}
     </Card>
