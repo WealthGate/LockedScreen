@@ -610,6 +610,15 @@ interface ActionFeedback {
   text: string;
 }
 
+type SetupGuide = {
+  title: string;
+  description: string;
+  steps: string[];
+  notes?: string[];
+  primaryActionLabel?: string;
+  onPrimaryAction?: () => void;
+};
+
 type SettingsTab =
   | "overview"
   | "google"
@@ -2674,6 +2683,7 @@ const SettingsPage = () => {
   const [adminPinAttempt, setAdminPinAttempt] = useState("");
   const [adminUnlockError, setAdminUnlockError] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("overview");
+  const [setupGuide, setSetupGuide] = useState<SetupGuide | null>(null);
 
   useEffect(() => {
     if (!snapshot) {
@@ -2885,6 +2895,60 @@ const SettingsPage = () => {
   const settingsTabClass = (tab: SettingsTab): string => (settingsTab === tab ? "space-y-6" : "hidden");
   const settingsTabStyle = (tab: SettingsTab): CSSProperties =>
     settingsTab === tab ? {} : { display: "none" };
+  const openAppsScript = () => void window.lockedscreenApi.openGoogleAppsScript();
+  const showGoogleOAuthGuide = () =>
+    setSetupGuide({
+      title: "Google Classroom setup",
+      description: "Use this when a school admin is preparing the Google OAuth client before teachers connect Classroom.",
+      steps: [
+        "Open Google Cloud and select the Lockedscreen project.",
+        "Confirm the OAuth app branding, privacy policy, terms link, and authorized domain are saved.",
+        "Open Data Access and keep only the scopes approved for the school's Lockedscreen workflow.",
+        "Open Clients, copy the Desktop app client ID and client secret, then paste them in Lockedscreen.",
+        "Save settings in Lockedscreen, then reconnect the teacher Google account so Google grants the current permissions."
+      ],
+      notes: [
+        "Teachers do not need to see or edit OAuth client IDs.",
+        "If scopes change, disconnect and reconnect Google Classroom so Google issues a fresh consent grant."
+      ]
+    });
+  const showSheetsSyncGuide = () =>
+    setSetupGuide({
+      title: "Google Sheets sync URL",
+      description: "Use this to create the Apps Script web app URL that receives student scores and writes them to a teacher's Google Sheet.",
+      steps: [
+        "Open Google Apps Script and create a new project.",
+        "Paste the Lockedscreen Google Sheets sync script from the admin guide into Code.gs.",
+        "Deploy the project as a Web app.",
+        "Set Execute as to the school/admin account that should write to the Sheet.",
+        "Set access to the broadest option allowed by the school's Google Workspace policy.",
+        "Copy the deployed Web app URL ending in /exec and paste it into Lockedscreen."
+      ],
+      notes: [
+        "Students never enter this URL on their machines; it is exported inside the exam package.",
+        "The Apps Script project, not the desktop OAuth app, owns the Google Sheets permission."
+      ],
+      primaryActionLabel: "Open Google Apps Script",
+      onPrimaryAction: openAppsScript
+    });
+  const showClassroomGradeSyncGuide = () =>
+    setSetupGuide({
+      title: "Classroom grade-sync server URL",
+      description: "Use this to get the endpoint that receives Lockedscreen scores and writes grades back to Google Classroom.",
+      steps: [
+        "Open Google Apps Script or the school's grade-sync server project.",
+        "Deploy a web app or HTTPS endpoint that accepts Lockedscreen grade-sync POST requests.",
+        "Authorize it with a teacher/admin Google account that can grade the selected Classroom assignment.",
+        "Copy the deployed endpoint URL ending in /exec or the school API route.",
+        "Paste that URL into Grade-sync server URL, choose the matching class and exam scope, then save the destination."
+      ],
+      notes: [
+        "This URL is different from the Classroom class link. It is the school-owned bridge that performs the grade write.",
+        "Use an API key or bearer token for live exams when the school endpoint supports it."
+      ],
+      primaryActionLabel: "Open Google Apps Script",
+      onPrimaryAction: openAppsScript
+    });
   const adminUnlockPin = settings.adminUnlockPin.trim();
   const adminUnlockRequiresPin = adminUnlockPin.length > 0;
 
@@ -3735,8 +3799,11 @@ const SettingsPage = () => {
           onUnlock={unlockAdvancedAdminSections}
           onLock={lockAdvancedAdminSections}
         >
-          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-            These values are for the school administrator. Teachers do not need to know OAuth client IDs or permission scopes.
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            <span>These values are for the school administrator. Teachers do not need to know OAuth client IDs or permission scopes.</span>
+            <Button variant="secondary" onClick={showGoogleOAuthGuide}>
+              Setup guide
+            </Button>
           </div>
 
           <div className="mt-4 grid gap-4">
@@ -3826,8 +3893,8 @@ const SettingsPage = () => {
                     <li>Deploy as a Web app, execute as the school/admin account, then copy the Web app URL.</li>
                   </ol>
                 </div>
-                <Button variant="secondary" onClick={() => void window.lockedscreenApi.openGoogleAppsScript()}>
-                  Open Google Apps Script
+                <Button variant="secondary" onClick={showSheetsSyncGuide}>
+                  Setup guide
                 </Button>
               </div>
             </div>
@@ -4741,7 +4808,7 @@ const SettingsPage = () => {
                   <div className="text-xs text-slate-800 dark:text-slate-100">
                     This is not used for posting the package to Classroom. It is the school-owned server address that receives student scores after submission and writes grades back to Classroom.
                   </div>
-                  <Button variant="secondary" onClick={() => void window.lockedscreenApi.openGoogleAppsScript()}>
+                  <Button variant="secondary" onClick={showClassroomGradeSyncGuide}>
                     Get grade-sync server URL
                   </Button>
                 </div>
@@ -5817,9 +5884,56 @@ const SettingsPage = () => {
         </Card>
       </div>
       </div>
+      {setupGuide ? (
+        <SetupGuideModal guide={setupGuide} onClose={() => setSetupGuide(null)} />
+      ) : null}
     </motion.div>
   );
 };
+
+const SetupGuideModal = ({ guide, onClose }: { guide: SetupGuide; onClose: () => void }) => (
+  <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-auto bg-slate-950/70 p-4 pt-16 backdrop-blur-sm">
+    <Card className="w-full max-w-2xl border-slate-200 bg-white p-5 text-slate-950 shadow-2xl dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <CardTitle>{guide.title}</CardTitle>
+          <CardDescription className="mt-2 max-w-xl">{guide.description}</CardDescription>
+        </div>
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      <ol className="mt-5 space-y-3">
+        {guide.steps.map((step, index) => (
+          <li key={`${guide.title}-${index}`} className="flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-teal-600 text-sm font-semibold text-white">
+              {index + 1}
+            </span>
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+      {guide.notes?.length ? (
+        <div className="mt-5 space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          {guide.notes.map((note, index) => (
+            <div key={`${guide.title}-note-${index}`}>{note}</div>
+          ))}
+        </div>
+      ) : null}
+      {guide.primaryActionLabel && guide.onPrimaryAction ? (
+        <div className="mt-5 flex justify-end">
+          <Button
+            onClick={() => {
+              guide.onPrimaryAction?.();
+            }}
+          >
+            {guide.primaryActionLabel}
+          </Button>
+        </div>
+      ) : null}
+    </Card>
+  </div>
+);
 
 const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
