@@ -105,6 +105,7 @@ const requiredPublishScopes = [
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/drive.file"
 ] as const;
+const lockedscreenPackageMimeType = "application/vnd.lockedscreen.package+json";
 
 const assertPublishScopesConfigured = (settings: GoogleIntegrationSettings): void => {
   const configuredScopes = new Set(settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean));
@@ -250,7 +251,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     const boundary = `lockedscreen-${Date.now().toString(36)}`;
     const metadata = {
       name: request.fileName,
-      mimeType: "application/json"
+      mimeType: lockedscreenPackageMimeType
     };
     const uploadBody = [
       `--${boundary}`,
@@ -258,7 +259,8 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       "",
       JSON.stringify(metadata),
       `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
+      `Content-Type: ${lockedscreenPackageMimeType}`,
+      "Content-Disposition: attachment",
       "",
       request.packageJson,
       `--${boundary}--`,
@@ -266,7 +268,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     ].join("\r\n");
 
     const uploadResponse = await fetch(
-      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink`,
+      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
       {
         method: "POST",
         headers: {
@@ -329,7 +331,12 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         courseWork: parseCourseWork(courseWork, normalizedCourseId),
         driveFileId,
         driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
-        driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined
+        driveFileLink:
+          typeof driveFile.webContentLink === "string"
+            ? driveFile.webContentLink
+            : typeof driveFile.webViewLink === "string"
+              ? driveFile.webViewLink
+              : undefined
       };
     } catch (error) {
       if ((error as ClassroomRequestError).status === 403) {

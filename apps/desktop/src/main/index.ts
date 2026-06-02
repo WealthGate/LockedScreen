@@ -914,7 +914,8 @@ app.whenReady().then(async () => {
         title: exam.title || configPackage.label || "Lockedscreen exam",
         description: [
           "Open the attached Lockedscreen exam package on the school device to begin.",
-          "Double-click the .lscp attachment if Lockedscreen is installed.",
+          "Download the .lscp attachment first, then double-click the downloaded file if Lockedscreen is installed.",
+          "Do not open the package in a text editor or Google Drive preview.",
           configPackage.description.trim()
         ].filter(Boolean).join("\n\n"),
         fileName,
