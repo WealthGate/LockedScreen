@@ -23,7 +23,7 @@ export interface GoogleClassroomApi {
 
 type ClassroomRequestError = Error & { status?: number };
 
-const classroomApiError = (status: number, payload: unknown): ClassroomRequestError => {
+const googleApiError = (status: number, payload: unknown, fallbackMessage: string): ClassroomRequestError => {
   const record = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
   const errorRecord = typeof record.error === "object" && record.error !== null ? (record.error as Record<string, unknown>) : {};
   const message = typeof errorRecord.message === "string" ? errorRecord.message : "";
@@ -63,7 +63,7 @@ const classroomApiError = (status: number, payload: unknown): ClassroomRequestEr
     return error;
   }
 
-  const error = new Error("Google Classroom could not load classes right now. Check your connection and try again.") as ClassroomRequestError;
+  const error = new Error(message ? `${fallbackMessage} Google said: ${message}` : fallbackMessage) as ClassroomRequestError;
   error.status = status;
   return error;
 };
@@ -92,10 +92,13 @@ const parseCourseWork = (item: Record<string, unknown>, courseId: string): LmsCo
   };
 };
 
-const readClassroomJson = async <T>(response: Response): Promise<T> => {
+const readClassroomJson = async <T>(
+  response: Response,
+  fallbackMessage = "Google Classroom could not load classes right now. Check your connection and try again."
+): Promise<T> => {
   const payload = (await response.json().catch(() => ({}))) as unknown;
   if (!response.ok) {
-    throw classroomApiError(response.status, payload);
+    throw googleApiError(response.status, payload, fallbackMessage);
   }
 
   return payload as T;
@@ -105,7 +108,7 @@ const requiredPublishScopes = [
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/drive.file"
 ] as const;
-const lockedscreenPackageMimeType = "application/vnd.lockedscreen.package+json";
+const lockedscreenPackageMimeType = "application/octet-stream";
 
 const assertPublishScopesConfigured = (settings: GoogleIntegrationSettings): void => {
   const configuredScopes = new Set(settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean));
@@ -260,7 +263,6 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       JSON.stringify(metadata),
       `--${boundary}`,
       `Content-Type: ${lockedscreenPackageMimeType}`,
-      "Content-Disposition: attachment",
       "",
       request.packageJson,
       `--${boundary}--`,
@@ -280,7 +282,10 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     );
     let driveFile: Record<string, unknown>;
     try {
-      driveFile = await readClassroomJson<Record<string, unknown>>(uploadResponse);
+      driveFile = await readClassroomJson<Record<string, unknown>>(
+        uploadResponse,
+        "Google Drive could not upload the Lockedscreen package for Classroom."
+      );
     } catch (error) {
       if ((error as ClassroomRequestError).status === 403) {
         throw classroomPublishPermissionError();
@@ -325,7 +330,10 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       }
     );
     try {
-      const courseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
+      const courseWork = await readClassroomJson<Record<string, unknown>>(
+        courseWorkResponse,
+        "Google Classroom could not post the Lockedscreen package to the selected class."
+      );
 
       return {
         courseWork: parseCourseWork(courseWork, normalizedCourseId),
