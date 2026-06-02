@@ -193,19 +193,31 @@ const looksLikeAppsScriptUrl = (value?: string): boolean => {
   return trimmed.includes("script.google.com/macros/");
 };
 
+const destinationUsesSheetFields = (destination: ResultDestination): boolean => destination.type === "google-sheets";
+const destinationUsesClassroomFields = (destination: ResultDestination): boolean =>
+  destination.type === "google-classroom" || destination.type === "google-classroom-grade-sync";
+const destinationUsesProviderReference = (destination: ResultDestination): boolean => destination.type !== "google-sheets";
+
 const normalizeResultDestination = (destination: ResultDestination): ResultDestination => {
   const endpointUrl = destination.endpointUrl?.trim() ?? "";
-  const bridgeEndpointUrl = destination.bridgeEndpointUrl?.trim() || undefined;
+  const sheetFieldsEnabled = destinationUsesSheetFields(destination);
+  const classroomFieldsEnabled = destinationUsesClassroomFields(destination);
   const next: ResultDestination = {
     ...destination,
     endpointUrl,
     authMode: destination.authMode ?? "none",
     examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
-    connectionId: destination.connectionId?.trim() || undefined,
-    assignmentId: destination.assignmentId?.trim() || undefined,
-    assignmentLabel: destination.assignmentLabel?.trim() || undefined,
-    bridgeEndpointUrl,
-    sortByLastName: destination.sortByLastName === true,
+    authToken: destination.authMode === "none" ? undefined : destination.authToken?.trim() || undefined,
+    apiKeyHeader: destination.authMode === "api-key" ? destination.apiKeyHeader?.trim() || "x-api-key" : undefined,
+    className: destination.className?.trim() || undefined,
+    courseId: destinationUsesProviderReference(destination) ? destination.courseId?.trim() || undefined : undefined,
+    connectionId: sheetFieldsEnabled || classroomFieldsEnabled ? destination.connectionId?.trim() || undefined : undefined,
+    assignmentId: classroomFieldsEnabled ? destination.assignmentId?.trim() || undefined : undefined,
+    assignmentLabel: classroomFieldsEnabled ? destination.assignmentLabel?.trim() || undefined : undefined,
+    bridgeEndpointUrl: sheetFieldsEnabled ? destination.bridgeEndpointUrl?.trim() || undefined : undefined,
+    sheetName: sheetFieldsEnabled ? destination.sheetName?.trim() || undefined : undefined,
+    sortByLastName: sheetFieldsEnabled ? destination.sortByLastName === true : undefined,
+    notes: destination.notes?.trim() || undefined,
     includeResponses: destination.includeResponses ?? true
   };
 
@@ -218,10 +230,12 @@ const normalizeResultDestination = (destination: ResultDestination): ResultDesti
     next.endpointUrl = "";
   }
 
-  if (next.type !== "google-sheets") {
+  if (next.type === "google-sheets" && looksLikeGoogleSheetUrl(next.bridgeEndpointUrl)) {
     next.bridgeEndpointUrl = undefined;
-    next.sheetName = "";
-    next.sortByLastName = undefined;
+  }
+
+  if (next.type !== "google-sheets" && looksLikeGoogleSheetUrl(next.endpointUrl)) {
+    next.endpointUrl = "";
   }
 
   return next;

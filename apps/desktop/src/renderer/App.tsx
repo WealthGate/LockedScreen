@@ -196,48 +196,94 @@ const isAppsScriptUrl = (value?: string): boolean => {
   }
 };
 
+const providerOwnsSheetFields = (type: ResultDestinationType): boolean => type === "google-sheets";
+const providerOwnsClassroomFields = (type: ResultDestinationType): boolean =>
+  type === "google-classroom" || type === "google-classroom-grade-sync";
+const providerOwnsProviderReference = (type: ResultDestinationType): boolean => type !== "google-sheets";
+
+const shouldResetDestinationLabel = (label: string | undefined, currentType: ResultDestinationType): boolean => {
+  const normalized = label?.trim() ?? "";
+  if (!normalized || normalized === "New destination" || normalized === providerLabel(currentType)) {
+    return true;
+  }
+
+  return [
+    "Google Classroom",
+    "Google Classroom grade sync server",
+    "Classroom grade sync",
+    "Microsoft Teams",
+    "Google Sheets",
+    "Generic LMS"
+  ].some((prefix) => normalized.toLowerCase().startsWith(prefix.toLowerCase()));
+};
+
+const sanitizeResultDestinationForProvider = (destination: ResultDestination): ResultDestination => {
+  const next: ResultDestination = {
+    ...destination,
+    endpointUrl: destination.endpointUrl?.trim() ?? "",
+    authMode: destination.authMode ?? "none",
+    authToken: destination.authMode === "none" ? "" : destination.authToken?.trim() || "",
+    apiKeyHeader: destination.authMode === "api-key" ? destination.apiKeyHeader?.trim() || "x-api-key" : "",
+    className: destination.className?.trim() || "",
+    courseId: providerOwnsProviderReference(destination.type) ? destination.courseId?.trim() || "" : "",
+    assignmentId: providerOwnsClassroomFields(destination.type) ? destination.assignmentId?.trim() || undefined : undefined,
+    assignmentLabel: providerOwnsClassroomFields(destination.type) ? destination.assignmentLabel?.trim() || undefined : undefined,
+    connectionId:
+      providerOwnsClassroomFields(destination.type) || providerOwnsSheetFields(destination.type)
+        ? destination.connectionId?.trim() || ""
+        : "",
+    bridgeEndpointUrl: providerOwnsSheetFields(destination.type) ? destination.bridgeEndpointUrl?.trim() || "" : "",
+    sheetName: providerOwnsSheetFields(destination.type) ? destination.sheetName?.trim() || "" : "",
+    sortByLastName: providerOwnsSheetFields(destination.type) ? destination.sortByLastName !== false : undefined,
+    notes: destination.notes?.trim() || ""
+  };
+
+  if (next.type === "google-sheets") {
+    if (isAppsScriptUrl(next.endpointUrl)) {
+      next.bridgeEndpointUrl = next.bridgeEndpointUrl || next.endpointUrl;
+      next.endpointUrl = "";
+    }
+    if (isGoogleSheetUrl(next.bridgeEndpointUrl)) {
+      next.bridgeEndpointUrl = "";
+    }
+  } else if (next.type === "google-classroom-grade-sync") {
+    if (isGoogleSheetUrl(next.endpointUrl)) {
+      next.endpointUrl = "";
+    }
+  } else if (isGoogleSheetUrl(next.endpointUrl)) {
+    next.endpointUrl = "";
+  }
+
+  return next;
+};
+
 const retargetResultDestinationProvider = (
   current: ResultDestination,
   nextType: ResultDestinationType
 ): ResultDestination => {
-  const base = {
+  const providerChanged = current.type !== nextType;
+  const base: ResultDestination = {
     ...current,
     type: nextType,
-    label:
-      current.label === "New destination" || current.label === providerLabel(current.type)
-        ? providerLabel(nextType)
-        : current.label
+    label: shouldResetDestinationLabel(current.label, current.type) ? providerLabel(nextType) : current.label
   };
 
-  if (nextType === "google-sheets") {
-    return {
-      ...base,
-      endpointUrl: isGoogleSheetUrl(current.endpointUrl) ? current.endpointUrl : "",
-      bridgeEndpointUrl:
-        current.bridgeEndpointUrl?.trim() ||
-        (isAppsScriptUrl(current.endpointUrl) ? current.endpointUrl : ""),
-      assignmentId: undefined,
-      assignmentLabel: undefined
-    };
+  if (!providerChanged) {
+    return sanitizeResultDestinationForProvider(base);
   }
 
-  if (nextType === "google-classroom-grade-sync") {
-    return {
-      ...base,
-      endpointUrl: current.type === "google-sheets" || isGoogleSheetUrl(current.endpointUrl) ? "" : current.endpointUrl,
-      bridgeEndpointUrl: "",
-      sheetName: "",
-      sortByLastName: undefined
-    };
-  }
-
-  return {
+  return sanitizeResultDestinationForProvider({
     ...base,
-    endpointUrl: isGoogleSheetUrl(current.endpointUrl) ? "" : current.endpointUrl,
+    endpointUrl: "",
+    connectionId: "",
     bridgeEndpointUrl: "",
-    sheetName: nextType === "generic-lms" ? current.sheetName : "",
-    sortByLastName: undefined
-  };
+    courseId: "",
+    assignmentId: undefined,
+    assignmentLabel: undefined,
+    sheetName: "",
+    sortByLastName: nextType === "google-sheets" ? true : undefined,
+    notes: ""
+  });
 };
 
 const defaultLmsScope = (provider: LmsProviderType): string =>
@@ -2748,6 +2794,7 @@ const SettingsPage = () => {
   const [adminUnlockError, setAdminUnlockError] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("overview");
   const [setupGuide, setSetupGuide] = useState<SetupGuide | null>(null);
+  const [reusablePackageId, setReusablePackageId] = useState("");
 
   useEffect(() => {
     if (!snapshot) {
@@ -3105,6 +3152,53 @@ const SettingsPage = () => {
     }
   });
 
+  const applyReusablePackageSettings = () => {
+    const sourcePackage = snapshot.configPackages.find((candidate) => candidate.id === reusablePackageId);
+    if (!sourcePackage) {
+      setActionFeedback({
+        tone: "error",
+        text: "Choose a saved package to reuse first."
+      });
+      return;
+    }
+
+    const current = buildPackageDraft();
+    const reusedPackage: ExamConfigPackage = {
+      ...current,
+      description: sourcePackage.description,
+      status: sourcePackage.status,
+      packageVersion: sourcePackage.packageVersion,
+      sourceMode: sourcePackage.sourceMode,
+      securityMode: sourcePackage.securityMode,
+      browserPolicy: structuredClone(sourcePackage.browserPolicy),
+      sessionPolicy: structuredClone(sourcePackage.sessionPolicy),
+      allowedApplications: structuredClone(sourcePackage.allowedApplications),
+      processPolicy: structuredClone(sourcePackage.processPolicy),
+      environmentPolicy: structuredClone(sourcePackage.environmentPolicy),
+      clipboardPolicy: structuredClone(sourcePackage.clipboardPolicy),
+      capturePolicy: structuredClone(sourcePackage.capturePolicy),
+      printPolicy: structuredClone(sourcePackage.printPolicy),
+      keyRestrictionPolicy: structuredClone(sourcePackage.keyRestrictionPolicy),
+      teacherOptions: structuredClone(sourcePackage.teacherOptions),
+      studentAccessPolicy: structuredClone(sourcePackage.studentAccessPolicy),
+      quitUnlockPolicy: structuredClone(sourcePackage.quitUnlockPolicy),
+      branding: structuredClone(sourcePackage.branding),
+      studentLmsBinding: structuredClone(sourcePackage.studentLmsBinding),
+      resultDestinations: structuredClone(sourcePackage.resultDestinations),
+      passwordHint: undefined
+    };
+
+    setPackageDraft(reusedPackage);
+    setUrlRulesText(serializeUrlRules(reusedPackage.browserPolicy.urlRules));
+    setAllowedAppsText(serializeAllowedApps(reusedPackage));
+    setBindingStudents([]);
+    setPackageDirty(true);
+    setActionFeedback({
+      tone: "success",
+      text: `Reused settings from "${sourcePackage.label}". Current package label and assigned exam were kept.`
+    });
+  };
+
   const runAdminAction = async <T,>(
     action: AdminActionState,
     operation: () => Promise<T | null>,
@@ -3230,19 +3324,20 @@ const SettingsPage = () => {
   };
 
   const handleSaveDestination = async () => {
+    const sanitizedDraft = sanitizeResultDestinationForProvider(destinationDraft);
     const nextDestination = {
-      ...destinationDraft,
-      label: destinationDraft.label.trim() || providerLabel(destinationDraft.type),
-      endpointUrl: destinationDraft.endpointUrl.trim(),
-      className: destinationDraft.className?.trim() || undefined,
-      courseId: destinationDraft.courseId?.trim() || undefined,
-      connectionId: destinationDraft.connectionId?.trim() || undefined,
-      bridgeEndpointUrl: destinationDraft.bridgeEndpointUrl?.trim() || undefined,
-      sortByLastName: destinationDraft.sortByLastName === true,
-      sheetName: destinationDraft.sheetName?.trim() || undefined,
-      authToken: destinationDraft.authToken?.trim() || undefined,
-      apiKeyHeader: destinationDraft.apiKeyHeader?.trim() || undefined,
-      notes: destinationDraft.notes?.trim() || undefined
+      ...sanitizedDraft,
+      label: sanitizedDraft.label.trim() || providerLabel(sanitizedDraft.type),
+      endpointUrl: sanitizedDraft.endpointUrl.trim(),
+      className: sanitizedDraft.className?.trim() || undefined,
+      courseId: sanitizedDraft.courseId?.trim() || undefined,
+      connectionId: sanitizedDraft.connectionId?.trim() || undefined,
+      bridgeEndpointUrl: sanitizedDraft.bridgeEndpointUrl?.trim() || undefined,
+      sortByLastName: sanitizedDraft.type === "google-sheets" ? sanitizedDraft.sortByLastName === true : undefined,
+      sheetName: sanitizedDraft.sheetName?.trim() || undefined,
+      authToken: sanitizedDraft.authToken?.trim() || undefined,
+      apiKeyHeader: sanitizedDraft.apiKeyHeader?.trim() || undefined,
+      notes: sanitizedDraft.notes?.trim() || undefined
     };
 
     await runAdminAction("save-destination", () => saveResultDestination(nextDestination), {
@@ -3782,6 +3877,33 @@ const SettingsPage = () => {
               ))}
             </select>
           </LabelledField>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Reuse saved package settings</div>
+              <div className="mt-1 text-xs text-slate-800 dark:text-slate-100">
+                Apply runtime, access, lockdown, Classroom, Sheets, and sync settings from a previous package. The current package label and selected exam stay unchanged.
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <select
+                className={selectClassName}
+                value={reusablePackageId}
+                onChange={(event) => setReusablePackageId(event.target.value)}
+              >
+                <option value="">Choose saved settings</option>
+                {snapshot.configPackages
+                  .filter((candidate) => candidate.id !== packageDraft.id)
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.label}
+                    </option>
+                  ))}
+              </select>
+              <Button variant="secondary" onClick={applyReusablePackageSettings} disabled={adminBusy || !reusablePackageId}>
+                Apply settings
+              </Button>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-4">
             <Button variant="secondary" onClick={() => void handleDuplicatePackage()} disabled={adminBusy}>
               {isPending("duplicate-package") ? "Duplicating..." : "Duplicate"}
@@ -4937,12 +5059,15 @@ const SettingsPage = () => {
               <select
                 className={selectClassName}
                 value={destinationDraft.authMode}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const authMode = event.target.value as ResultSyncAuthMode;
                   updateDestination((current) => ({
                     ...current,
-                    authMode: event.target.value as ResultSyncAuthMode
-                  }))
-                }
+                    authMode,
+                    authToken: authMode === "none" ? "" : current.authToken,
+                    apiKeyHeader: authMode === "api-key" ? current.apiKeyHeader || "x-api-key" : ""
+                  }));
+                }}
               >
                 <option value="none">No auth</option>
                 <option value="bearer">Bearer token</option>
