@@ -18,6 +18,7 @@ export type NativeLockdownFeatureLevel = "none" | "partial" | "desktop-lockdown"
 export type ResultDestinationType =
   | "google-classroom"
   | "google-classroom-grade-sync"
+  | "google-forms-quiz-classroom-sync"
   | "microsoft-teams"
   | "google-sheets"
   | "generic-lms";

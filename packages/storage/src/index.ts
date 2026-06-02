@@ -193,9 +193,12 @@ const looksLikeAppsScriptUrl = (value?: string): boolean => {
   return trimmed.includes("script.google.com/macros/");
 };
 
-const destinationUsesSheetFields = (destination: ResultDestination): boolean => destination.type === "google-sheets";
+const destinationUsesSheetFields = (destination: ResultDestination): boolean =>
+  destination.type === "google-sheets" || destination.type === "google-forms-quiz-classroom-sync";
 const destinationUsesClassroomFields = (destination: ResultDestination): boolean =>
-  destination.type === "google-classroom" || destination.type === "google-classroom-grade-sync";
+  destination.type === "google-classroom" ||
+  destination.type === "google-classroom-grade-sync" ||
+  destination.type === "google-forms-quiz-classroom-sync";
 const destinationUsesProviderReference = (destination: ResultDestination): boolean => destination.type !== "google-sheets";
 
 const normalizeResultDestination = (destination: ResultDestination): ResultDestination => {

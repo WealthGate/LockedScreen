@@ -196,9 +196,12 @@ const isAppsScriptUrl = (value?: string): boolean => {
   }
 };
 
-const providerOwnsSheetFields = (type: ResultDestinationType): boolean => type === "google-sheets";
+const providerOwnsSheetFields = (type: ResultDestinationType): boolean =>
+  type === "google-sheets" || type === "google-forms-quiz-classroom-sync";
 const providerOwnsClassroomFields = (type: ResultDestinationType): boolean =>
-  type === "google-classroom" || type === "google-classroom-grade-sync";
+  type === "google-classroom" ||
+  type === "google-classroom-grade-sync" ||
+  type === "google-forms-quiz-classroom-sync";
 const providerOwnsProviderReference = (type: ResultDestinationType): boolean => type !== "google-sheets";
 
 const shouldResetDestinationLabel = (label: string | undefined, currentType: ResultDestinationType): boolean => {
@@ -211,6 +214,7 @@ const shouldResetDestinationLabel = (label: string | undefined, currentType: Res
     "Google Classroom",
     "Google Classroom grade sync server",
     "Classroom grade sync",
+    "Google Forms quiz sync",
     "Microsoft Teams",
     "Google Sheets",
     "Generic LMS"
@@ -250,6 +254,10 @@ const sanitizeResultDestinationForProvider = (destination: ResultDestination): R
     if (isGoogleSheetUrl(next.endpointUrl)) {
       next.endpointUrl = "";
     }
+  } else if (next.type === "google-forms-quiz-classroom-sync") {
+    next.authMode = "none";
+    next.authToken = "";
+    next.apiKeyHeader = "";
   } else if (isGoogleSheetUrl(next.endpointUrl)) {
     next.endpointUrl = "";
   }
@@ -775,6 +783,8 @@ const providerLabel = (type: ResultDestinationType | LmsProviderType): string =>
     ? "Google Classroom"
     : type === "google-classroom-grade-sync"
       ? "Google Classroom grade sync"
+      : type === "google-forms-quiz-classroom-sync"
+        ? "Google Forms quiz sync"
       : type === "microsoft-teams"
       ? "Microsoft Teams"
       : type === "microsoft-365"
@@ -3071,6 +3081,30 @@ const SettingsPage = () => {
       secondaryActionLabel: "Open Classroom script guide",
       onSecondaryAction: () => openGitHubGuide("docs/google-classroom-grade-sync-apps-script.md")
     });
+  const showGoogleFormsQuizSyncGuide = () =>
+    setSetupGuide({
+      title: "Google Forms quiz score sync",
+      description: "Use this for link-based Google Forms quizzes where Google Forms calculates the score and the teacher wants that score written to Google Classroom.",
+      steps: [
+        "Open the Google Form quiz used for this exam.",
+        "Turn on quiz mode, collect email addresses, and require school sign-in when the school uses managed accounts.",
+        "In Lockedscreen Student turn-in, select the same Classroom class and assignment used for this Form.",
+        "In Grade sync, choose Google Forms quiz sync and paste the Google Form link or response Sheet link for reference.",
+        "Open the Forms quiz sync guide and copy the Apps Script Code.gs into the Form's Script editor.",
+        "In the script CONFIG, paste the Classroom course ID and assignment ID shown in Lockedscreen.",
+        "Run installLockedscreenFormSubmitTrigger once, approve permissions, then submit a test response from a student account."
+      ],
+      notes: [
+        "This sync runs from Google Apps Script after the Form is submitted; the student PC does not read or write the grade.",
+        "The student's collected Google email is used to find the matching Google Classroom student submission.",
+        "For each different Google Form quiz, attach the script to that Form and update its courseWorkId.",
+        "Teachers can optionally set a gradebook Sheet in the script to keep a spreadsheet copy as well."
+      ],
+      primaryActionLabel: "Open Google Apps Script",
+      onPrimaryAction: openAppsScript,
+      secondaryActionLabel: "Open Forms sync guide",
+      onSecondaryAction: () => openGitHubGuide("docs/google-forms-quiz-classroom-sync.md")
+    });
   const adminUnlockPin = settings.adminUnlockPin.trim();
   const adminUnlockRequiresPin = adminUnlockPin.length > 0;
 
@@ -3675,13 +3709,19 @@ const SettingsPage = () => {
     const teacherConnection = snapshot.lmsConnections.find((connection) => connection.id === binding.connectionId);
     const courseLabel = binding.courseLabel || binding.courseId;
     const examIds = selectedExam?.id ? Array.from(new Set([...(destinationDraft.examIds ?? []), selectedExam.id])) : destinationDraft.examIds;
+    const targetType =
+      destinationDraft.type === "google-forms-quiz-classroom-sync"
+        ? "google-forms-quiz-classroom-sync"
+        : "google-classroom-grade-sync";
     const notes = [
       `Google Classroom account: ${teacherConnection ? lmsAccountOptionLabel(teacherConnection) : binding.connectionId}`,
       `Class: ${courseLabel}`,
       `Course ID: ${binding.courseId}`,
       binding.assignmentId ? `Assignment: ${binding.assignmentLabel || binding.assignmentId}` : "",
       binding.assignmentId ? `Assignment ID: ${binding.assignmentId}` : "",
-      "Server-side grade sync writes scores through the school-owned bridge after local submission."
+      targetType === "google-forms-quiz-classroom-sync"
+        ? "Google Forms quiz sync writes the Form quiz score to Classroom from the Form Apps Script trigger."
+        : "Server-side grade sync writes scores through the school-owned bridge after local submission."
     ]
       .filter(Boolean)
       .join("\n");
@@ -3692,10 +3732,10 @@ const SettingsPage = () => {
       current
         ? {
             ...current,
-            type: "google-classroom-grade-sync",
+            type: targetType,
             label:
               current.label === "New destination" || current.label === providerLabel(current.type)
-                ? `Classroom grade sync - ${courseLabel}`
+                ? `${providerLabel(targetType)} - ${courseLabel}`
                 : current.label,
             enabled: true,
             trigger: "auto-on-submit",
@@ -3713,7 +3753,10 @@ const SettingsPage = () => {
     setSettingsTab("results");
     setActionFeedback({
       tone: "success",
-      text: "Classroom class and assignment details were copied into Grade sync. Add the grade-sync server endpoint, then save the destination."
+      text:
+        targetType === "google-forms-quiz-classroom-sync"
+          ? "Classroom class and assignment details were copied into Google Forms quiz sync. Open the setup guide, add the Form script, then save the destination."
+          : "Classroom class and assignment details were copied into Grade sync. Add the grade-sync server endpoint, then save the destination."
     });
   };
 
@@ -4940,6 +4983,7 @@ const SettingsPage = () => {
               >
                 <option value="google-classroom">Google Classroom</option>
                 <option value="google-classroom-grade-sync">Google Classroom grade sync server</option>
+                <option value="google-forms-quiz-classroom-sync">Google Forms quiz sync</option>
                 <option value="microsoft-teams">Microsoft Teams</option>
                 <option value="google-sheets">Google Sheets</option>
                 <option value="generic-lms">Generic LMS</option>
@@ -4981,6 +5025,8 @@ const SettingsPage = () => {
               label={
                 destinationDraft.type === "google-classroom-grade-sync"
                   ? "Grade-sync server URL"
+                  : destinationDraft.type === "google-forms-quiz-classroom-sync"
+                    ? "Google Form or response Sheet link"
                   : destinationDraft.type === "google-sheets"
                     ? "Google Sheet link"
                     : "Endpoint URL"
@@ -4990,6 +5036,8 @@ const SettingsPage = () => {
                 placeholder={
                   destinationDraft.type === "google-classroom-grade-sync"
                     ? "https://school-sync.example.com/lockedscreen/grade-sync"
+                    : destinationDraft.type === "google-forms-quiz-classroom-sync"
+                      ? "https://docs.google.com/forms/d/... or https://docs.google.com/spreadsheets/d/..."
                     : destinationDraft.type === "google-sheets"
                       ? "https://docs.google.com/spreadsheets/d/..."
                       : "https://..."
@@ -5017,8 +5065,18 @@ const SettingsPage = () => {
                   </Button>
                 </div>
               ) : null}
+              {destinationDraft.type === "google-forms-quiz-classroom-sync" ? (
+                <div className="mt-2 space-y-2">
+                  <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                    Google Forms quiz scores sync from an Apps Script attached to the Form after students submit. The student PC does not read the score.
+                  </div>
+                  <Button variant="secondary" onClick={showGoogleFormsQuizSyncGuide}>
+                    Set up Forms quiz sync
+                  </Button>
+                </div>
+              ) : null}
             </LabelledField>
-            {destinationDraft.type === "google-sheets" ? (
+            {destinationDraft.type === "google-sheets" || destinationDraft.type === "google-forms-quiz-classroom-sync" ? (
               <LabelledField label="Teacher Google account">
                 <select
                   className={selectClassName}
@@ -5036,45 +5094,59 @@ const SettingsPage = () => {
                 </select>
               </LabelledField>
             ) : null}
-            {destinationDraft.type === "google-sheets" ? (
-              <LabelledField label="School/Apps Script sync URL">
+            {destinationDraft.type === "google-sheets" || destinationDraft.type === "google-forms-quiz-classroom-sync" ? (
+              <LabelledField label={destinationDraft.type === "google-forms-quiz-classroom-sync" ? "Optional gradebook Sheet link" : "School/Apps Script sync URL"}>
                 <Input
-                  placeholder={settings.defaultGoogleSheetsSyncEndpoint ? "Using admin default unless changed" : "https://script.google.com/macros/s/.../exec"}
+                  placeholder={
+                    destinationDraft.type === "google-forms-quiz-classroom-sync"
+                      ? "Optional: https://docs.google.com/spreadsheets/d/..."
+                      : settings.defaultGoogleSheetsSyncEndpoint
+                        ? "Using admin default unless changed"
+                        : "https://script.google.com/macros/s/.../exec"
+                  }
                   value={destinationDraft.bridgeEndpointUrl ?? ""}
                   onChange={(event) =>
                     updateDestination((current) => ({ ...current, bridgeEndpointUrl: event.target.value }))
                   }
                 />
                 <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
-                  This is saved into the exported test package. Students do not enter it on their machines.
+                  {destinationDraft.type === "google-forms-quiz-classroom-sync"
+                    ? "Optional. The Forms Apps Script can also write a copy of grades to this Sheet."
+                    : "This is saved into the exported test package. Students do not enter it on their machines."}
                 </div>
-                {isGoogleSheetUrl(destinationDraft.bridgeEndpointUrl) ? (
+                {destinationDraft.type === "google-sheets" && isGoogleSheetUrl(destinationDraft.bridgeEndpointUrl) ? (
                   <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
                     This is a Google Sheet link. Paste the deployed Apps Script `/exec` URL here instead.
                   </div>
                 ) : null}
               </LabelledField>
             ) : null}
-            <LabelledField label="Auth mode">
-              <select
-                className={selectClassName}
-                value={destinationDraft.authMode}
-                onChange={(event) => {
-                  const authMode = event.target.value as ResultSyncAuthMode;
-                  updateDestination((current) => ({
-                    ...current,
-                    authMode,
-                    authToken: authMode === "none" ? "" : current.authToken,
-                    apiKeyHeader: authMode === "api-key" ? current.apiKeyHeader || "x-api-key" : ""
-                  }));
-                }}
-              >
-                <option value="none">No auth</option>
-                <option value="bearer">Bearer token</option>
-                <option value="api-key">API key header</option>
-              </select>
-            </LabelledField>
-            {destinationDraft.authMode !== "none" ? (
+            {destinationDraft.type === "google-forms-quiz-classroom-sync" ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                Forms quiz sync authorization is handled inside the Form's Apps Script trigger after the teacher/admin approves it once.
+              </div>
+            ) : (
+              <LabelledField label="Auth mode">
+                <select
+                  className={selectClassName}
+                  value={destinationDraft.authMode}
+                  onChange={(event) => {
+                    const authMode = event.target.value as ResultSyncAuthMode;
+                    updateDestination((current) => ({
+                      ...current,
+                      authMode,
+                      authToken: authMode === "none" ? "" : current.authToken,
+                      apiKeyHeader: authMode === "api-key" ? current.apiKeyHeader || "x-api-key" : ""
+                    }));
+                  }}
+                >
+                  <option value="none">No auth</option>
+                  <option value="bearer">Bearer token</option>
+                  <option value="api-key">API key header</option>
+                </select>
+              </LabelledField>
+            )}
+            {destinationDraft.type !== "google-forms-quiz-classroom-sync" && destinationDraft.authMode !== "none" ? (
               <LabelledField label="Token / API key">
                 <Input
                   type="password"
@@ -5083,7 +5155,7 @@ const SettingsPage = () => {
                 />
               </LabelledField>
             ) : null}
-            {destinationDraft.authMode === "api-key" ? (
+            {destinationDraft.type !== "google-forms-quiz-classroom-sync" && destinationDraft.authMode === "api-key" ? (
               <LabelledField label="API key header">
                 <Input
                   value={destinationDraft.apiKeyHeader ?? ""}
@@ -5098,9 +5170,23 @@ const SettingsPage = () => {
                 onChange={(event) => updateDestination((current) => ({ ...current, className: event.target.value }))}
               />
             </LabelledField>
-            <LabelledField label={destinationDraft.type === "google-sheets" ? "Sheet tab name" : "Provider reference"}>
+            <LabelledField
+              label={
+                destinationDraft.type === "google-sheets"
+                  ? "Sheet tab name"
+                  : destinationDraft.type === "google-forms-quiz-classroom-sync"
+                    ? "Classroom course ID"
+                    : "Provider reference"
+              }
+            >
               <Input
-                placeholder={destinationDraft.type === "google-sheets" ? "Leave blank for first sheet" : "Course / channel / LMS id"}
+                placeholder={
+                  destinationDraft.type === "google-sheets"
+                    ? "Leave blank for first sheet"
+                    : destinationDraft.type === "google-forms-quiz-classroom-sync"
+                      ? "Google Classroom course ID"
+                      : "Course / channel / LMS id"
+                }
                 value={destinationDraft.type === "google-sheets" ? destinationDraft.sheetName ?? "" : destinationDraft.courseId ?? ""}
                 onChange={(event) =>
                   updateDestination((current) => ({
@@ -5111,6 +5197,23 @@ const SettingsPage = () => {
                 }
               />
             </LabelledField>
+            {destinationDraft.type === "google-forms-quiz-classroom-sync" ? (
+              <LabelledField label="Classroom assignment ID">
+                <Input
+                  placeholder="Google Classroom coursework / assignment ID"
+                  value={destinationDraft.assignmentId ?? ""}
+                  onChange={(event) =>
+                    updateDestination((current) => ({
+                      ...current,
+                      assignmentId: event.target.value
+                    }))
+                  }
+                />
+                <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
+                  Use Import Classroom details after selecting the class and assignment in Student turn-in, or paste the ID from the selected Classroom assignment.
+                </div>
+              </LabelledField>
+            ) : null}
           </div>
 
           <LabelledField label="Exam scope">
@@ -5170,6 +5273,9 @@ const SettingsPage = () => {
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               To use both Classroom and Sheets, create one Google Classroom grade-sync server destination and one Google Sheets destination. Set both to Auto sync after submission, enable both, and select the same exam scope.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              Google Forms quiz sync: use this for link-based Google Forms quizzes. The Form's Apps Script reads the quiz score after submission and writes that score to the matching Classroom assignment.
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               The endpoint URL comes from the school IT/admin after they deploy the grade-sync bridge or Apps Script web app. It is usually a secure HTTPS address ending in an API route or `/exec`.

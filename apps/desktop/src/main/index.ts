@@ -396,6 +396,10 @@ const sanitizePackageResultDestination = (destination: ResultDestination): Resul
     return null;
   }
 
+  if (destination.type === "google-forms-quiz-classroom-sync") {
+    return null;
+  }
+
   return {
     ...destination,
     authToken: undefined,

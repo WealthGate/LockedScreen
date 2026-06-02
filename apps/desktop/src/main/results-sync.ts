@@ -151,6 +151,32 @@ const buildPayload = (destination: ResultDestination, exam: Exam, submission: Su
     return buildServerGradeSyncPayload(destination, exam, submission);
   }
 
+  if (destination.type === "google-forms-quiz-classroom-sync") {
+    return {
+      provider: destination.type,
+      schema: "lockedscreen.google-forms.quiz-classroom-sync.v1",
+      requestedAction: "forms-script-sync-reference",
+      syncedAt: new Date().toISOString(),
+      destination: {
+        id: destination.id,
+        label: destination.label,
+        formOrResponseSheetUrl: destination.endpointUrl,
+        optionalGradebookSheetUrl: destination.bridgeEndpointUrl,
+        courseId: destination.courseId,
+        courseWorkId: destination.assignmentId,
+        assignmentLabel: destination.assignmentLabel,
+        className: destination.className
+      },
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        subject: exam.subject,
+        className: exam.className,
+        form: exam.form
+      }
+    };
+  }
+
   return {
   provider: destination.type,
   syncedAt: new Date().toISOString(),
@@ -329,6 +355,13 @@ export const syncSubmissionToDestination = async (
 
   if (!destination.enabled) {
     return createDisabledSyncState(destination, "Destination disabled.");
+  }
+
+  if (destination.type === "google-forms-quiz-classroom-sync") {
+    return createDisabledSyncState(
+      destination,
+      "Google Forms quiz scores sync from the Form Apps Script trigger after submission, not from the local Lockedscreen result."
+    );
   }
 
   if (!destinationMatchesExam(destination, exam)) {

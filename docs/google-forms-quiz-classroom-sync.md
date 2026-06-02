@@ -43,20 +43,29 @@ The student's Google email is the safest match key for Google Forms quiz sync.
 
 ## Setup Steps
 
-1. Open the Google Form used for the exam.
-2. Click the three-dot menu.
-3. Click `Script editor`.
-4. Paste the `Code.gs` script below.
-5. Update the `CONFIG` values.
-6. Click `Project Settings`.
-7. Enable `Show appsscript.json manifest file in editor`.
-8. Open `appsscript.json` and paste the manifest below.
-9. Save the project.
-10. Run `installLockedscreenFormSubmitTrigger` once.
-11. Approve the permissions as the teacher/admin account that owns the Classroom class.
-12. Submit one test response from a student account and confirm the grade appears in Classroom.
+1. In Lockedscreen, open `Admin Console > Student turn-in`.
+2. Select the connected teacher Google Classroom account, class, and assignment for this Google Form quiz.
+3. Open `Admin Console > Grade sync`.
+4. Create or select a destination and set `Provider` to `Google Forms quiz sync`.
+5. Click `Import Classroom details` so Lockedscreen fills the Classroom course ID and assignment ID.
+6. Paste the Google Form link or Form response Sheet link into `Google Form or response Sheet link`.
+7. Optionally paste a gradebook Sheet link into `Optional gradebook Sheet link`.
+8. Open the Google Form used for the exam.
+9. Click the three-dot menu.
+10. Click `Script editor`.
+11. Paste the `Code.gs` script below.
+12. Update the `CONFIG` values using the course ID, assignment ID, and optional Sheet details shown in Lockedscreen.
+13. Click `Project Settings`.
+14. Enable `Show appsscript.json manifest file in editor`.
+15. Open `appsscript.json` and paste the manifest below.
+16. Save the project.
+17. Run `installLockedscreenFormSubmitTrigger` once.
+18. Approve the permissions as the teacher/admin account that owns the Classroom class.
+19. Submit one test response from a student account and confirm the grade appears in Classroom.
 
 Do not use `Run` on `onLockedscreenFormSubmit`. It needs the Form submit event. Run only the installer function manually.
+
+The `Google Forms quiz sync` destination in Lockedscreen is a setup record and guide. The grade write is performed by Google Apps Script after Google Forms submits and grades the quiz. This is intentional: student computers do not receive teacher Google tokens and do not write Classroom grades directly.
 
 ## Code.gs
 
