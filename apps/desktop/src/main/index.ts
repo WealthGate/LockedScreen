@@ -626,6 +626,14 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveResultDestination(destination));
   });
 
+  ipcMain.handle("resultsDestinationTemplate:save", async (_event, destination: unknown) => {
+    if (!isResultDestination(destination)) {
+      throw new Error("Invalid reusable grade-sync setup payload.");
+    }
+
+    return withRuntime(storage.saveResultDestinationTemplate(destination));
+  });
+
   ipcMain.handle("lmsConnection:save", async (_event, connection: unknown) => {
     if (!isLmsConnection(connection)) {
       throw new Error("Invalid LMS connection payload.");
@@ -819,6 +827,14 @@ app.whenReady().then(async () => {
     }
 
     return withRuntime(storage.deleteResultDestination(destinationId));
+  });
+
+  ipcMain.handle("resultsDestinationTemplate:delete", async (_event, destinationId: unknown) => {
+    if (typeof destinationId !== "string") {
+      throw new Error("Invalid reusable grade-sync setup id.");
+    }
+
+    return withRuntime(storage.deleteResultDestinationTemplate(destinationId));
   });
 
   ipcMain.handle("configPackage:delete", async (_event, packageId: unknown) => {

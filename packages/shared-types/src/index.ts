@@ -529,6 +529,7 @@ export interface AppStateSnapshot {
   submissions: SubmissionResult[];
   studentExamStates: StudentExamState[];
   resultDestinations: ResultDestination[];
+  resultDestinationTemplates: ResultDestination[];
   lmsConnections: LmsConnection[];
   settings: AppSettings;
   securityProfile: SecurityProfile;

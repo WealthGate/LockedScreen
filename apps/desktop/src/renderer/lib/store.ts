@@ -32,6 +32,7 @@ interface LockedscreenStore {
   saveSecurityProfile: (profile: SecurityProfile) => Promise<AppStateSnapshot | null>;
   saveConfigPackage: (configPackage: ExamConfigPackage) => Promise<AppStateSnapshot | null>;
   saveResultDestination: (destination: ResultDestination) => Promise<AppStateSnapshot | null>;
+  saveResultDestinationTemplate: (destination: ResultDestination) => Promise<AppStateSnapshot | null>;
   saveLmsConnection: (connection: LmsConnection) => Promise<AppStateSnapshot | null>;
   deleteLmsConnection: (connectionId: string) => Promise<AppStateSnapshot | null>;
   connectLmsConnection: (connectionId: string) => Promise<AppStateSnapshot | null>;
@@ -41,6 +42,7 @@ interface LockedscreenStore {
   listLmsCourseWork: (payload: { connectionId: string; courseId: string }) => Promise<LmsCourseWork[]>;
   listLmsStudents: (payload: { connectionId: string; courseId: string }) => Promise<LmsStudent[]>;
   deleteResultDestination: (destinationId: string) => Promise<AppStateSnapshot | null>;
+  deleteResultDestinationTemplate: (destinationId: string) => Promise<AppStateSnapshot | null>;
   deleteConfigPackage: (packageId: string) => Promise<AppStateSnapshot | null>;
   duplicateConfigPackage: (packageId: string) => Promise<AppStateSnapshot | null>;
   exportConfigPackage: (payload: { packageId: string }) => Promise<string | null>;
@@ -142,6 +144,13 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
     }
     return snapshot;
   },
+  saveResultDestinationTemplate: async (destination) => {
+    const snapshot = await withGuard(() => window.lockedscreenApi.saveResultDestinationTemplate(destination), (error) => set({ error }));
+    if (snapshot) {
+      set({ snapshot, error: null });
+    }
+    return snapshot;
+  },
   saveLmsConnection: async (connection) => {
     const snapshot = await withGuard(() => window.lockedscreenApi.saveLmsConnection(connection), (error) => set({ error }));
     if (snapshot) {
@@ -212,6 +221,13 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
   },
   deleteResultDestination: async (destinationId) => {
     const snapshot = await withGuard(() => window.lockedscreenApi.deleteResultDestination(destinationId), (error) => set({ error }));
+    if (snapshot) {
+      set({ snapshot, error: null });
+    }
+    return snapshot;
+  },
+  deleteResultDestinationTemplate: async (destinationId) => {
+    const snapshot = await withGuard(() => window.lockedscreenApi.deleteResultDestinationTemplate(destinationId), (error) => set({ error }));
     if (snapshot) {
       set({ snapshot, error: null });
     }

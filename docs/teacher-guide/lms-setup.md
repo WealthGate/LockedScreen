@@ -178,6 +178,24 @@ Recommended flow:
 
 Do not put teacher Google tokens or service account secrets into exported student packages. See `docs/google-sheets-sync-endpoint.md` for the endpoint payload and a minimal Apps Script example.
 
+## Reusable Grade Sync Setups
+
+Teachers can save grade-sync settings with custom names on the teacher PC.
+
+Use this when the same school endpoint, Google Sheet pattern, Classroom grade-sync bridge, Forms quiz sync setup, Microsoft Teams endpoint, or generic LMS endpoint will be reused for several exams.
+
+Recommended flow:
+
+1. Open `Admin Console > Grade sync`.
+2. Configure the destination once.
+3. Enter a clear custom name, such as `Physics Classroom + Sheet`, `Google Forms Quiz Sync`, or `WHS Grade Sync Server`.
+4. Click `Save as setup`.
+5. For a new exam, open `Grade sync`, choose the saved setup, and click `Apply setup`.
+6. Review the class, assignment, exam scope, and Sheet/Form links.
+7. Click `Save destination`.
+
+Reusable setups are local templates. They do not sync grades until a teacher applies them to an active result destination for an exam.
+
 ## Troubleshooting
 
 `Error 401: invalid_client` means the provider rejected the app registration, not the teacher password.

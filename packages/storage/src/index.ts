@@ -573,6 +573,7 @@ const seedState = (): AppStateSnapshot => {
     submissions: [],
     studentExamStates: [],
     resultDestinations: [],
+    resultDestinationTemplates: [],
     lmsConnections: [],
     settings: defaultSettings,
     securityProfile: defaultSecurityProfile,
@@ -627,6 +628,7 @@ const reconcilePackages = (snapshot: AppStateSnapshot): AppStateSnapshot => {
 const hydrateSnapshot = (raw: Partial<AppStateSnapshot> | null | undefined): AppStateSnapshot => {
   const seeded = seedState();
   const resultDestinations = (raw?.resultDestinations ?? seeded.resultDestinations).map(normalizeResultDestination);
+  const resultDestinationTemplates = (raw?.resultDestinationTemplates ?? seeded.resultDestinationTemplates).map(normalizeResultDestination);
   const lmsConnections = (raw?.lmsConnections ?? seeded.lmsConnections).map(normalizeLmsConnection);
   const snapshot: AppStateSnapshot = {
     exams: (raw?.exams ?? seeded.exams).map(normalizeExam),
@@ -637,6 +639,7 @@ const hydrateSnapshot = (raw: Partial<AppStateSnapshot> | null | undefined): App
         typeof entry?.examId === "string" && typeof entry?.candidateId === "string" && typeof entry?.hiddenAt === "string"
     ),
     resultDestinations,
+    resultDestinationTemplates,
     lmsConnections,
     settings: {
       ...defaultSettings,
@@ -732,9 +735,11 @@ export interface StorageService {
   saveSecurityProfile(profile: SecurityProfile): Promise<AppStateSnapshot>;
   saveConfigPackage(configPackage: ExamConfigPackage): Promise<AppStateSnapshot>;
   saveResultDestination(destination: ResultDestination): Promise<AppStateSnapshot>;
+  saveResultDestinationTemplate(destination: ResultDestination): Promise<AppStateSnapshot>;
   saveLmsConnection(connection: LmsConnection): Promise<AppStateSnapshot>;
   deleteLmsConnection(connectionId: string): Promise<AppStateSnapshot>;
   deleteResultDestination(destinationId: string): Promise<AppStateSnapshot>;
+  deleteResultDestinationTemplate(destinationId: string): Promise<AppStateSnapshot>;
   updateSubmissionSyncState(submissionId: string, syncState: SubmissionSyncState): Promise<AppStateSnapshot>;
   updateSubmissionStudentLmsTurnIn(submissionId: string, state: StudentLmsTurnInState): Promise<AppStateSnapshot>;
   importExamBundle(exam: Exam, configPackage: ExamConfigPackage): Promise<AppStateSnapshot>;
@@ -900,6 +905,29 @@ class JsonStorageService implements StorageService {
     return this.write(snapshot);
   }
 
+  async saveResultDestinationTemplate(destination: ResultDestination): Promise<AppStateSnapshot> {
+    const snapshot = await this.read();
+    const now = new Date().toISOString();
+    const nextDestination = normalizeResultDestination({
+      ...destination,
+      enabled: true,
+      createdAt: destination.createdAt || now,
+      updatedAt: now
+    });
+    const existing = snapshot.resultDestinationTemplates.findIndex((candidate) => candidate.id === destination.id);
+
+    if (existing >= 0) {
+      snapshot.resultDestinationTemplates[existing] = nextDestination;
+    } else {
+      snapshot.resultDestinationTemplates.unshift(nextDestination);
+    }
+
+    snapshot.securityLogs.unshift(
+      logEntry("results", "info", `Saved reusable grade-sync setup "${nextDestination.label}".`, nextDestination.type)
+    );
+    return this.write(snapshot);
+  }
+
   async saveLmsConnection(connection: LmsConnection): Promise<AppStateSnapshot> {
     const snapshot = await this.read();
     const nextConnection = normalizeLmsConnection({
@@ -935,6 +963,13 @@ class JsonStorageService implements StorageService {
       syncStates: submission.syncStates.filter((state) => state.destinationId !== destinationId)
     }));
     snapshot.securityLogs.unshift(logEntry("results", "warning", `Deleted result destination ${destinationId}.`));
+    return this.write(snapshot);
+  }
+
+  async deleteResultDestinationTemplate(destinationId: string): Promise<AppStateSnapshot> {
+    const snapshot = await this.read();
+    snapshot.resultDestinationTemplates = snapshot.resultDestinationTemplates.filter((candidate) => candidate.id !== destinationId);
+    snapshot.securityLogs.unshift(logEntry("results", "warning", `Deleted reusable grade-sync setup ${destinationId}.`));
     return this.write(snapshot);
   }
 

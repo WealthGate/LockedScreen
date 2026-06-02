@@ -707,6 +707,8 @@ type AdminActionState =
   | "save-settings"
   | "save-destination"
   | "delete-destination"
+  | "save-destination-template"
+  | "delete-destination-template"
   | "save-lms-connection"
   | "delete-lms-connection"
   | "connect-lms"
@@ -2763,6 +2765,7 @@ const SettingsPage = () => {
     saveSecurityProfile,
     saveConfigPackage,
     saveResultDestination,
+    saveResultDestinationTemplate,
     saveLmsConnection,
     deleteLmsConnection,
     connectLmsConnection,
@@ -2772,6 +2775,7 @@ const SettingsPage = () => {
     listLmsCourseWork,
     listLmsStudents,
     deleteResultDestination,
+    deleteResultDestinationTemplate,
     deleteConfigPackage,
     duplicateConfigPackage,
     exportConfigPackage,
@@ -2793,6 +2797,8 @@ const SettingsPage = () => {
   const [selectedDestinationId, setSelectedDestinationId] = useState(snapshot?.resultDestinations[0]?.id ?? "");
   const [destinationDraft, setDestinationDraft] = useState<ResultDestination | null>(snapshot?.resultDestinations[0] ?? null);
   const [destinationDirty, setDestinationDirty] = useState(false);
+  const [selectedDestinationTemplateId, setSelectedDestinationTemplateId] = useState(snapshot?.resultDestinationTemplates[0]?.id ?? "");
+  const [destinationTemplateName, setDestinationTemplateName] = useState("");
   const [selectedConnectionId, setSelectedConnectionId] = useState(snapshot?.lmsConnections[0]?.id ?? "");
   const [connectionDraft, setConnectionDraft] = useState<LmsConnection | null>(snapshot?.lmsConnections[0] ?? null);
   const [connectionDirty, setConnectionDirty] = useState(false);
@@ -2814,6 +2820,8 @@ const SettingsPage = () => {
       setPackageDraft(null);
       setSelectedDestinationId("");
       setDestinationDraft(null);
+      setSelectedDestinationTemplateId("");
+      setDestinationTemplateName("");
       setSelectedConnectionId("");
       setConnectionDraft(null);
       setConnectionCourses([]);
@@ -2866,6 +2874,12 @@ const SettingsPage = () => {
       }
     }
 
+    if (snapshot.resultDestinationTemplates.length === 0) {
+      setSelectedDestinationTemplateId("");
+    } else if (!snapshot.resultDestinationTemplates.some((candidate) => candidate.id === selectedDestinationTemplateId)) {
+      setSelectedDestinationTemplateId(snapshot.resultDestinationTemplates[0]?.id ?? "");
+    }
+
     if (snapshot.lmsConnections.length === 0) {
       if (!connectionDirty) {
         setSelectedConnectionId("");
@@ -2898,6 +2912,7 @@ const SettingsPage = () => {
     packageDraft?.id,
     securityDirty,
     selectedDestinationId,
+    selectedDestinationTemplateId,
     selectedConnectionId,
     selectedPackageId,
     settingsDirty,
@@ -3258,6 +3273,10 @@ const SettingsPage = () => {
                   ? "Saving result destination..."
                   : action === "delete-destination"
                     ? "Deleting result destination..."
+                    : action === "save-destination-template"
+                      ? "Saving reusable sync setup..."
+                      : action === "delete-destination-template"
+                        ? "Deleting reusable sync setup..."
                     : action === "save-lms-connection"
                       ? "Saving LMS connection..."
                       : action === "delete-lms-connection"
@@ -3383,6 +3402,92 @@ const SettingsPage = () => {
           nextSnapshot.resultDestinations[0] ??
           nextDestination;
         selectDestination(saved);
+      }
+    });
+  };
+
+  const destinationTemplateForCurrentExam = (template: ResultDestination, label?: string): ResultDestination => {
+    const now = new Date().toISOString();
+    const currentClass =
+      packageDraft.studentLmsBinding.courseLabel?.trim() ||
+      selectedExam?.className?.trim() ||
+      template.className?.trim() ||
+      "";
+
+    return sanitizeResultDestinationForProvider({
+      ...template,
+      id: crypto.randomUUID(),
+      label: label?.trim() || template.label,
+      className: currentClass,
+      examIds: selectedExam?.id ? [selectedExam.id] : [],
+      createdAt: now,
+      updatedAt: now
+    });
+  };
+
+  const handleSaveDestinationTemplate = async () => {
+    const profileName = destinationTemplateName.trim() || destinationDraft.label.trim();
+    if (!profileName) {
+      setActionFeedback({ tone: "error", text: "Enter a custom name for this reusable sync setup." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const sanitizedDraft = sanitizeResultDestinationForProvider(destinationDraft);
+    const template: ResultDestination = {
+      ...sanitizedDraft,
+      id: crypto.randomUUID(),
+      label: profileName,
+      enabled: true,
+      examIds: [],
+      className: sanitizedDraft.className?.trim() || "",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await runAdminAction("save-destination-template", () => saveResultDestinationTemplate(template), {
+      success: `Saved reusable sync setup "${template.label}".`,
+      empty: "Reusable sync setup was not saved.",
+      onSuccess: (nextSnapshot) => {
+        const saved = nextSnapshot.resultDestinationTemplates.find((candidate) => candidate.id === template.id);
+        setSelectedDestinationTemplateId(saved?.id ?? nextSnapshot.resultDestinationTemplates[0]?.id ?? "");
+        setDestinationTemplateName("");
+      }
+    });
+  };
+
+  const handleApplyDestinationTemplate = () => {
+    const template = snapshot.resultDestinationTemplates.find((candidate) => candidate.id === selectedDestinationTemplateId);
+    if (!template) {
+      setActionFeedback({ tone: "error", text: "Choose a reusable sync setup first." });
+      return;
+    }
+
+    const label =
+      destinationTemplateName.trim() ||
+      (selectedExam?.title ? `${template.label} - ${selectedExam.title}` : `${template.label} copy`);
+    const nextDestination = destinationTemplateForCurrentExam(template, label);
+    setSelectedDestinationId("");
+    setDestinationDraft(nextDestination);
+    setDestinationDirty(true);
+    setDestinationTemplateName(label);
+    setActionFeedback({
+      tone: "success",
+      text: `Applied "${template.label}" to the current exam. Review the class, assignment, and exam scope, then save the destination.`
+    });
+  };
+
+  const handleDeleteDestinationTemplate = async () => {
+    if (!selectedDestinationTemplateId) {
+      setActionFeedback({ tone: "error", text: "Choose a reusable sync setup to delete." });
+      return;
+    }
+
+    await runAdminAction("delete-destination-template", () => deleteResultDestinationTemplate(selectedDestinationTemplateId), {
+      success: "Reusable sync setup deleted.",
+      empty: "Reusable sync setup deletion did not complete.",
+      onSuccess: (nextSnapshot) => {
+        setSelectedDestinationTemplateId(nextSnapshot.resultDestinationTemplates[0]?.id ?? "");
       }
     });
   };
@@ -4929,6 +5034,47 @@ const SettingsPage = () => {
                 disabled={!packageDraft.studentLmsBinding.connectionId || !packageDraft.studentLmsBinding.courseId}
               >
                 Import Classroom details
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Reusable grade-sync setup</div>
+              <div className="mt-1 text-xs text-slate-800 dark:text-slate-100">
+                Save Google Forms, Classroom, Google Sheets, Microsoft Teams, or generic LMS sync settings with a custom name on this PC. Applying a setup creates an editable destination for the current exam.
+              </div>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-[1fr_1fr_auto_auto_auto]">
+              <select
+                className={selectClassName}
+                value={selectedDestinationTemplateId}
+                onChange={(event) => setSelectedDestinationTemplateId(event.target.value)}
+              >
+                <option value="">Choose saved setup</option>
+                {snapshot.resultDestinationTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.label} ({providerLabel(template.type)})
+                  </option>
+                ))}
+              </select>
+              <Input
+                placeholder="Custom setup name"
+                value={destinationTemplateName}
+                onChange={(event) => setDestinationTemplateName(event.target.value)}
+              />
+              <Button variant="secondary" onClick={handleApplyDestinationTemplate} disabled={adminBusy || !selectedDestinationTemplateId}>
+                Apply setup
+              </Button>
+              <Button variant="secondary" onClick={() => void handleSaveDestinationTemplate()} disabled={adminBusy}>
+                {isPending("save-destination-template") ? "Saving..." : "Save as setup"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => void handleDeleteDestinationTemplate()}
+                disabled={adminBusy || !selectedDestinationTemplateId}
+              >
+                {isPending("delete-destination-template") ? "Deleting..." : "Delete setup"}
               </Button>
             </div>
           </div>
