@@ -183,17 +183,49 @@ const defaultStudentLmsBinding = (): StudentLmsBinding => ({
   assignmentLabel: ""
 });
 
-const normalizeResultDestination = (destination: ResultDestination): ResultDestination => ({
-  ...destination,
-  authMode: destination.authMode ?? "none",
-  examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
-  connectionId: destination.connectionId?.trim() || undefined,
-  assignmentId: destination.assignmentId?.trim() || undefined,
-  assignmentLabel: destination.assignmentLabel?.trim() || undefined,
-  bridgeEndpointUrl: destination.bridgeEndpointUrl?.trim() || undefined,
-  sortByLastName: destination.sortByLastName === true,
-  includeResponses: destination.includeResponses ?? true
-});
+const looksLikeGoogleSheetUrl = (value?: string): boolean => {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.includes("docs.google.com/spreadsheets/");
+};
+
+const looksLikeAppsScriptUrl = (value?: string): boolean => {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.includes("script.google.com/macros/");
+};
+
+const normalizeResultDestination = (destination: ResultDestination): ResultDestination => {
+  const endpointUrl = destination.endpointUrl?.trim() ?? "";
+  const bridgeEndpointUrl = destination.bridgeEndpointUrl?.trim() || undefined;
+  const next: ResultDestination = {
+    ...destination,
+    endpointUrl,
+    authMode: destination.authMode ?? "none",
+    examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
+    connectionId: destination.connectionId?.trim() || undefined,
+    assignmentId: destination.assignmentId?.trim() || undefined,
+    assignmentLabel: destination.assignmentLabel?.trim() || undefined,
+    bridgeEndpointUrl,
+    sortByLastName: destination.sortByLastName === true,
+    includeResponses: destination.includeResponses ?? true
+  };
+
+  if (next.type === "google-classroom-grade-sync" && looksLikeGoogleSheetUrl(next.endpointUrl)) {
+    next.endpointUrl = "";
+  }
+
+  if (next.type === "google-sheets" && looksLikeAppsScriptUrl(next.endpointUrl)) {
+    next.bridgeEndpointUrl = next.bridgeEndpointUrl || next.endpointUrl;
+    next.endpointUrl = "";
+  }
+
+  if (next.type !== "google-sheets") {
+    next.bridgeEndpointUrl = undefined;
+    next.sheetName = "";
+    next.sortByLastName = undefined;
+  }
+
+  return next;
+};
 
 const normalizeExam = (exam: Exam): Exam => ({
   ...exam,

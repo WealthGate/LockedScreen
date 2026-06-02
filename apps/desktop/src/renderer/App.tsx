@@ -178,6 +178,68 @@ const blankResultDestination = (): ResultDestination => {
   };
 };
 
+const isGoogleSheetUrl = (value?: string): boolean => {
+  try {
+    const parsed = new URL(value?.trim() || "");
+    return parsed.hostname === "docs.google.com" && parsed.pathname.includes("/spreadsheets/");
+  } catch {
+    return false;
+  }
+};
+
+const isAppsScriptUrl = (value?: string): boolean => {
+  try {
+    const parsed = new URL(value?.trim() || "");
+    return parsed.hostname === "script.google.com" && parsed.pathname.includes("/macros/");
+  } catch {
+    return false;
+  }
+};
+
+const retargetResultDestinationProvider = (
+  current: ResultDestination,
+  nextType: ResultDestinationType
+): ResultDestination => {
+  const base = {
+    ...current,
+    type: nextType,
+    label:
+      current.label === "New destination" || current.label === providerLabel(current.type)
+        ? providerLabel(nextType)
+        : current.label
+  };
+
+  if (nextType === "google-sheets") {
+    return {
+      ...base,
+      endpointUrl: isGoogleSheetUrl(current.endpointUrl) ? current.endpointUrl : "",
+      bridgeEndpointUrl:
+        current.bridgeEndpointUrl?.trim() ||
+        (isAppsScriptUrl(current.endpointUrl) ? current.endpointUrl : ""),
+      assignmentId: undefined,
+      assignmentLabel: undefined
+    };
+  }
+
+  if (nextType === "google-classroom-grade-sync") {
+    return {
+      ...base,
+      endpointUrl: current.type === "google-sheets" || isGoogleSheetUrl(current.endpointUrl) ? "" : current.endpointUrl,
+      bridgeEndpointUrl: "",
+      sheetName: "",
+      sortByLastName: undefined
+    };
+  }
+
+  return {
+    ...base,
+    endpointUrl: isGoogleSheetUrl(current.endpointUrl) ? "" : current.endpointUrl,
+    bridgeEndpointUrl: "",
+    sheetName: nextType === "generic-lms" ? current.sheetName : "",
+    sortByLastName: undefined
+  };
+};
+
 const defaultLmsScope = (provider: LmsProviderType): string =>
   provider === "google-classroom"
     ? [
@@ -4749,15 +4811,9 @@ const SettingsPage = () => {
                 className={selectClassName}
                 value={destinationDraft.type}
                 onChange={(event) =>
-                  updateDestination((current) => ({
-                    ...current,
-                    type: event.target.value as ResultDestinationType,
-                    label:
-                      current.label === "New destination" ||
-                      current.label === providerLabel(current.type)
-                        ? providerLabel(event.target.value as ResultDestinationType)
-                        : current.label
-                  }))
+                  updateDestination((current) =>
+                    retargetResultDestinationProvider(current, event.target.value as ResultDestinationType)
+                  )
                 }
               >
                 <option value="google-classroom">Google Classroom</option>
@@ -4766,6 +4822,9 @@ const SettingsPage = () => {
                 <option value="google-sheets">Google Sheets</option>
                 <option value="generic-lms">Generic LMS</option>
               </select>
+              <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
+                Use separate saved destinations for Google Sheets and Classroom grade sync. Changing this provider clears fields that belong to the previous provider.
+              </div>
             </LabelledField>
             <LabelledField label="Label">
               <Input
@@ -4816,8 +4875,18 @@ const SettingsPage = () => {
                 value={destinationDraft.endpointUrl}
                 onChange={(event) => updateDestination((current) => ({ ...current, endpointUrl: event.target.value }))}
               />
+              {destinationDraft.type === "google-sheets" && isAppsScriptUrl(destinationDraft.endpointUrl) ? (
+                <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+                  This is an Apps Script URL. Paste the teacher's Google Sheet link here, then put the Apps Script `/exec` URL in School/Apps Script sync URL.
+                </div>
+              ) : null}
               {destinationDraft.type === "google-classroom-grade-sync" ? (
                 <div className="mt-2 space-y-2">
+                  {isGoogleSheetUrl(destinationDraft.endpointUrl) ? (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+                      This is a Google Sheet link. Paste the Classroom grade-sync Apps Script `/exec` URL here instead.
+                    </div>
+                  ) : null}
                   <div className="text-xs text-slate-800 dark:text-slate-100">
                     This is not used for posting the package to Classroom. It is the school-owned server address that receives student scores after submission and writes grades back to Classroom.
                   </div>
@@ -4857,6 +4926,11 @@ const SettingsPage = () => {
                 <div className="mt-2 text-xs text-slate-800 dark:text-slate-100">
                   This is saved into the exported test package. Students do not enter it on their machines.
                 </div>
+                {isGoogleSheetUrl(destinationDraft.bridgeEndpointUrl) ? (
+                  <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+                    This is a Google Sheet link. Paste the deployed Apps Script `/exec` URL here instead.
+                  </div>
+                ) : null}
               </LabelledField>
             ) : null}
             <LabelledField label="Auth mode">
