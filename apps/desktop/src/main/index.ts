@@ -138,6 +138,25 @@ const canOpenExternalHelpUrl = (targetUrl: string): boolean => {
     return false;
   }
 };
+
+const friendlyStudentLmsTurnInError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : "Student LMS turn-in failed.";
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes("access_not_configured") || lowerMessage.includes("institution") || lowerMessage.includes("admin")) {
+    return "Google blocked this student account because the school's Google Workspace admin has not allowed Lockedscreen for students. The local exam submission is saved. Ask the Google admin to review/allow the Lockedscreen OAuth app for the student organizational unit, then retry LMS turn-in.";
+  }
+
+  if (lowerMessage.includes("closed before it completed") || lowerMessage.includes("access_denied")) {
+    return "Student Google sign-in did not finish. The local exam submission is saved. If Google says the institution admin needs to review Lockedscreen, ask the Google Workspace admin to allow the app for students, then retry LMS turn-in.";
+  }
+
+  if (lowerMessage.includes("no google classroom submission")) {
+    return "No matching Google Classroom submission was found for this student account. The local exam submission is saved. Confirm the student is enrolled in the selected class and that the package is connected to the correct Classroom assignment.";
+  }
+
+  return message;
+};
 const initialPackageImportPath = getPackageImportArg(process.argv);
 const readInstalledRole = (): InstalledAppRole => {
   const rolePath = join(process.resourcesPath, "install-role.json");
@@ -436,6 +455,56 @@ const packageResultDestinationsForExport = (
     .map(sanitizePackageResultDestination)
     .filter((destination): destination is ResultDestination => destination !== null);
 
+const normalizeEmailDomain = (value: string): string =>
+  value.trim().replace(/^@+/, "").toLowerCase();
+
+const uniqueEmailDomains = (domains: string[]): string[] =>
+  Array.from(new Set(domains.map(normalizeEmailDomain).filter(Boolean)));
+
+const domainFromEmail = (email?: string): string | null => {
+  const trimmed = email?.trim().toLowerCase();
+  const atIndex = trimmed?.lastIndexOf("@") ?? -1;
+  return trimmed && atIndex >= 0 ? normalizeEmailDomain(trimmed.slice(atIndex + 1)) : null;
+};
+
+const connectedTeacherDomainForPackage = (
+  snapshot: AppStateSnapshot,
+  configPackage: ExamConfigPackage
+): string | null => {
+  const binding = configPackage.studentLmsBinding;
+  const connection = binding.connectionId
+    ? snapshot.lmsConnections.find((candidate) => candidate.id === binding.connectionId)
+    : snapshot.lmsConnections.find((candidate) => candidate.provider === binding.provider && candidate.status === "connected");
+  return (
+    domainFromEmail(connection?.accountEmail) ??
+    (binding.provider === "google-classroom" ? domainFromEmail(snapshot.settings.googleIntegration.accountEmail) : null)
+  );
+};
+
+const applyStudentEmailDomainDefaults = (
+  snapshot: AppStateSnapshot,
+  configPackage: ExamConfigPackage
+): ExamConfigPackage => {
+  const explicitDomains = uniqueEmailDomains(configPackage.studentAccessPolicy.allowedEmailDomains ?? []);
+  const fallbackDomain = explicitDomains.length === 0 ? connectedTeacherDomainForPackage(snapshot, configPackage) : null;
+  return {
+    ...configPackage,
+    studentAccessPolicy: {
+      ...configPackage.studentAccessPolicy,
+      allowedEmailDomains: explicitDomains.length > 0 ? explicitDomains : fallbackDomain ? [fallbackDomain] : []
+    }
+  };
+};
+
+const preparePackageForStudentExport = (
+  snapshot: AppStateSnapshot,
+  configPackage: ExamConfigPackage
+): ExamConfigPackage => ({
+  ...applyStudentEmailDomainDefaults(snapshot, configPackage),
+  passwordHint: undefined,
+  resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
+});
+
 const syncPendingResultsInternal = async (): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
   const pendingSubmissions = snapshot.submissions.filter((submission) =>
@@ -630,7 +699,8 @@ app.whenReady().then(async () => {
       throw new Error("Invalid configuration package payload.");
     }
 
-    return withRuntime(storage.saveConfigPackage(configPackage));
+    const snapshot = await storage.getSnapshot();
+    return withRuntime(storage.saveConfigPackage(applyStudentEmailDomainDefaults(snapshot, configPackage)));
   });
 
   ipcMain.handle("resultsDestination:save", async (_event, destination: unknown) => {
@@ -883,11 +953,7 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const exportPackage: ExamConfigPackage = {
-      ...configPackage,
-      passwordHint: undefined,
-      resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
-    };
+    const exportPackage = preparePackageForStudentExport(snapshot, configPackage);
     const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
 
     const output = await dialog.showSaveDialog({
@@ -933,11 +999,7 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const exportPackage: ExamConfigPackage = {
-      ...configPackage,
-      passwordHint: undefined,
-      resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
-    };
+    const exportPackage = preparePackageForStudentExport(snapshot, configPackage);
     const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
     const safePackageLabel = configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package";
     const fileName = `${safePackageLabel}.lscp`;
@@ -963,6 +1025,7 @@ app.whenReady().then(async () => {
 
     const nextPackage: ExamConfigPackage = {
       ...configPackage,
+      studentAccessPolicy: exportPackage.studentAccessPolicy,
       studentLmsBinding: {
         ...binding,
         assignmentId: published.courseWork.id,
@@ -1334,7 +1397,7 @@ app.whenReady().then(async () => {
         provider: configPackage.studentLmsBinding.provider,
         status: "failed",
         lastAttemptAt: new Date().toISOString(),
-        lastError: error instanceof Error ? error.message : "Student LMS turn-in failed."
+        lastError: friendlyStudentLmsTurnInError(error)
       };
       const nextSnapshot = await storage.updateSubmissionStudentLmsTurnIn(submission.id, failedState);
       const updatedSubmission = nextSnapshot.submissions.find((candidate) => candidate.id === submission.id);
@@ -1381,10 +1444,6 @@ app.whenReady().then(async () => {
     }
 
     await shell.openExternal(url);
-  });
-
-  ipcMain.handle("help:openGoogleAppsScript", async () => {
-    await shell.openExternal("https://script.google.com/home/projects/create");
   });
 
   await createWindow();

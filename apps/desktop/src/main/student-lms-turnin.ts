@@ -18,6 +18,7 @@ interface StudentOAuthTokens {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string;
+  profileEmail?: string;
 }
 
 interface SubmissionArtifact {
@@ -40,6 +41,10 @@ interface MicrosoftUploadedFile {
 
 interface TurnInOptions {
   teacherAccessToken?: string;
+}
+
+interface StudentProfile {
+  email?: string;
 }
 
 const toBase64Url = (input: Buffer): string =>
@@ -75,6 +80,38 @@ const providerTokenUrl = (binding: StudentLmsBinding): string =>
   binding.provider === "google-classroom"
     ? "https://oauth2.googleapis.com/token"
     : `https://login.microsoftonline.com/${binding.tenantId?.trim() || "common"}/oauth2/v2.0/token`;
+
+const normalizeEmailDomain = (value: string): string =>
+  value.trim().replace(/^@+/, "").toLowerCase();
+
+const normalizeEmailDomains = (domains: string[] | undefined): string[] =>
+  Array.from(new Set((domains ?? []).map(normalizeEmailDomain).filter(Boolean)));
+
+const domainFromEmail = (email?: string): string | null => {
+  const trimmed = email?.trim().toLowerCase();
+  const atIndex = trimmed?.lastIndexOf("@") ?? -1;
+  return trimmed && atIndex >= 0 ? normalizeEmailDomain(trimmed.slice(atIndex + 1)) : null;
+};
+
+const assertStudentEmailDomainAllowed = (configPackage: ExamConfigPackage, email?: string): void => {
+  const allowedDomains = normalizeEmailDomains(configPackage.studentAccessPolicy.allowedEmailDomains);
+  if (allowedDomains.length === 0) {
+    return;
+  }
+
+  const actualDomain = domainFromEmail(email);
+  if (!actualDomain) {
+    throw new Error(
+      `Lockedscreen could not confirm the signed-in student email domain. Use a school account ending in ${allowedDomains.join(", ")}.`
+    );
+  }
+
+  if (!allowedDomains.includes(actualDomain)) {
+    throw new Error(
+      `This exam only accepts student accounts from ${allowedDomains.join(", ")}. Sign out and use the correct school account.`
+    );
+  }
+};
 
 const sanitizeFileName = (value: string): string =>
   value
@@ -126,6 +163,32 @@ const buildSubmissionArtifact = (exam: Exam, submission: SubmissionResult): Subm
     fileName: `${stem}.json`,
     mimeType: "application/json",
     content: Buffer.from(JSON.stringify(payload, null, 2), "utf-8")
+  };
+};
+
+const fetchStudentProfile = async (binding: StudentLmsBinding, accessToken: string): Promise<StudentProfile> => {
+  const url =
+    binding.provider === "google-classroom"
+      ? "https://www.googleapis.com/oauth2/v3/userinfo"
+      : "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName";
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    return {};
+  }
+
+  return {
+    email:
+      typeof payload.email === "string"
+        ? payload.email
+        : typeof payload.userPrincipalName === "string"
+          ? payload.userPrincipalName
+          : typeof payload.mail === "string"
+            ? payload.mail
+            : undefined
   };
 };
 
@@ -267,7 +330,11 @@ const exchangeAuthorizationCode = async (
   };
 };
 
-const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWindow | null): Promise<StudentOAuthTokens> => {
+const signInStudent = async (
+  binding: StudentLmsBinding,
+  parentWindow: BrowserWindow | null,
+  allowedEmailDomains: string[]
+): Promise<StudentOAuthTokens> => {
   if (!binding.clientId.trim()) {
     throw new Error("This package is missing the LMS OAuth client ID.");
   }
@@ -288,6 +355,10 @@ const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWi
   if (binding.provider === "google-classroom") {
     params.set("access_type", "offline");
     params.set("prompt", "consent");
+    const hostedDomainHint = allowedEmailDomains[0];
+    if (allowedEmailDomains.length === 1 && hostedDomainHint) {
+      params.set("hd", hostedDomainHint);
+    }
   }
 
   const authUrl = new URL(providerAuthorizeUrl(binding));
@@ -300,7 +371,12 @@ const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWi
       authWindow.once("closed", () => reject(new Error("Student sign-in was closed before it completed.")));
     });
     const code = await Promise.race([codePromise, closedPromise]);
-    return exchangeAuthorizationCode(binding, code, authorization.redirectUri, pkce.verifier);
+    const tokens = await exchangeAuthorizationCode(binding, code, authorization.redirectUri, pkce.verifier);
+    const profile = await fetchStudentProfile(binding, tokens.accessToken);
+    return {
+      ...tokens,
+      profileEmail: profile.email
+    };
   } finally {
     if (!authWindow.isDestroyed()) {
       authWindow.close();
@@ -655,7 +731,9 @@ export const turnInSubmissionToLms = async (
     throw new Error("This package is missing the LMS course or assignment reference.");
   }
 
-  const tokens = await signInStudent(binding, parentWindow);
+  const allowedEmailDomains = normalizeEmailDomains(configPackage.studentAccessPolicy.allowedEmailDomains);
+  const tokens = await signInStudent(binding, parentWindow, allowedEmailDomains);
+  assertStudentEmailDomainAllowed(configPackage, tokens.profileEmail);
   const artifact = buildSubmissionArtifact(exam, submission);
 
   if (binding.provider === "google-classroom") {

@@ -1,0 +1,32 @@
+{
+  "name": "@lockedscreen/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android-first Lockedscreen student runtime for phone fallback exam sessions",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --host 0.0.0.0",
+    "cap:sync:android": "npm run build && cap sync android",
+    "cap:open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0",
+    "@lockedscreen/exam-engine": "file:../../packages/exam-engine",
+    "@lockedscreen/shared-types": "file:../../packages/shared-types",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "scrypt-js": "^3.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react-swc": "^3.7.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.6"
+  }
+}

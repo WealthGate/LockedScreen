@@ -93,6 +93,7 @@ const defaultTeacherOptions = (): TeacherOptions => ({
 const defaultStudentAccessPolicy = (): StudentAccessPolicy => ({
   assignedClassNames: [],
   assignedCandidateIds: [],
+  allowedEmailDomains: [],
   availableFrom: undefined,
   availableUntil: undefined,
   allowStudentDeletionAfterCompletion: true,
@@ -264,6 +265,15 @@ const normalizeStudentAccessPolicy = (policy: StudentAccessPolicy | null | undef
   ...(policy ?? {}),
   assignedClassNames: Array.isArray(policy?.assignedClassNames) ? policy.assignedClassNames : [],
   assignedCandidateIds: Array.isArray(policy?.assignedCandidateIds) ? policy.assignedCandidateIds : [],
+  allowedEmailDomains: Array.isArray(policy?.allowedEmailDomains)
+    ? Array.from(
+        new Set(
+          policy.allowedEmailDomains
+            .map((entry) => entry.trim().replace(/^@+/, "").toLowerCase())
+            .filter(Boolean)
+        )
+      )
+    : [],
   startCodeHash: policy?.startCodeHash?.trim() || undefined,
   startCodeSalt: policy?.startCodeSalt?.trim() || undefined,
   startCodeHint: policy?.startCodeHint?.trim() || undefined
@@ -466,110 +476,20 @@ const logEntry = (
   details
 });
 
-const sampleExam = (): Exam => {
-  const now = new Date().toISOString();
-
-  return {
-    id: randomUUID(),
-    mode: "app",
-    title: "Year 10 Chemistry Midterm",
-    subject: "Chemistry",
-    className: "Year 10",
-    form: "A",
-    instructions:
-      "Read each question carefully. Select one answer for each item. Use the flag action for questions you want to revisit before submitting.",
-    durationMinutes: 45,
-    branding: {
-      schoolName: "Northfield Academy",
-      accentColor: "#0f766e"
-    },
-    appearance: {
-      theme: "system",
-      headerLayout: "split",
-      fontScale: 1,
-      density: "comfortable"
-    },
-    questions: [
-      {
-        id: randomUUID(),
-        type: "multiple-choice",
-        prompt: "What is the chemical symbol for sodium?",
-        points: 1,
-        options: [
-          { id: randomUUID(), label: "A", content: "S" },
-          { id: randomUUID(), label: "B", content: "Na" },
-          { id: randomUUID(), label: "C", content: "So" },
-          { id: randomUUID(), label: "D", content: "Sd" }
-        ],
-        correctOptionId: ""
-      },
-      {
-        id: randomUUID(),
-        type: "multiple-choice",
-        prompt: "Which expression represents the quadratic formula discriminant?",
-        points: 1,
-        options: [
-          { id: randomUUID(), label: "A", content: "b^2 - 4ac" },
-          { id: randomUUID(), label: "B", content: "a^2 + b^2" },
-          { id: randomUUID(), label: "C", content: "2ab + c" },
-          { id: randomUUID(), label: "D", content: "4a^2 - c^2" }
-        ],
-        correctOptionId: ""
-      }
-    ],
-    createdAt: now,
-    updatedAt: now
-  };
-};
+const isLegacyDemoExam = (exam: Exam): boolean =>
+  (exam.title === "Year 10 Chemistry Midterm" &&
+    exam.subject === "Chemistry" &&
+    exam.className === "Year 10" &&
+    exam.branding.schoolName === "Northfield Academy") ||
+  (exam.title === "History LMS Assessment" &&
+    exam.subject === "History" &&
+    exam.className === "Year 11" &&
+    exam.branding.schoolName === "Northfield Academy");
 
 const seedState = (): AppStateSnapshot => {
-  const seededExam = sampleExam();
-  const firstQuestion = seededExam.questions.at(0);
-  const secondQuestion = seededExam.questions.at(1);
-  const firstQuestionSecondOption = firstQuestion?.options.at(1);
-  const secondQuestionFirstOption = secondQuestion?.options.at(0);
-
-  if (firstQuestion && firstQuestionSecondOption) {
-    firstQuestion.correctOptionId = firstQuestionSecondOption.id;
-  }
-
-  if (secondQuestion && secondQuestionFirstOption) {
-    secondQuestion.correctOptionId = secondQuestionFirstOption.id;
-  }
-
-  const hostedExam: Exam = {
-    id: randomUUID(),
-    mode: "link",
-    title: "History LMS Assessment",
-    subject: "History",
-    className: "Year 11",
-    form: "B",
-    instructions: "The linked LMS opens inside the secure session shell. Keep your candidate details visible.",
-    durationMinutes: 60,
-    branding: {
-      schoolName: "Northfield Academy",
-      accentColor: "#1d4ed8"
-    },
-    appearance: {
-      theme: "light",
-      headerLayout: "centered",
-      fontScale: 1,
-      density: "comfortable"
-    },
-    questions: [],
-    linkConfig: {
-      url: "https://docs.google.com/forms/",
-      allowedDomains: ["docs.google.com"]
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  const exams = [seededExam, hostedExam];
-
   return {
-    exams,
-    configPackages: exams.map((exam) => createConfigPackageFromExam(exam)),
+    exams: [],
+    configPackages: [],
     submissions: [],
     studentExamStates: [],
     resultDestinations: [],
@@ -578,7 +498,7 @@ const seedState = (): AppStateSnapshot => {
     settings: defaultSettings,
     securityProfile: defaultSecurityProfile,
     securityLogs: [
-      logEntry("package", "info", "Seeded default exam configuration packages."),
+      logEntry("package", "info", "Initialized empty Lockedscreen exam workspace."),
       logEntry("kiosk", "info", "Windows kiosk posture starts as not configured until an administrator verifies deployment.")
     ]
   };
@@ -630,13 +550,21 @@ const hydrateSnapshot = (raw: Partial<AppStateSnapshot> | null | undefined): App
   const resultDestinations = (raw?.resultDestinations ?? seeded.resultDestinations).map(normalizeResultDestination);
   const resultDestinationTemplates = (raw?.resultDestinationTemplates ?? seeded.resultDestinationTemplates).map(normalizeResultDestination);
   const lmsConnections = (raw?.lmsConnections ?? seeded.lmsConnections).map(normalizeLmsConnection);
+  const normalizedExams = (raw?.exams ?? seeded.exams).map(normalizeExam);
+  const legacyDemoExamIds = new Set(normalizedExams.filter(isLegacyDemoExam).map((exam) => exam.id));
+  const exams = normalizedExams.filter((exam) => !legacyDemoExamIds.has(exam.id));
   const snapshot: AppStateSnapshot = {
-    exams: (raw?.exams ?? seeded.exams).map(normalizeExam),
+    exams,
     configPackages: (raw?.configPackages ?? []).map(normalizeConfigPackage),
-    submissions: (raw?.submissions ?? []).map((submission) => normalizeSubmission(submission, resultDestinations)),
+    submissions: (raw?.submissions ?? [])
+      .map((submission) => normalizeSubmission(submission, resultDestinations))
+      .filter((submission) => !legacyDemoExamIds.has(submission.examId)),
     studentExamStates: (raw?.studentExamStates ?? []).filter(
       (entry): entry is StudentExamState =>
-        typeof entry?.examId === "string" && typeof entry?.candidateId === "string" && typeof entry?.hiddenAt === "string"
+        typeof entry?.examId === "string" &&
+        !legacyDemoExamIds.has(entry.examId) &&
+        typeof entry?.candidateId === "string" &&
+        typeof entry?.hiddenAt === "string"
     ),
     resultDestinations,
     resultDestinationTemplates,

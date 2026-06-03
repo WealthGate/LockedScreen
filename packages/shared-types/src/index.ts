@@ -351,6 +351,7 @@ export interface TeacherOptions {
 export interface StudentAccessPolicy {
   assignedClassNames: string[];
   assignedCandidateIds: string[];
+  allowedEmailDomains: string[];
   availableFrom?: string;
   availableUntil?: string;
   allowStudentDeletionAfterCompletion: boolean;

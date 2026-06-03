@@ -733,8 +733,7 @@ const helpLinks = {
   googleAppsScriptNewProject: "https://script.google.com/home/projects/create",
   sheetsSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-sheets-sync-endpoint.md",
   classroomGradeSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-classroom-grade-sync-apps-script.md",
-  formsQuizSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-forms-quiz-classroom-sync.md",
-  lmsSetupGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/teacher-guide/lms-setup.md"
+  formsQuizSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-forms-quiz-classroom-sync.md"
 } as const;
 
 type SetupGuide = {
@@ -1171,10 +1170,11 @@ const StudentPortalPage = () => {
           const policy = configPackage.studentAccessPolicy;
           const assignedClasses = policy.assignedClassNames.map((entry) => entry.trim().toLowerCase()).filter(Boolean);
           const assignedCandidateIds = policy.assignedCandidateIds.map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+          const hasExplicitAssignment = assignedClasses.length > 0 || assignedCandidateIds.length > 0;
           const assignedToStudent =
-            (assignedClasses.length === 0 && assignedCandidateIds.length === 0) ||
-            assignedClasses.includes(normalizedCandidateClass) ||
-            assignedCandidateIds.includes(normalizedCandidateId.trim().toLowerCase());
+            hasExplicitAssignment &&
+            (assignedClasses.includes(normalizedCandidateClass) ||
+              assignedCandidateIds.includes(normalizedCandidateId.trim().toLowerCase()));
           const hiddenByStudent = snapshot.studentExamStates.some(
             (entry) => entry.examId === exam.id && entry.candidateId === normalizedCandidateId
           );
@@ -3194,6 +3194,9 @@ const SettingsPage = () => {
       ...packageDraft.studentAccessPolicy,
       assignedClassNames: packageDraft.studentAccessPolicy.assignedClassNames.map((entry) => entry.trim()).filter(Boolean),
       assignedCandidateIds: packageDraft.studentAccessPolicy.assignedCandidateIds.map((entry) => entry.trim()).filter(Boolean),
+      allowedEmailDomains: packageDraft.studentAccessPolicy.allowedEmailDomains
+        .map((entry) => entry.trim().replace(/^@+/, "").toLowerCase())
+        .filter(Boolean),
       availableFrom: packageDraft.studentAccessPolicy.availableFrom?.trim() || undefined,
       availableUntil: packageDraft.studentAccessPolicy.availableUntil?.trim() || undefined,
       startCodeHash: packageDraft.studentAccessPolicy.startCodeHash?.trim() || undefined,
@@ -5610,7 +5613,7 @@ const SettingsPage = () => {
         <Card className="space-y-5">
           <CardTitle>Student Assignment</CardTitle>
           <CardDescription>
-            Limit this package to specific classes or student IDs. Leave both assignment lists blank to keep the exam visible to all students on the device.
+            Limit this package to specific classes or student IDs. Students now see only exams that match an assigned class or student ID.
           </CardDescription>
           <LabelledField label="Assigned classes">
             <Input
@@ -5642,6 +5645,27 @@ const SettingsPage = () => {
                 }))
               }
             />
+          </LabelledField>
+          <LabelledField label="Allowed student email domains">
+            <Input
+              placeholder="education.gov.dm, whsdominica.com"
+              value={serializeCommaList(packageDraft.studentAccessPolicy.allowedEmailDomains)}
+              onChange={(event) =>
+                updatePackage((current) => ({
+                  ...current,
+                  studentAccessPolicy: {
+                    ...current.studentAccessPolicy,
+                    allowedEmailDomains: splitCommaList(event.target.value).map((entry) =>
+                      entry.trim().replace(/^@+/, "").toLowerCase()
+                    )
+                  }
+                }))
+              }
+            />
+            <p className="mt-2 text-xs font-medium text-slate-800 dark:text-slate-100">
+              Optional. During student Google turn-in, Lockedscreen only accepts accounts from these domains. If blank,
+              the exported package uses the connected teacher account domain when one is available.
+            </p>
           </LabelledField>
           <div className="grid gap-4 md:grid-cols-2">
             <LabelledField label="Available from">
@@ -6594,7 +6618,7 @@ const StudentExamPage = () => {
   }, [beginSession, endSession, sessionExamId, sessionPackageId]);
 
   useEffect(() => {
-    if (!exam) {
+    if (!exam || submitted) {
       return;
     }
 
@@ -6604,7 +6628,7 @@ const StudentExamPage = () => {
     setSubmitting(false);
     setTurningIn(false);
     setSubmissionResult(null);
-  }, [exam, location.search]);
+  }, [sessionExamId, location.search]);
 
   const handleStudentTurnIn = async (submissionId: string) => {
     if (!configPackage) {
@@ -6919,7 +6943,7 @@ const LinkExamPage = () => {
   }, []);
 
   useEffect(() => {
-    if (!exam) {
+    if (!exam || submitted) {
       return;
     }
 
@@ -6931,7 +6955,7 @@ const LinkExamPage = () => {
     setSubmissionResult(null);
     setHostedSubmitDetected(false);
     setHostedGoogleSignInState("idle");
-  }, [exam, location.search]);
+  }, [sessionExamId, location.search]);
 
   useEffect(() => {
     if (submitted || expired) {
