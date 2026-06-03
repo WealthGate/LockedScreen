@@ -362,7 +362,7 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
 
 const syncSubmissionResultsInternal = async (
   submissionId: string,
-  options?: { autoOnly?: boolean; packageDestinations?: ResultDestination[] }
+  options?: { autoOnly?: boolean; packageDestinations?: ResultDestination[]; destinationTypes?: ResultDestination["type"][] }
 ): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
   const submission = snapshot.submissions.find((candidate) => candidate.id === submissionId);
@@ -378,6 +378,9 @@ const syncSubmissionResultsInternal = async (
   const destinationMap = new Map<string, ResultDestination>();
   [...snapshot.resultDestinations, ...(options?.packageDestinations ?? [])].forEach((destination) => {
     if (options?.autoOnly && destination.trigger !== "auto-on-submit") {
+      return;
+    }
+    if (options?.destinationTypes && !options.destinationTypes.includes(destination.type)) {
       return;
     }
     destinationMap.set(destination.id, destination);
@@ -504,6 +507,13 @@ const preparePackageForStudentExport = (
   passwordHint: undefined,
   resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
 });
+
+const postTurnInGradeSyncDestinations = (configPackage: ExamConfigPackage): ResultDestination[] =>
+  configPackage.resultDestinations.filter(
+    (destination) =>
+      destination.trigger === "auto-on-submit" &&
+      destination.type === "google-classroom-grade-sync"
+  );
 
 const syncPendingResultsInternal = async (): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
@@ -1378,6 +1388,22 @@ app.whenReady().then(async () => {
       const updatedSubmission = nextSnapshot.submissions.find((candidate) => candidate.id === submission.id);
       if (!updatedSubmission) {
         throw new Error("Updated submission not found.");
+      }
+
+      const postTurnInDestinations = postTurnInGradeSyncDestinations(configPackage);
+      if (postTurnInDestinations.length > 0) {
+        void syncSubmissionResultsInternal(submission.id, {
+          autoOnly: true,
+          packageDestinations: postTurnInDestinations,
+          destinationTypes: ["google-classroom-grade-sync"]
+        }).catch((syncError) => {
+          void recordSecurityEvent(
+            "results",
+            "warning",
+            `Post-turn-in grade sync failed for "${submission.examTitle}".`,
+            syncError instanceof Error ? syncError.message : "Post-turn-in grade sync failed."
+          );
+        });
       }
 
       await recordSecurityEvent(
