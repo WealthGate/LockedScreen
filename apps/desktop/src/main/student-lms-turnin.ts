@@ -71,6 +71,11 @@ const defaultStudentScope = (provider: StudentLmsProviderType): string =>
       ].join(" ")
     : ["offline_access", "openid", "profile", "User.Read", "EduAssignments.ReadWrite", "Files.ReadWrite"].join(" ");
 
+const studentOAuthScope = (binding: StudentLmsBinding): string =>
+  binding.provider === "google-classroom"
+    ? defaultStudentScope("google-classroom")
+    : binding.scope.trim() || defaultStudentScope(binding.provider);
+
 const providerAuthorizeUrl = (binding: StudentLmsBinding): string =>
   binding.provider === "google-classroom"
     ? "https://accounts.google.com/o/oauth2/v2/auth"
@@ -303,7 +308,7 @@ const exchangeAuthorizationCode = async (
     code,
     redirect_uri: redirectUri,
     code_verifier: verifier,
-    scope: binding.scope.trim() || defaultStudentScope(binding.provider)
+    scope: studentOAuthScope(binding)
   });
   if (binding.clientSecret?.trim()) {
     body.set("client_secret", binding.clientSecret.trim());
@@ -346,7 +351,7 @@ const signInStudent = async (
     client_id: binding.clientId,
     response_type: "code",
     redirect_uri: authorization.redirectUri,
-    scope: binding.scope.trim() || defaultStudentScope(binding.provider),
+    scope: studentOAuthScope(binding),
     state,
     code_challenge: pkce.challenge,
     code_challenge_method: "S256"

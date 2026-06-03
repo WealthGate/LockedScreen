@@ -23,6 +23,7 @@ import type {
   StudentAccessPolicy,
   StudentExamState,
   StudentLmsBinding,
+  StudentLmsProviderType,
   StudentLmsTurnInState,
   SubmissionSyncState,
   SubmissionResult,
@@ -184,6 +185,17 @@ const defaultStudentLmsBinding = (): StudentLmsBinding => ({
   assignmentLabel: ""
 });
 
+const defaultStudentLmsScope = (provider: StudentLmsProviderType): string =>
+  provider === "google-classroom"
+    ? [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/classroom.coursework.me",
+        "https://www.googleapis.com/auth/drive.file"
+      ].join(" ")
+    : ["offline_access", "openid", "profile", "User.Read", "EduAssignments.ReadWrite", "Files.ReadWrite"].join(" ");
+
 const looksLikeGoogleSheetUrl = (value?: string): boolean => {
   const trimmed = value?.trim() ?? "";
   return trimmed.includes("docs.google.com/spreadsheets/");
@@ -255,7 +267,10 @@ const normalizeStudentLmsBinding = (binding: StudentLmsBinding | null | undefine
   ...(binding ?? {}),
   clientId: binding?.clientId?.trim() ?? "",
   clientSecret: binding?.clientSecret?.trim() || undefined,
-  scope: binding?.scope ?? "",
+  scope:
+    binding?.provider === "google-classroom"
+      ? defaultStudentLmsScope("google-classroom")
+      : binding?.scope ?? "",
   courseId: binding?.courseId ?? "",
   assignmentId: binding?.assignmentId ?? ""
 });

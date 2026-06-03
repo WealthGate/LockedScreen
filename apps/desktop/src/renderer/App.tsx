@@ -2962,7 +2962,7 @@ const SettingsPage = () => {
               clientId: teacherConnection.clientId,
               clientSecret: teacherConnection.clientSecret,
               tenantId: "",
-              scope: teacherConnection.scope?.trim() || defaultStudentLmsScope("google-classroom")
+              scope: defaultStudentLmsScope("google-classroom")
             }
           }
         : current
@@ -4678,11 +4678,9 @@ const SettingsPage = () => {
                         selectedConnection?.provider === "microsoft-365"
                           ? (selectedConnection.tenantId ?? "common")
                           : "",
-                      scope:
-                        selectedConnection?.scope?.trim() ||
-                        defaultStudentLmsScope(
-                          selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom"
-                        )
+                      scope: defaultStudentLmsScope(
+                        selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom"
+                      )
                     }
                   }));
                 }}
