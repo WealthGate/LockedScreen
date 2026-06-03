@@ -728,6 +728,15 @@ interface ActionFeedback {
   text: string;
 }
 
+const helpLinks = {
+  googleOAuthSettings: "https://console.cloud.google.com/auth/overview",
+  googleAppsScriptNewProject: "https://script.google.com/home/projects/create",
+  sheetsSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-sheets-sync-endpoint.md",
+  classroomGradeSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-classroom-grade-sync-apps-script.md",
+  formsQuizSyncGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/google-forms-quiz-classroom-sync.md",
+  lmsSetupGuide: "https://github.com/WealthGate/LockedScreen/blob/main/docs/teacher-guide/lms-setup.md"
+} as const;
+
 type SetupGuide = {
   title: string;
   description: string;
@@ -3031,9 +3040,15 @@ const SettingsPage = () => {
   const settingsTabClass = (tab: SettingsTab): string => (settingsTab === tab ? "space-y-6" : "hidden");
   const settingsTabStyle = (tab: SettingsTab): CSSProperties =>
     settingsTab === tab ? {} : { display: "none" };
-  const openAppsScript = () => void window.lockedscreenApi.openGoogleAppsScript();
-  const openGitHubGuide = (path: string) =>
-    void window.lockedscreenApi.openExternal(`https://github.com/WealthGate/LockedScreen/blob/main/${path}`);
+  const openHelpLink = (url: string) => {
+    void window.lockedscreenApi.openExternal(url).catch((error: unknown) => {
+      setActionFeedback({
+        tone: "error",
+        text: error instanceof Error ? error.message : "This help link could not be opened."
+      });
+    });
+  };
+  const openAppsScript = () => openHelpLink(helpLinks.googleAppsScriptNewProject);
   const showGoogleOAuthGuide = () =>
     setSetupGuide({
       title: "Google Classroom setup",
@@ -3050,7 +3065,7 @@ const SettingsPage = () => {
         "If scopes change, disconnect and reconnect Google Classroom so Google issues a fresh consent grant."
       ],
       primaryActionLabel: "Open Google OAuth settings",
-      onPrimaryAction: () => void window.lockedscreenApi.openExternal("https://console.cloud.google.com/auth/overview")
+      onPrimaryAction: () => openHelpLink(helpLinks.googleOAuthSettings)
     });
   const showSheetsSyncGuide = () =>
     setSetupGuide({
@@ -3071,7 +3086,7 @@ const SettingsPage = () => {
       primaryActionLabel: "Create new Apps Script project",
       onPrimaryAction: openAppsScript,
       secondaryActionLabel: "Open Sheets script guide",
-      onSecondaryAction: () => openGitHubGuide("docs/google-sheets-sync-endpoint.md")
+      onSecondaryAction: () => openHelpLink(helpLinks.sheetsSyncGuide)
     });
   const showClassroomGradeSyncGuide = () =>
     setSetupGuide({
@@ -3094,7 +3109,7 @@ const SettingsPage = () => {
       primaryActionLabel: "Create new Apps Script project",
       onPrimaryAction: openAppsScript,
       secondaryActionLabel: "Open Classroom script guide",
-      onSecondaryAction: () => openGitHubGuide("docs/google-classroom-grade-sync-apps-script.md")
+      onSecondaryAction: () => openHelpLink(helpLinks.classroomGradeSyncGuide)
     });
   const showGoogleFormsQuizSyncGuide = () =>
     setSetupGuide({
@@ -3118,7 +3133,7 @@ const SettingsPage = () => {
       primaryActionLabel: "Open Google Apps Script",
       onPrimaryAction: openAppsScript,
       secondaryActionLabel: "Open Forms sync guide",
-      onSecondaryAction: () => openGitHubGuide("docs/google-forms-quiz-classroom-sync.md")
+      onSecondaryAction: () => openHelpLink(helpLinks.formsQuizSyncGuide)
     });
   const adminUnlockPin = settings.adminUnlockPin.trim();
   const adminUnlockRequiresPin = adminUnlockPin.length > 0;

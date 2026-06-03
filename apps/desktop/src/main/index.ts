@@ -105,6 +105,7 @@ import {
   configureWebContents,
   endManagedSession,
   getActivePackage,
+  getActiveSession,
   launchApprovedApplication,
   setNavigationGuard,
   urlAllowedByGuard
@@ -123,6 +124,20 @@ const launchedByNativeHost = process.argv.includes("--lockedscreen-native-hosted
 const requiresSingleInstanceLock = !launchedByNativeHost;
 const getPackageImportArg = (argv: string[]): string | null =>
   argv.find((entry) => entry.toLowerCase().endsWith(".lscp") && existsSync(entry)) ?? null;
+
+const canOpenExternalHelpUrl = (targetUrl: string): boolean => {
+  try {
+    const target = new URL(targetUrl);
+    const normalWebLink = target.protocol === "https:" || target.protocol === "http:";
+    if (!normalWebLink) {
+      return false;
+    }
+
+    return getActiveSession() ? urlAllowedByGuard(targetUrl) : true;
+  } catch {
+    return false;
+  }
+};
 const initialPackageImportPath = getPackageImportArg(process.argv);
 const readInstalledRole = (): InstalledAppRole => {
   const rolePath = join(process.resourcesPath, "install-role.json");
@@ -1361,9 +1376,11 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("shell:openExternal", async (_event, url: unknown) => {
-    if (typeof url === "string" && urlAllowedByGuard(url)) {
-      await shell.openExternal(url);
+    if (typeof url !== "string" || !canOpenExternalHelpUrl(url)) {
+      throw new Error("This link cannot be opened right now.");
     }
+
+    await shell.openExternal(url);
   });
 
   ipcMain.handle("help:openGoogleAppsScript", async () => {
