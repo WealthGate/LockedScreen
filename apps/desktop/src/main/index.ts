@@ -190,6 +190,7 @@ const preloadPath = (() => {
 let mainWindow: BrowserWindow | null = null;
 let processMonitorTimer: NodeJS.Timeout | null = null;
 let lastProcessAlert = "";
+let updateInstallRestarting = false;
 let pendingLaunchContext: LaunchContext = {
   route: launchRoute,
   nativeHosted: launchedByNativeHost,
@@ -552,6 +553,10 @@ const createWindow = async (): Promise<void> => {
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.on("close", (event) => {
+    if (updateInstallRestarting) {
+      return;
+    }
+
     if (!getActivePackage()) {
       return;
     }
@@ -654,7 +659,17 @@ app.whenReady().then(async () => {
     await queuePackageImportLaunch(initialPackageImportPath);
   }
 
-  configureAppUpdates(() => mainWindow);
+  configureAppUpdates(() => mainWindow, {
+    onBeforeInstall: () => {
+      updateInstallRestarting = true;
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.setFullScreen(false);
+    }
+  });
 
   ipcMain.handle("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
   ipcMain.handle("app:getLaunchContext", async () => pendingLaunchContext);

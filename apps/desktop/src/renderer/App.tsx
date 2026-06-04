@@ -10,6 +10,7 @@ import {
   FileInput,
   Flag,
   LayoutDashboard,
+  Loader2,
   Lock,
   Moon,
   Plus,
@@ -6454,6 +6455,7 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
     state.status === "available" ||
     state.status === "downloading" ||
     state.status === "downloaded" ||
+    state.status === "installing" ||
     state.status === "error";
 
   if (!visible || dismissedVersion === `${state.status}:${state.availableVersion ?? state.message ?? ""}`) {
@@ -6465,9 +6467,11 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
       ? `Lockedscreen ${state.availableVersion} is available`
       : state.status === "downloaded"
         ? "Update ready to install"
-        : state.status === "downloading"
-          ? "Downloading Lockedscreen update"
-          : "Update check needs attention";
+        : state.status === "installing"
+          ? "Installing Lockedscreen update"
+          : state.status === "downloading"
+            ? "Downloading Lockedscreen update"
+            : "Update check needs attention";
   const message =
     state.message ??
     (state.status === "available"
@@ -6498,17 +6502,25 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
               Install now
             </Button>
           ) : null}
+          {state.status === "installing" ? (
+            <Button disabled>
+              <Loader2 className="size-4 animate-spin" />
+              Installing
+            </Button>
+          ) : null}
           {state.status === "error" ? (
             <Button variant="secondary" onClick={() => void window.lockedscreenApi.checkForUpdates()}>
               Check again
             </Button>
           ) : null}
-          <Button
-            variant="secondary"
-            onClick={() => setDismissedVersion(`${state.status}:${state.availableVersion ?? state.message ?? ""}`)}
-          >
-            Later
-          </Button>
+          {state.status !== "installing" ? (
+            <Button
+              variant="secondary"
+              onClick={() => setDismissedVersion(`${state.status}:${state.availableVersion ?? state.message ?? ""}`)}
+            >
+              Later
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>

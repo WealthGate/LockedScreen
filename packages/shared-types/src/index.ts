@@ -51,6 +51,7 @@ export type AppUpdateStatus =
   | "not-available"
   | "downloading"
   | "downloaded"
+  | "installing"
   | "error";
 
 export interface SchoolBranding {

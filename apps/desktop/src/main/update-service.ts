@@ -17,6 +17,7 @@ let updateState: AppUpdateState = {
   currentVersion: app.getVersion()
 };
 let periodicUpdateCheckTimer: NodeJS.Timeout | null = null;
+let updateInstallRequested = false;
 
 const updateMainWindow = (window: BrowserWindow | null): void => {
   if (!window || window.isDestroyed()) {
@@ -93,9 +94,17 @@ const cleanupOldUpdateFiles = async (): Promise<void> => {
   }
 };
 
-export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): void => {
+interface ConfigureAppUpdatesOptions {
+  onBeforeInstall?: () => void;
+}
+
+export const configureAppUpdates = (
+  getMainWindow: () => BrowserWindow | null,
+  options: ConfigureAppUpdatesOptions = {}
+): void => {
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = false;
 
   void cleanupOldUpdateFiles();
@@ -145,12 +154,13 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
       status: "downloaded",
       availableVersion: info.version,
       percent: 100,
-      message: "Update downloaded. Restart Lockedscreen to install it."
+      message: "Update downloaded. Click Install now, approve the Windows prompt, and Lockedscreen will reopen when the update finishes."
     });
     showUpdateNotification(window, "Lockedscreen update ready", "Click Install now in Lockedscreen to finish the update.");
   });
 
   autoUpdater.on("error", (error) => {
+    updateInstallRequested = false;
     setUpdateState(getMainWindow(), {
       status: "error",
       percent: undefined,
@@ -214,7 +224,56 @@ export const configureAppUpdates = (getMainWindow: () => BrowserWindow | null): 
   });
 
   ipcMain.handle("updates:install", async () => {
-    autoUpdater.quitAndInstall(false, true);
+    const window = getMainWindow();
+    if (!app.isPackaged) {
+      return setUpdateState(window, {
+        status: "error",
+        message: "Updates are available only in the installed app."
+      });
+    }
+
+    if (updateInstallRequested || updateState.status === "installing") {
+      return updateState;
+    }
+
+    if (updateState.status !== "downloaded") {
+      return setUpdateState(window, {
+        status: "error",
+        message: "Download the update before installing it."
+      });
+    }
+
+    updateInstallRequested = true;
+    setUpdateState(window, {
+      status: "installing",
+      percent: 100,
+      message: "Installing update. Approve the Windows prompt; Lockedscreen will close and reopen automatically."
+    });
+
+    try {
+      options.onBeforeInstall?.();
+      setTimeout(() => {
+        try {
+          autoUpdater.quitAndInstall(true, true);
+        } catch (error) {
+          updateInstallRequested = false;
+          setUpdateState(window, {
+            status: "error",
+            percent: undefined,
+            message: friendlyUpdateError(error)
+          });
+        }
+      }, 250);
+    } catch (error) {
+      updateInstallRequested = false;
+      setUpdateState(window, {
+        status: "error",
+        percent: undefined,
+        message: friendlyUpdateError(error)
+      });
+    }
+
+    return updateState;
   });
 };
 
@@ -223,7 +282,12 @@ const checkForUpdatesQuietly = async (): Promise<void> => {
     return;
   }
 
-  if (updateState.status === "checking" || updateState.status === "downloading" || updateState.status === "downloaded") {
+  if (
+    updateState.status === "checking" ||
+    updateState.status === "downloading" ||
+    updateState.status === "downloaded" ||
+    updateState.status === "installing"
+  ) {
     return;
   }
 

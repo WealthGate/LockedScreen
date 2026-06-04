@@ -3,15 +3,40 @@
 
 !ifndef BUILD_UNINSTALLER
 Var LockedscreenInstallRole
+Var LockedscreenIsUpdate
 Var LockedscreenTeacherRadio
 Var LockedscreenStudentRadio
 Var LockedscreenServiceResult
+
+!macro customInit
+  StrCpy $LockedscreenIsUpdate "0"
+  ${GetParameters} $R0
+  ${GetOptions} $R0 "--updated" $R1
+  ${IfNot} ${Errors}
+    StrCpy $LockedscreenIsUpdate "1"
+  ${EndIf}
+
+  ${If} $LockedscreenIsUpdate == "1"
+    StrCpy $LockedscreenInstallRole "teacher"
+    IfFileExists "$INSTDIR\resources\install-role.json" 0 roleDone
+      FileOpen $0 "$INSTDIR\resources\install-role.json" r
+      FileRead $0 $1
+      FileClose $0
+      StrCmp $1 '{"role":"student"}' 0 roleDone
+        StrCpy $LockedscreenInstallRole "student"
+  roleDone:
+  ${EndIf}
+!macroend
 
 !macro customPageAfterChangeDir
   Page custom LockedscreenRolePageCreate LockedscreenRolePageLeave
 !macroend
 
 Function LockedscreenRolePageCreate
+  ${If} $LockedscreenIsUpdate == "1"
+    Abort
+  ${EndIf}
+
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
@@ -42,6 +67,10 @@ Function LockedscreenRolePageLeave
 FunctionEnd
 
 !macro customInstall
+  ${If} $LockedscreenInstallRole == ""
+    StrCpy $LockedscreenInstallRole "teacher"
+  ${EndIf}
+
   CreateDirectory "$INSTDIR\resources"
   FileOpen $0 "$INSTDIR\resources\install-role.json" w
   FileWrite $0 '{"role":"$LockedscreenInstallRole"}'

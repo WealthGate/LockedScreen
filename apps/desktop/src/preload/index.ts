@@ -28,7 +28,7 @@ export interface LockedscreenApi {
   getUpdateState: () => Promise<AppUpdateState>;
   checkForUpdates: () => Promise<AppUpdateState>;
   downloadUpdate: () => Promise<AppUpdateState>;
-  installUpdate: () => Promise<void>;
+  installUpdate: () => Promise<AppUpdateState>;
   onUpdateStateChanged: (callback: (state: AppUpdateState) => void) => () => void;
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
