@@ -86,6 +86,39 @@ const providerTokenUrl = (binding: StudentLmsBinding): string =>
     ? "https://oauth2.googleapis.com/token"
     : `https://login.microsoftonline.com/${binding.tenantId?.trim() || "common"}/oauth2/v2.0/token`;
 
+const friendlyStudentOAuthError = (provider: StudentLmsProviderType, error: string, description?: string): Error => {
+  const detail = [error, description].filter(Boolean).join(" ").toLowerCase();
+
+  if (provider === "google-classroom") {
+    if (detail.includes("admin_policy_enforced") || detail.includes("access blocked")) {
+      return new Error(
+        "Student Google sign-in was blocked by the school Google Workspace policy. The local exam submission is saved. Ask the Google administrator to allow the Lockedscreen OAuth app for students, then retry Classroom turn-in."
+      );
+    }
+
+    if (
+      detail.includes("test user") ||
+      detail.includes("testing") ||
+      detail.includes("not completed") ||
+      detail.includes("not verified")
+    ) {
+      return new Error(
+        "The Google OAuth app is still in testing or unverified for this student account. The local exam submission is saved. Add the student account as an allowed test user or publish/verify the Google app."
+      );
+    }
+  }
+
+  if (error === "access_denied" || detail.includes("access_denied")) {
+    return new Error("Student sign-in was cancelled or the requested LMS permission was not approved.");
+  }
+
+  if (error === "invalid_scope" || detail.includes("invalid_scope")) {
+    return new Error("The student LMS permissions in this package are not valid. Re-save and re-export the package, then retry turn-in.");
+  }
+
+  return new Error(description || error || "Student LMS sign-in failed.");
+};
+
 const normalizeEmailDomain = (value: string): string =>
   value.trim().replace(/^@+/, "").toLowerCase();
 
@@ -198,6 +231,7 @@ const fetchStudentProfile = async (binding: StudentLmsBinding, accessToken: stri
 };
 
 const createAuthorizationListener = async (
+  provider: StudentLmsProviderType,
   expectedState: string
 ): Promise<{ redirectUri: string; waitForCode: () => Promise<string> }> =>
   new Promise((resolve, reject) => {
@@ -205,6 +239,7 @@ const createAuthorizationListener = async (
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       const code = requestUrl.searchParams.get("code");
       const error = requestUrl.searchParams.get("error");
+      const errorDescription = requestUrl.searchParams.get("error_description") ?? undefined;
       const state = requestUrl.searchParams.get("state");
 
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -222,7 +257,7 @@ const createAuthorizationListener = async (
       server.close();
 
       if (error) {
-        pendingReject?.(new Error(error));
+        pendingReject?.(friendlyStudentOAuthError(provider, error, errorDescription));
         return;
       }
 
@@ -324,7 +359,11 @@ const exchangeAuthorizationCode = async (
 
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok || typeof payload.access_token !== "string") {
-    throw new Error(typeof payload.error_description === "string" ? payload.error_description : "Token exchange failed.");
+    throw friendlyStudentOAuthError(
+      binding.provider,
+      typeof payload.error === "string" ? payload.error : "token_exchange_failed",
+      typeof payload.error_description === "string" ? payload.error_description : undefined
+    );
   }
 
   const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : Number(payload.expires_in ?? 0);
@@ -346,7 +385,7 @@ const signInStudent = async (
 
   const state = randomBytes(16).toString("hex");
   const pkce = createPkce();
-  const authorization = await createAuthorizationListener(state);
+  const authorization = await createAuthorizationListener(binding.provider, state);
   const params = new URLSearchParams({
     client_id: binding.clientId,
     response_type: "code",

@@ -3211,7 +3211,7 @@ const SettingsPage = () => {
       tenantId: packageDraft.studentLmsBinding.provider === "microsoft-365"
         ? packageDraft.studentLmsBinding.tenantId?.trim() || "common"
         : undefined,
-      scope: packageDraft.studentLmsBinding.scope.trim() || defaultStudentLmsScope(packageDraft.studentLmsBinding.provider),
+      scope: defaultStudentLmsScope(packageDraft.studentLmsBinding.provider),
       courseId: packageDraft.studentLmsBinding.courseId.trim(),
       courseLabel: packageDraft.studentLmsBinding.courseLabel?.trim() || undefined,
       assignmentId: packageDraft.studentLmsBinding.assignmentId.trim(),

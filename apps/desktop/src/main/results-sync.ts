@@ -5,7 +5,12 @@ interface ResultSyncOptions {
 }
 
 const destinationMatchesExam = (destination: ResultDestination, exam: Exam): boolean => {
-  const examIdMatch = destination.examIds.length === 0 || destination.examIds.includes(exam.id);
+  const explicitlyMatchesExam = destination.examIds.includes(exam.id);
+  if (explicitlyMatchesExam) {
+    return true;
+  }
+
+  const examIdMatch = destination.examIds.length === 0;
   const classMatch = !destination.className || destination.className.trim() === exam.className.trim();
   return examIdMatch && classMatch;
 };
