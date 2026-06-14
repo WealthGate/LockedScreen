@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 
-import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
+import { extractExamDocumentText, parseExamDocument, supportedQuestionImportExtensions } from "@lockedscreen/parser";
 import type {
   Candidate,
   AppSettings,
@@ -1125,7 +1125,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("import:questions", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters: [{ name: "Supported exam files", extensions: ["txt", "doc", "docx", "pdf", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"] }]
+      filters: [{ name: "Supported exam files", extensions: [...supportedQuestionImportExtensions] }]
     });
 
     if (result.canceled || result.filePaths.length === 0) {

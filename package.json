@@ -1,6 +1,6 @@
 {
   "name": "lockedscreen",
-  "version": "0.6.37",
+  "version": "0.6.38",
   "private": true,
   "packageManager": "npm@10.8.2",
   "workspaces": [

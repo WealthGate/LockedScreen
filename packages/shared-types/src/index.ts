@@ -73,6 +73,45 @@ export interface MultipleChoiceOption {
   content: string;
 }
 
+export type QuestionImageMimeType = "image/png" | "image/jpeg" | "image/webp";
+export type QuestionAudioMimeType =
+  | "audio/mpeg"
+  | "audio/mp3"
+  | "audio/wav"
+  | "audio/x-wav"
+  | "audio/ogg"
+  | "audio/mp4"
+  | "audio/x-m4a"
+  | "audio/aac"
+  | "audio/webm";
+
+export interface QuestionImageAsset {
+  id: string;
+  fileName: string;
+  mimeType: QuestionImageMimeType;
+  dataUrl: string;
+  altText: string;
+  caption?: string;
+}
+
+export interface QuestionAudioAsset {
+  id: string;
+  fileName: string;
+  mimeType: QuestionAudioMimeType;
+  dataUrl: string;
+  title: string;
+  transcript?: string;
+  maxPlays?: number;
+}
+
+export interface QuestionGroup {
+  id: string;
+  title: string;
+  instructions?: string;
+  image?: QuestionImageAsset;
+  audio?: QuestionAudioAsset;
+}
+
 export interface MultipleChoiceQuestion {
   id: string;
   type: "multiple-choice";
@@ -81,6 +120,9 @@ export interface MultipleChoiceQuestion {
   points: number;
   options: MultipleChoiceOption[];
   correctOptionId: string;
+  groupId?: string;
+  image?: QuestionImageAsset;
+  audio?: QuestionAudioAsset;
   flagged?: boolean;
 }
 
@@ -103,6 +145,7 @@ export interface Exam {
   branding: SchoolBranding;
   appearance: ExamAppearance;
   questions: Question[];
+  questionGroups?: QuestionGroup[];
   linkConfig?: LinkExamConfig;
   createdAt: string;
   updatedAt: string;
@@ -126,6 +169,7 @@ export interface ExamSession {
   startedAt: string;
   endsAt: string;
   responses: ExamResponse[];
+  mediaPlayCounts?: Record<string, number>;
   mode: ExamMode;
 }
 
@@ -573,7 +617,7 @@ export interface ImportedExamMetadata {
   durationMinutes?: number;
 }
 
-export type ImportExtractionMethod = "text" | "docx" | "doc" | "pdf-text" | "pdf-ocr" | "image-ocr";
+export type ImportExtractionMethod = "text" | "docx" | "doc" | "office" | "pdf-text" | "pdf-ocr" | "image-ocr";
 
 export interface ImportExtractionInfo {
   method: ImportExtractionMethod;

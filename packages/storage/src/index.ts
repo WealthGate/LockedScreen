@@ -14,6 +14,9 @@ import type {
   GoogleIntegrationSettings,
   LmsConnection,
   ProcessPolicy,
+  QuestionAudioAsset,
+  QuestionGroup,
+  QuestionImageAsset,
   ResultDestination,
   SchoolBranding,
   SecurityLogCategory,
@@ -257,10 +260,121 @@ const normalizeResultDestination = (destination: ResultDestination): ResultDesti
   return next;
 };
 
-const normalizeExam = (exam: Exam): Exam => ({
-  ...exam,
-  form: exam.form ?? ""
-});
+const maxQuestionImageDataUrlLength = 7_000_000;
+const maxQuestionAudioDataUrlLength = 28_000_000;
+const supportedQuestionImageMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+const supportedQuestionAudioMimeTypes = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/webm"
+]);
+
+const normalizeQuestionImage = (image: unknown): QuestionImageAsset | undefined => {
+  if (!image || typeof image !== "object") {
+    return undefined;
+  }
+
+  const candidate = image as Partial<QuestionImageAsset>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.fileName !== "string" ||
+    typeof candidate.mimeType !== "string" ||
+    !supportedQuestionImageMimeTypes.has(candidate.mimeType) ||
+    typeof candidate.dataUrl !== "string" ||
+    candidate.dataUrl.length > maxQuestionImageDataUrlLength ||
+    !candidate.dataUrl.startsWith(`data:${candidate.mimeType};base64,`)
+  ) {
+    return undefined;
+  }
+
+  return {
+    id: candidate.id,
+    fileName: candidate.fileName,
+    mimeType: candidate.mimeType as QuestionImageAsset["mimeType"],
+    dataUrl: candidate.dataUrl,
+    altText: typeof candidate.altText === "string" ? candidate.altText : "",
+    caption: typeof candidate.caption === "string" && candidate.caption.trim() ? candidate.caption : undefined
+  };
+};
+
+const normalizeQuestionAudio = (audio: unknown): QuestionAudioAsset | undefined => {
+  if (!audio || typeof audio !== "object") {
+    return undefined;
+  }
+
+  const candidate = audio as Partial<QuestionAudioAsset>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.fileName !== "string" ||
+    typeof candidate.mimeType !== "string" ||
+    !supportedQuestionAudioMimeTypes.has(candidate.mimeType) ||
+    typeof candidate.dataUrl !== "string" ||
+    candidate.dataUrl.length > maxQuestionAudioDataUrlLength ||
+    !candidate.dataUrl.startsWith(`data:${candidate.mimeType};base64,`)
+  ) {
+    return undefined;
+  }
+
+  const maxPlays =
+    typeof candidate.maxPlays === "number" && Number.isInteger(candidate.maxPlays) && candidate.maxPlays > 0
+      ? Math.min(candidate.maxPlays, 99)
+      : undefined;
+
+  return {
+    id: candidate.id,
+    fileName: candidate.fileName,
+    mimeType: candidate.mimeType as QuestionAudioAsset["mimeType"],
+    dataUrl: candidate.dataUrl,
+    title: typeof candidate.title === "string" ? candidate.title : "",
+    transcript: typeof candidate.transcript === "string" && candidate.transcript.trim() ? candidate.transcript : undefined,
+    maxPlays
+  };
+};
+
+const normalizeQuestionGroup = (group: unknown): QuestionGroup | null => {
+  if (!group || typeof group !== "object") {
+    return null;
+  }
+
+  const candidate = group as Partial<QuestionGroup>;
+  if (typeof candidate.id !== "string") {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    title: typeof candidate.title === "string" ? candidate.title : "",
+    instructions:
+      typeof candidate.instructions === "string" && candidate.instructions.trim() ? candidate.instructions : undefined,
+    image: normalizeQuestionImage(candidate.image),
+    audio: normalizeQuestionAudio(candidate.audio)
+  };
+};
+
+const normalizeExam = (exam: Exam): Exam => {
+  const questionGroups = (Array.isArray(exam.questionGroups) ? exam.questionGroups : [])
+    .map(normalizeQuestionGroup)
+    .filter((group): group is QuestionGroup => group !== null);
+  const questionGroupIds = new Set(questionGroups.map((group) => group.id));
+
+  return {
+    ...exam,
+    form: exam.form ?? "",
+    questionGroups,
+    questions: exam.questions.map((question) => ({
+      ...question,
+      groupId: question.groupId && questionGroupIds.has(question.groupId) ? question.groupId : undefined,
+      image: normalizeQuestionImage(question.image),
+      audio: normalizeQuestionAudio(question.audio)
+    }))
+  };
+};
 
 const normalizeStudentLmsBinding = (binding: StudentLmsBinding | null | undefined): StudentLmsBinding => ({
   ...defaultStudentLmsBinding(),

@@ -45,6 +45,11 @@ import type {
   LmsProviderType,
   PackageUrlRule,
   Question,
+  QuestionAudioAsset,
+  QuestionAudioMimeType,
+  QuestionGroup,
+  QuestionImageAsset,
+  QuestionImageMimeType,
   ResultDestination,
   ResultDestinationType,
   ResultSyncAuthMode,
@@ -85,6 +90,20 @@ const hostedExamUserAgent =
 const minExamZoom = 0.75;
 const maxExamZoom = 1.75;
 const examZoomStep = 0.1;
+const maxQuestionImageBytes = 5 * 1024 * 1024;
+const maxQuestionAudioBytes = 20 * 1024 * 1024;
+const supportedQuestionImageTypes = new Set<QuestionImageMimeType>(["image/png", "image/jpeg", "image/webp"]);
+const supportedQuestionAudioTypes = new Set<QuestionAudioMimeType>([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/webm"
+]);
 
 const clampExamZoom = (value: number) =>
   Math.min(maxExamZoom, Math.max(minExamZoom, Math.round(value * 100) / 100));
@@ -109,6 +128,71 @@ const blankAppearance = (): ExamAppearance => ({
   density: "comfortable"
 });
 
+const readFileAsDataUrl = (file: File, mimeType: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Unable to read this media file."));
+    reader.onerror = () => reject(new Error("Unable to read this media file."));
+    reader.readAsDataURL(file.type === mimeType ? file : new Blob([file], { type: mimeType }));
+  });
+
+const readQuestionImage = async (file: File): Promise<QuestionImageAsset> => {
+  if (!supportedQuestionImageTypes.has(file.type as QuestionImageMimeType)) {
+    throw new Error("Use a PNG, JPEG, or WebP image.");
+  }
+
+  if (file.size > maxQuestionImageBytes) {
+    throw new Error("Images must be 5 MB or smaller.");
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    fileName: file.name,
+    mimeType: file.type as QuestionImageMimeType,
+    dataUrl: await readFileAsDataUrl(file, file.type),
+    altText: ""
+  };
+};
+
+const resolveQuestionAudioMimeType = (file: File): QuestionAudioMimeType | null => {
+  if (supportedQuestionAudioTypes.has(file.type as QuestionAudioMimeType)) {
+    return file.type as QuestionAudioMimeType;
+  }
+
+  const extension = file.name.toLowerCase().split(".").pop();
+  const extensionTypes: Record<string, QuestionAudioMimeType> = {
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    oga: "audio/ogg",
+    m4a: "audio/mp4",
+    mp4: "audio/mp4",
+    aac: "audio/aac",
+    webm: "audio/webm"
+  };
+  return extension ? extensionTypes[extension] ?? null : null;
+};
+
+const readQuestionAudio = async (file: File): Promise<QuestionAudioAsset> => {
+  const mimeType = resolveQuestionAudioMimeType(file);
+  if (!mimeType) {
+    throw new Error("Use an MP3, WAV, OGG, M4A, AAC, MP4, or WebM audio file.");
+  }
+
+  if (file.size > maxQuestionAudioBytes) {
+    throw new Error("Audio files must be 20 MB or smaller.");
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    fileName: file.name,
+    mimeType,
+    dataUrl: await readFileAsDataUrl(file, mimeType),
+    title: file.name.replace(/\.[^.]+$/, "")
+  };
+};
+
 const blankExam = (mode: Exam["mode"] = "app"): Exam => {
   const now = new Date().toISOString();
 
@@ -127,6 +211,7 @@ const blankExam = (mode: Exam["mode"] = "app"): Exam => {
     },
     appearance: blankAppearance(),
     questions: [],
+    questionGroups: [],
     linkConfig: mode === "link" ? { url: "", allowedDomains: [] } : undefined,
     createdAt: now,
     updatedAt: now
@@ -1870,25 +1955,76 @@ const QuestionBuilder = ({
   setDraft: Dispatch<SetStateAction<Exam>>;
 }) => {
   const addQuestion = () => setDraft((current) => ({ ...current, questions: [...current.questions, blankQuestion()] }));
+  const groups = draft.questionGroups ?? [];
+  const addQuestionGroup = () =>
+    setDraft((current) => ({
+      ...current,
+      questionGroups: [
+        ...(current.questionGroups ?? []),
+        {
+          id: crypto.randomUUID(),
+          title: `Shared passage ${(current.questionGroups?.length ?? 0) + 1}`
+        }
+      ]
+    }));
 
   return (
     <Card className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <CardTitle>Question builder</CardTitle>
-          <CardDescription>Formatting helpers insert safe HTML tags or display math blocks using `$$...$$`.</CardDescription>
+          <CardDescription>
+            Add images or audio to one question, or create a shared passage for a group of questions.
+          </CardDescription>
         </div>
-        <Button onClick={addQuestion}>
-          <Plus className="size-4" />
-          Add question
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={addQuestionGroup}>
+            <FileInput className="size-4" />
+            Add shared passage
+          </Button>
+          <Button onClick={addQuestion}>
+            <Plus className="size-4" />
+            Add question
+          </Button>
+        </div>
       </div>
+
+      {groups.length > 0 ? (
+        <div className="space-y-3">
+          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Shared passages</div>
+          {groups.map((group) => (
+            <QuestionGroupEditor
+              key={group.id}
+              group={group}
+              questionCount={draft.questions.filter((question) => question.groupId === group.id).length}
+              onChange={(nextGroup) =>
+                setDraft((current) => ({
+                  ...current,
+                  questionGroups: (current.questionGroups ?? []).map((candidate) =>
+                    candidate.id === group.id ? nextGroup : candidate
+                  )
+                }))
+              }
+              onDelete={() =>
+                setDraft((current) => ({
+                  ...current,
+                  questionGroups: (current.questionGroups ?? []).filter((candidate) => candidate.id !== group.id),
+                  questions: current.questions.map((question) =>
+                    question.groupId === group.id ? { ...question, groupId: undefined } : question
+                  )
+                }))
+              }
+            />
+          ))}
+        </div>
+      ) : null}
 
       <div className="space-y-4">
         {draft.questions.map((question, index) => (
           <QuestionEditor
             key={question.id}
             question={question}
+            groups={groups}
             index={index}
             total={draft.questions.length}
             onChange={(nextQuestion) =>
@@ -1937,6 +2073,8 @@ const QuestionBuilder = ({
                 const duplicated = {
                   ...question,
                   id: crypto.randomUUID(),
+                  image: question.image ? { ...question.image, id: crypto.randomUUID() } : undefined,
+                  audio: question.audio ? { ...question.audio, id: crypto.randomUUID() } : undefined,
                   options: nextOptions,
                   correctOptionId: nextOptions.find((option) => option.label === correctLabel)?.id ?? firstNextOption.id
                 };
@@ -1960,6 +2098,7 @@ const QuestionBuilder = ({
 
 const QuestionEditor = ({
   question,
+  groups,
   index,
   total,
   onChange,
@@ -1968,6 +2107,7 @@ const QuestionEditor = ({
   onDuplicate
 }: {
   question: Question;
+  groups: QuestionGroup[];
   index: number;
   total: number;
   onChange: (nextQuestion: Question) => void;
@@ -2030,12 +2170,38 @@ const QuestionEditor = ({
       </div>
 
       <div className="space-y-4">
+        <LabelledField label="Shared passage">
+          <select
+            className={selectClassName}
+            value={question.groupId ?? ""}
+            onChange={(event) => onChange({ ...question, groupId: event.target.value || undefined })}
+          >
+            <option value="">No shared passage</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.title || "Untitled shared passage"}
+              </option>
+            ))}
+          </select>
+        </LabelledField>
         <Textarea
           ref={textareaRef}
           value={question.prompt}
           onChange={(event) => onChange({ ...question, prompt: event.target.value })}
           placeholder="Write the prompt. Use HTML tags for formatting and $$...$$ for equations."
         />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <QuestionImageEditor
+            label="Image for this question"
+            image={question.image}
+            onChange={(image) => onChange({ ...question, image })}
+          />
+          <QuestionAudioEditor
+            label="Audio for this question"
+            audio={question.audio}
+            onChange={(audio) => onChange({ ...question, audio })}
+          />
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
           {question.options.map((option) => (
             <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
@@ -2066,6 +2232,185 @@ const QuestionEditor = ({
     </div>
   );
 };
+
+const QuestionGroupEditor = ({
+  group,
+  questionCount,
+  onChange,
+  onDelete
+}: {
+  group: QuestionGroup;
+  questionCount: number;
+  onChange: (group: QuestionGroup) => void;
+  onDelete: () => void;
+}) => (
+  <div className="space-y-4 rounded-[26px] border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/40">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div className="font-semibold text-blue-950 dark:text-blue-50">{group.title || "Untitled shared passage"}</div>
+        <div className="text-sm text-blue-800 dark:text-blue-200">
+          Used by {questionCount} question{questionCount === 1 ? "" : "s"}
+        </div>
+      </div>
+      <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" onClick={onDelete}>
+        Delete passage
+      </Button>
+    </div>
+    <div className="grid gap-4 md:grid-cols-2">
+      <LabelledField label="Passage title">
+        <Input value={group.title} onChange={(event) => onChange({ ...group, title: event.target.value })} />
+      </LabelledField>
+      <LabelledField label="Instructions">
+        <Input
+          value={group.instructions ?? ""}
+          placeholder="For example: Listen to the passage, then answer questions 1-4."
+          onChange={(event) => onChange({ ...group, instructions: event.target.value || undefined })}
+        />
+      </LabelledField>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <QuestionImageEditor
+        label="Shared image"
+        image={group.image}
+        onChange={(image) => onChange({ ...group, image })}
+      />
+      <QuestionAudioEditor
+        label="Shared audio passage"
+        audio={group.audio}
+        onChange={(audio) => onChange({ ...group, audio })}
+      />
+    </div>
+  </div>
+);
+
+const QuestionImageEditor = ({
+  label,
+  image,
+  onChange
+}: {
+  label: string;
+  image?: QuestionImageAsset;
+  onChange: (image?: QuestionImageAsset) => void;
+}) => {
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</div>
+      <input
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-white dark:text-slate-200 dark:file:bg-slate-100 dark:file:text-slate-900"
+        onChange={(event) => {
+          const input = event.currentTarget;
+          const file = input.files?.[0];
+          input.value = "";
+          if (!file) {
+            return;
+          }
+          setError(null);
+          void readQuestionImage(file)
+            .then(onChange)
+            .catch((candidate) => setError(candidate instanceof Error ? candidate.message : "Unable to read this image."));
+        }}
+      />
+      <div className="text-xs text-slate-600 dark:text-slate-300">PNG, JPEG, or WebP. Maximum 5 MB.</div>
+      {error ? <div className="text-sm text-rose-700 dark:text-rose-300">{error}</div> : null}
+      {image ? (
+        <div className="space-y-3">
+          <img
+            src={image.dataUrl}
+            alt={image.altText || ""}
+            className="max-h-64 w-full rounded-xl border border-slate-200 object-contain dark:border-slate-700"
+          />
+          <LabelledField label="Alternative text">
+            <Input
+              value={image.altText}
+              placeholder="Describe the image for learners using assistive technology."
+              onChange={(event) => onChange({ ...image, altText: event.target.value })}
+            />
+          </LabelledField>
+          <LabelledField label="Caption (optional)">
+            <Input
+              value={image.caption ?? ""}
+              onChange={(event) => onChange({ ...image, caption: event.target.value || undefined })}
+            />
+          </LabelledField>
+          <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" onClick={() => onChange(undefined)}>
+            Remove image
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const QuestionAudioEditor = ({
+  label,
+  audio,
+  onChange
+}: {
+  label: string;
+  audio?: QuestionAudioAsset;
+  onChange: (audio?: QuestionAudioAsset) => void;
+}) => {
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</div>
+      <input
+        type="file"
+        accept=".mp3,.wav,.ogg,.oga,.m4a,.mp4,.aac,.webm,audio/*"
+        className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-white dark:text-slate-200 dark:file:bg-slate-100 dark:file:text-slate-900"
+        onChange={(event) => {
+          const input = event.currentTarget;
+          const file = input.files?.[0];
+          input.value = "";
+          if (!file) {
+            return;
+          }
+          setError(null);
+          void readQuestionAudio(file)
+            .then(onChange)
+            .catch((candidate) => setError(candidate instanceof Error ? candidate.message : "Unable to read this audio."));
+        }}
+      />
+      <div className="text-xs text-slate-600 dark:text-slate-300">
+        MP3, WAV, OGG, M4A, AAC, MP4, or WebM. Maximum 20 MB.
+      </div>
+      {error ? <div className="text-sm text-rose-700 dark:text-rose-300">{error}</div> : null}
+      {audio ? (
+        <div className="space-y-3">
+          <audio controls preload="metadata" src={audio.dataUrl} className="w-full" />
+          <LabelledField label="Audio title">
+            <Input value={audio.title} onChange={(event) => onChange({ ...audio, title: event.target.value })} />
+          </LabelledField>
+          <LabelledField label="Maximum plays (optional)">
+            <Input
+              type="number"
+              min={1}
+              max={99}
+              value={audio.maxPlays ?? ""}
+              placeholder="Blank means unlimited"
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                onChange({
+                  ...audio,
+                  maxPlays: event.target.value && Number.isFinite(value) ? Math.max(1, Math.min(99, Math.floor(value))) : undefined
+                });
+              }}
+            />
+          </LabelledField>
+          <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" onClick={() => onChange(undefined)}>
+            Remove audio
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const ImportPage = () => {
   const navigate = useNavigate();
   const { snapshot, activeImport, importQuestions, exportQuestionTemplate, saveExam } = useLockedscreenStore();
@@ -2156,7 +2501,8 @@ const ImportPage = () => {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Import questions</h1>
         <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
-          Upload `.doc`, `.docx`, `.pdf`, `.txt`, or scanned image exam papers, review the extracted heading and metadata, then select the correct option for each question before saving.
+          Upload Word, PDF, OpenDocument, presentation, spreadsheet, text, HTML, or scanned image exam papers,
+          then review the extracted questions before saving.
         </p>
       </div>
 
@@ -6593,6 +6939,74 @@ const StudentLmsTurnInPanel = ({
   );
 };
 
+const StudentQuestionImage = ({ image }: { image: QuestionImageAsset }) => (
+  <figure className="space-y-2">
+    <img
+      src={image.dataUrl}
+      alt={image.altText}
+      className="max-h-[34rem] w-full rounded-2xl border border-slate-200 bg-white object-contain dark:border-slate-700 dark:bg-slate-950"
+    />
+    {image.caption ? (
+      <figcaption className="text-sm text-slate-700 dark:text-slate-300">{image.caption}</figcaption>
+    ) : null}
+  </figure>
+);
+
+const StudentQuestionAudio = ({
+  audio,
+  playCount,
+  onPlayStarted
+}: {
+  audio: QuestionAudioAsset;
+  playCount: number;
+  onPlayStarted: () => void;
+}) => {
+  const countedCurrentPlayback = useRef(false);
+  const limitReached = typeof audio.maxPlays === "number" && playCount >= audio.maxPlays;
+  const remaining = typeof audio.maxPlays === "number" ? Math.max(0, audio.maxPlays - playCount) : null;
+
+  useEffect(() => {
+    countedCurrentPlayback.current = false;
+  }, [audio.id]);
+
+  return (
+    <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+      <div className="font-semibold text-slate-950 dark:text-slate-50">{audio.title || "Audio passage"}</div>
+      <audio
+        controls
+        controlsList="nodownload noplaybackrate"
+        preload="metadata"
+        src={audio.dataUrl}
+        className="w-full"
+        onPlay={(event) => {
+          if (countedCurrentPlayback.current) {
+            return;
+          }
+          if (limitReached) {
+            event.currentTarget.pause();
+            event.currentTarget.currentTime = 0;
+            return;
+          }
+          countedCurrentPlayback.current = true;
+          onPlayStarted();
+        }}
+        onEnded={() => {
+          countedCurrentPlayback.current = false;
+        }}
+      />
+      {remaining !== null ? (
+        <div className={`text-sm ${remaining === 0 ? "font-semibold text-rose-700 dark:text-rose-300" : "text-slate-700 dark:text-slate-300"}`}>
+          {remaining === 0
+            ? "The listening limit has been reached."
+            : `${remaining} play${remaining === 1 ? "" : "s"} remaining.`}
+        </div>
+      ) : (
+        <div className="text-sm text-slate-700 dark:text-slate-300">Unlimited plays.</div>
+      )}
+    </div>
+  );
+};
+
 const StudentExamPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -6704,6 +7118,21 @@ const StudentExamPage = () => {
 
   const question = exam.questions[currentIndex];
   const response = session.responses.find((entry) => entry.questionId === question?.id);
+  const questionGroup = question?.groupId
+    ? (exam.questionGroups ?? []).find((group) => group.id === question.groupId)
+    : undefined;
+  const recordMediaPlay = (mediaId: string) =>
+    setSession((current) =>
+      current
+        ? {
+            ...current,
+            mediaPlayCounts: {
+              ...(current.mediaPlayCounts ?? {}),
+              [mediaId]: (current.mediaPlayCounts?.[mediaId] ?? 0) + 1
+            }
+          }
+        : current
+    );
 
   return (
     <StudentShell
@@ -6776,6 +7205,30 @@ const StudentExamPage = () => {
           </Card>
 
           <Card className="space-y-4 p-4 sm:p-5">
+            {questionGroup ? (
+              <div className="space-y-4 rounded-[24px] border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/40">
+                <div>
+                  <div className="font-semibold text-blue-950 dark:text-blue-50">
+                    {questionGroup.title || "Shared passage"}
+                  </div>
+                  {questionGroup.instructions ? (
+                    <RichContent
+                      content={questionGroup.instructions}
+                      className="mt-1 text-sm text-blue-900 dark:text-blue-100"
+                    />
+                  ) : null}
+                </div>
+                {questionGroup.image ? <StudentQuestionImage image={questionGroup.image} /> : null}
+                {questionGroup.audio ? (
+                  <StudentQuestionAudio
+                    audio={questionGroup.audio}
+                    playCount={session.mediaPlayCounts?.[questionGroup.audio.id] ?? 0}
+                    onPlayStarted={() => recordMediaPlay(questionGroup.audio!.id)}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <Badge>Question {currentIndex + 1}</Badge>
@@ -6783,6 +7236,15 @@ const StudentExamPage = () => {
               </div>
               <Badge className="bg-slate-900 text-white">{question.points} pt</Badge>
             </div>
+
+            {question.image ? <StudentQuestionImage image={question.image} /> : null}
+            {question.audio ? (
+              <StudentQuestionAudio
+                audio={question.audio}
+                playCount={session.mediaPlayCounts?.[question.audio.id] ?? 0}
+                onPlayStarted={() => recordMediaPlay(question.audio!.id)}
+              />
+            ) : null}
 
             <div className="grid gap-2.5">
               {question.options.map((option) => (

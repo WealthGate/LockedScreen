@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createSession, getRemainingSeconds, scoreSubmission, updateResponse } from "@lockedscreen/exam-engine";
-import type { Candidate, ExamResponse, ExamSession, SubmissionResult } from "@lockedscreen/shared-types";
+import type {
+  Candidate,
+  ExamResponse,
+  ExamSession,
+  QuestionAudioAsset,
+  QuestionImageAsset,
+  SubmissionResult
+} from "@lockedscreen/shared-types";
 
 import { enterMobileExamShell, leaveMobileExamShell } from "./lib/mobileShell";
 import { importPackageFromFile, type ImportedProtectedPackage, verifyExamStartCode } from "./lib/packageCrypto";
@@ -69,6 +76,65 @@ const availableNow = (imported: ImportedProtectedPackage): string | null => {
   return null;
 };
 
+const MobileQuestionImage = ({ image }: { image: QuestionImageAsset }) => (
+  <figure className="question-media">
+    <img src={image.dataUrl} alt={image.altText} />
+    {image.caption ? <figcaption>{image.caption}</figcaption> : null}
+  </figure>
+);
+
+const MobileQuestionAudio = ({
+  audio,
+  playCount,
+  onPlayStarted
+}: {
+  audio: QuestionAudioAsset;
+  playCount: number;
+  onPlayStarted: () => void;
+}) => {
+  const countedCurrentPlayback = useRef(false);
+  const limitReached = typeof audio.maxPlays === "number" && playCount >= audio.maxPlays;
+  const remaining = typeof audio.maxPlays === "number" ? Math.max(0, audio.maxPlays - playCount) : null;
+
+  useEffect(() => {
+    countedCurrentPlayback.current = false;
+  }, [audio.id]);
+
+  return (
+    <div className="question-audio">
+      <strong>{audio.title || "Audio passage"}</strong>
+      <audio
+        controls
+        controlsList="nodownload noplaybackrate"
+        preload="metadata"
+        src={audio.dataUrl}
+        onPlay={(event) => {
+          if (countedCurrentPlayback.current) {
+            return;
+          }
+          if (limitReached) {
+            event.currentTarget.pause();
+            event.currentTarget.currentTime = 0;
+            return;
+          }
+          countedCurrentPlayback.current = true;
+          onPlayStarted();
+        }}
+        onEnded={() => {
+          countedCurrentPlayback.current = false;
+        }}
+      />
+      <small>
+        {remaining === null
+          ? "Unlimited plays."
+          : remaining === 0
+            ? "The listening limit has been reached."
+            : `${remaining} play${remaining === 1 ? "" : "s"} remaining.`}
+      </small>
+    </div>
+  );
+};
+
 const App = () => {
   const [phase, setPhase] = useState<AppPhase>("import");
   const [imported, setImported] = useState<ImportedProtectedPackage | null>(null);
@@ -85,6 +151,18 @@ const App = () => {
   const configPackage = imported?.configPackage ?? null;
   const answeredCount = session?.responses.filter((response) => response.selectedOptionId).length ?? 0;
   const showScore = Boolean(configPackage?.teacherOptions.showScoreAfterSubmit);
+  const recordMediaPlay = (mediaId: string) =>
+    setSession((current) =>
+      current
+        ? {
+            ...current,
+            mediaPlayCounts: {
+              ...(current.mediaPlayCounts ?? {}),
+              [mediaId]: (current.mediaPlayCounts?.[mediaId] ?? 0) + 1
+            }
+          }
+        : current
+    );
 
   const canStart = useMemo(
     () => Boolean(imported && candidateDraft.name.trim() && candidateDraft.candidateId.trim()),
@@ -337,8 +415,27 @@ const App = () => {
 
           {exam.questions.map((question, index) => {
             const response = session.responses.find((entry) => entry.questionId === question.id);
+            const group = question.groupId
+              ? (exam.questionGroups ?? []).find((candidate) => candidate.id === question.groupId)
+              : undefined;
+            const showGroup =
+              group && exam.questions.findIndex((candidate) => candidate.groupId === group.id) === index;
             return (
               <article className="question-card" key={question.id}>
+                {showGroup ? (
+                  <section className="shared-passage">
+                    <h2>{group.title || "Shared passage"}</h2>
+                    {group.instructions ? <p>{group.instructions}</p> : null}
+                    {group.image ? <MobileQuestionImage image={group.image} /> : null}
+                    {group.audio ? (
+                      <MobileQuestionAudio
+                        audio={group.audio}
+                        playCount={session.mediaPlayCounts?.[group.audio.id] ?? 0}
+                        onPlayStarted={() => recordMediaPlay(group.audio!.id)}
+                      />
+                    ) : null}
+                  </section>
+                ) : null}
                 <div className="question-heading">
                   <span>Question {index + 1}</span>
                   <button type="button" className="flag-button" onClick={() => response && toggleFlag(response)}>
@@ -346,6 +443,14 @@ const App = () => {
                   </button>
                 </div>
                 <h2>{question.prompt}</h2>
+                {question.image ? <MobileQuestionImage image={question.image} /> : null}
+                {question.audio ? (
+                  <MobileQuestionAudio
+                    audio={question.audio}
+                    playCount={session.mediaPlayCounts?.[question.audio.id] ?? 0}
+                    onPlayStarted={() => recordMediaPlay(question.audio!.id)}
+                  />
+                ) : null}
                 <div className="options">
                   {question.options.map((option) => (
                     <button

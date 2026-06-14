@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 
 import type {
@@ -23,9 +23,53 @@ const answerLinePattern = /^(?:ans(?:wer)?|correct\s*answer)\s*[:\-]\s*([A-H])\b
 const separatorPattern = /^(?:[_\-=]{3,}|\*{3,})$/;
 const pageNoisePattern = /^(?:page\s+\d+(?:\s+of\s+\d+)?|turn\s+over|continued)$/i;
 const imageFilePattern = /\.(?:png|jpe?g|tiff?|bmp|webp)$/i;
+const plainTextFileExtensions = new Set([".txt", ".text", ".md", ".markdown", ".csv", ".tsv"]);
+const officeParserFileTypes = new Map<string, "docx" | "xlsx" | "pptx" | "odt" | "odp" | "ods" | "rtf" | "html">([
+  [".docm", "docx"],
+  [".xlsx", "xlsx"],
+  [".xlsm", "xlsx"],
+  [".pptx", "pptx"],
+  [".pptm", "pptx"],
+  [".odt", "odt"],
+  [".odp", "odp"],
+  [".ods", "ods"],
+  [".rtf", "rtf"],
+  [".html", "html"],
+  [".htm", "html"]
+]);
 const minimumUsefulTextLength = 20;
 const maxOcrPdfPages = 30;
 const requireFromParser = createRequire(import.meta.url);
+
+export const supportedQuestionImportExtensions = [
+  "txt",
+  "text",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "doc",
+  "docx",
+  "docm",
+  "pdf",
+  "rtf",
+  "odt",
+  "pptx",
+  "pptm",
+  "xlsx",
+  "xlsm",
+  "odp",
+  "ods",
+  "html",
+  "htm",
+  "png",
+  "jpg",
+  "jpeg",
+  "tif",
+  "tiff",
+  "bmp",
+  "webp"
+] as const;
 
 const loadCanvas = async (): Promise<typeof import("@napi-rs/canvas")> => {
   try {
@@ -74,6 +118,23 @@ const escapePowerShellLiteral = (value: string): string => value.replace(/'/g, "
 
 const hasUsefulText = (text: string): boolean => text.replace(/\s/g, "").length >= minimumUsefulTextLength;
 
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const isPasswordProtectedPdfError = (error: unknown): boolean =>
+  (error instanceof Error && error.name === "PasswordException") || /password/i.test(errorMessage(error));
+
+const pdfImportError = (error: unknown): Error => {
+  if (isPasswordProtectedPdfError(error)) {
+    return new Error("This PDF is password-protected. Remove the password and import the unlocked PDF.");
+  }
+
+  return new Error(
+    `Unable to read this PDF. It may be damaged or use an unsupported encoding. Re-save it as a new PDF, DOCX, or TXT file and try again. PDF error: ${errorMessage(
+      error
+    )}`
+  );
+};
+
 const createOcrWorker = async () => {
   const tesseract = await import("tesseract.js");
   const worker = await tesseract.createWorker("eng", undefined, {
@@ -96,6 +157,58 @@ const ocrImageBuffer = async (input: Buffer): Promise<string> => {
     return result.data.text;
   } finally {
     await worker.terminate();
+  }
+};
+
+const extractPdfText = async (input: Buffer): Promise<string> => {
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = getDocument({
+    data: new Uint8Array(input),
+    disableWorker: true,
+    isEvalSupported: false,
+    isOffscreenCanvasSupported: false,
+    useSystemFonts: true
+  } as unknown as Parameters<typeof getDocument>[0]);
+  const pdf = await loadingTask.promise;
+
+  try {
+    const pageTexts: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      let pageText = "";
+      let lastY: number | undefined;
+
+      for (const item of content.items) {
+        if (!("str" in item) || !item.str) {
+          continue;
+        }
+
+        const y = item.transform[5];
+        const startsNewLine = lastY !== undefined && Math.abs(y - lastY) > 1;
+        if (pageText && startsNewLine && !pageText.endsWith("\n")) {
+          pageText += "\n";
+        } else if (pageText && !pageText.endsWith("\n") && !pageText.endsWith(" ")) {
+          pageText += " ";
+        }
+
+        pageText += item.str;
+        if (item.hasEOL) {
+          pageText += "\n";
+          lastY = undefined;
+        } else {
+          lastY = y;
+        }
+      }
+
+      pageTexts.push(pageText.trim());
+      page.cleanup();
+    }
+
+    return pageTexts.join("\n\n");
+  } finally {
+    await pdf.destroy();
   }
 };
 
@@ -476,8 +589,9 @@ export const parseStructuredQuestions = (text: string): ImportPreview => parseEx
 
 export const extractExamDocumentText = async (fileName: string, input: Buffer): Promise<ExtractedDocumentText> => {
   const lower = fileName.toLowerCase();
+  const extension = extname(lower);
 
-  if (lower.endsWith(".txt")) {
+  if (plainTextFileExtensions.has(extension)) {
     return {
       text: input.toString("utf-8"),
       extraction: { method: "text", usedOcr: false }
@@ -501,24 +615,61 @@ export const extractExamDocumentText = async (fileName: string, input: Buffer): 
   }
 
   if (lower.endsWith(".pdf")) {
-    const pdfParse = (await import("pdf-parse")).default;
-    const result = await pdfParse(input);
-    if (hasUsefulText(result.text)) {
+    let typedText = "";
+    try {
+      typedText = await extractPdfText(input);
+    } catch (error) {
+      throw pdfImportError(error);
+    }
+
+    if (hasUsefulText(typedText)) {
       return {
-        text: result.text,
+        text: typedText,
         extraction: { method: "pdf-text", usedOcr: false }
       };
     }
 
-    const ocrResult = await ocrPdfBuffer(input);
-    if (hasUsefulText(ocrResult.text)) {
-      return ocrResult;
+    try {
+      const ocrResult = await ocrPdfBuffer(input);
+      if (hasUsefulText(ocrResult.text)) {
+        return ocrResult;
+      }
+    } catch (error) {
+      throw new Error(
+        `This PDF does not contain readable typed text, and OCR could not process its scanned pages. Try a clearer scan or export it as DOCX/TXT. OCR error: ${errorMessage(
+          error
+        )}`
+      );
     }
 
-    return {
-      text: result.text,
-      extraction: { method: "pdf-text", usedOcr: false }
-    };
+    throw new Error("No readable questions were found in this PDF. Try a clearer scan or export it as DOCX or TXT.");
+  }
+
+  const officeFileType = officeParserFileTypes.get(extension);
+  if (officeFileType) {
+    try {
+      const { parseOffice } = await import("officeparser");
+      const document = await parseOffice(input, {
+        fileType: officeFileType,
+        extractAttachments: false,
+        ignoreComments: true,
+        ignoreHeadersAndFooters: false,
+        ignoreNotes: true,
+        ignoreSlideMasters: true,
+        newlineDelimiter: "\n",
+        ocr: false
+      });
+      return {
+        text: document.toText(),
+        extraction: { method: "office", usedOcr: false }
+      };
+    } catch (error) {
+      throw new Error(
+        `Unable to read this ${extension || "document"} file. Re-save it as DOCX, PDF, or TXT and try again. Document error: ${errorMessage(
+          error
+        )}`
+      );
+    }
   }
 
   if (imageFilePattern.test(lower)) {
@@ -528,7 +679,9 @@ export const extractExamDocumentText = async (fileName: string, input: Buffer): 
     };
   }
 
-  throw new Error("Unsupported file type. Use TXT, DOC, DOCX, PDF, PNG, JPG, TIFF, BMP, or WEBP.");
+  throw new Error(
+    "Unsupported file type. Use TXT, Markdown, CSV, DOC, DOCX, PDF, RTF, ODT, PPTX, XLSX, HTML, or a supported image."
+  );
 };
 
 const withTempLegacyDocument = async (extension: ".doc", input: Buffer, operation: (filePath: string) => Promise<string>) => {
