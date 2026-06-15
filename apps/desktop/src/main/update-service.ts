@@ -10,7 +10,7 @@ const { autoUpdater } = updater;
 
 const updateCacheFilePattern = /lockedscreen.*\.(exe|blockmap|yml)$/i;
 const startupUpdateCheckDelayMs = 15000;
-const periodicUpdateCheckIntervalMs = 4 * 60 * 60 * 1000;
+const periodicUpdateCheckIntervalMs = 30 * 60 * 1000;
 const updateInstallHandoffDelayMs = 4000;
 const pendingUpdateMarkerName = "pending-update-install.json";
 
@@ -174,7 +174,7 @@ export const configureAppUpdates = (
       releaseName: info.releaseName ?? undefined,
       releaseDate: info.releaseDate,
       percent: undefined,
-      message: `Lockedscreen ${info.version} is available.`
+      message: `Lockedscreen ${info.version} is available. Download it when convenient; you choose when to install.`
     });
     showUpdateNotification(window, "Lockedscreen update available", `Version ${info.version} is ready to download.`);
   });

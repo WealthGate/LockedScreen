@@ -923,6 +923,8 @@ const blankResultDestinationWithDefaults = (settings?: AppSettings | null): Resu
   bridgeEndpointUrl: settings?.defaultGoogleSheetsSyncEndpoint?.trim() ?? ""
 });
 
+const updateReminderSnoozeMs = 30 * 60 * 1000;
+
 const lmsAccountOptionLabel = (connection: LmsConnection): string => {
   const accountName = connection.accountName?.trim();
   const accountEmail = connection.accountEmail?.trim();
@@ -945,7 +947,6 @@ const AppFrame = () => {
     location.pathname.startsWith("/session/") ||
     location.pathname.startsWith("/link/") ||
     location.pathname.startsWith("/package-import");
-  const canShowUpdates = !location.pathname.startsWith("/session/") && !location.pathname.startsWith("/link/");
 
   useEffect(() => {
     void load();
@@ -978,7 +979,7 @@ const AppFrame = () => {
 
   return (
     <div className={`min-h-screen text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-4 sm:p-6"}`}>
-      {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
+      {updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
         <Routes>
           <Route path="/" element={<StudentPortalPage />} />
@@ -6798,7 +6799,9 @@ const SetupGuideModal = ({ guide, onClose }: { guide: SetupGuide; onClose: () =>
 );
 
 const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
-  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
+  const [snoozedPrompt, setSnoozedPrompt] = useState<{ key: string; until: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const promptKey = `${state.status}:${state.availableVersion ?? state.message ?? ""}`;
   const visible =
     state.status === "available" ||
     state.status === "downloading" ||
@@ -6806,8 +6809,14 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
     state.status === "installing" ||
     state.status === "installed" ||
     state.status === "error";
+  const snoozed = snoozedPrompt?.key === promptKey && now < snoozedPrompt.until;
 
-  if (!visible || dismissedVersion === `${state.status}:${state.availableVersion ?? state.message ?? ""}`) {
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (!visible || snoozed) {
     return null;
   }
 
@@ -6867,9 +6876,16 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
           {state.status !== "installing" ? (
             <Button
               variant="secondary"
-              onClick={() => setDismissedVersion(`${state.status}:${state.availableVersion ?? state.message ?? ""}`)}
+              onClick={() => {
+                const dismissedAt = Date.now();
+                setNow(dismissedAt);
+                setSnoozedPrompt({
+                  key: promptKey,
+                  until: state.status === "installed" ? Number.POSITIVE_INFINITY : dismissedAt + updateReminderSnoozeMs
+                });
+              }}
             >
-              {state.status === "installed" ? "Dismiss" : "Later"}
+              {state.status === "installed" ? "Dismiss" : "Remind later"}
             </Button>
           ) : null}
         </div>
