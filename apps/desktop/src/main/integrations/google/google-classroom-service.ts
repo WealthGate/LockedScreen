@@ -15,7 +15,8 @@ export interface GoogleClassroomApi {
       title: string;
       description: string;
       fileName: string;
-      packageJson: string;
+      initialPackageJson: string;
+      buildFinalPackageJson: (courseWork: LmsCourseWork) => string;
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult>;
@@ -239,7 +240,8 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       title: string;
       description: string;
       fileName: string;
-      packageJson: string;
+      initialPackageJson: string;
+      buildFinalPackageJson: (courseWork: LmsCourseWork) => string;
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult> {
@@ -264,7 +266,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       `--${boundary}`,
       `Content-Type: ${lockedscreenPackageMimeType}`,
       "",
-      request.packageJson,
+      request.initialPackageJson,
       `--${boundary}--`,
       ""
     ].join("\r\n");
@@ -301,7 +303,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       title: request.title,
       description: request.description,
       workType: "ASSIGNMENT",
-      state: "PUBLISHED",
+      state: "DRAFT",
       materials: [
         {
           driveFile: {
@@ -330,13 +332,57 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       }
     );
     try {
-      const courseWork = await readClassroomJson<Record<string, unknown>>(
+      const draftCourseWork = await readClassroomJson<Record<string, unknown>>(
         courseWorkResponse,
         "Google Classroom could not post the Lockedscreen package to the selected class."
       );
+      const parsedDraftCourseWork = parseCourseWork(draftCourseWork, normalizedCourseId);
+      if (!parsedDraftCourseWork.id) {
+        throw new Error("Google Classroom did not return an assignment id for the posted package.");
+      }
+
+      const finalPackageJson = request.buildFinalPackageJson(parsedDraftCourseWork);
+      const updateFileResponse = await fetch(
+        `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files/${encodeURIComponent(driveFileId)}?uploadType=media&fields=id,name,webViewLink,webContentLink,mimeType`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": lockedscreenPackageMimeType
+          },
+          body: finalPackageJson
+        }
+      );
+      try {
+        await readClassroomJson<Record<string, unknown>>(
+          updateFileResponse,
+          "Google Drive could not finalize the Lockedscreen package with its Classroom assignment reference."
+        );
+      } catch (error) {
+        if ((error as ClassroomRequestError).status === 403) {
+          throw classroomPublishPermissionError();
+        }
+        throw error;
+      }
+
+      const publishResponse = await fetch(
+        `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork/${encodeURIComponent(parsedDraftCourseWork.id)}?updateMask=state`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ state: "PUBLISHED" })
+        }
+      );
+      const publishedCourseWork = await readClassroomJson<Record<string, unknown>>(
+        publishResponse,
+        "Google Classroom created the assignment draft but could not publish it after finalizing the package."
+      );
 
       return {
-        courseWork: parseCourseWork(courseWork, normalizedCourseId),
+        courseWork: parseCourseWork(publishedCourseWork, normalizedCourseId),
         driveFileId,
         driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
         driveFileLink:

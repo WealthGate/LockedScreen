@@ -13,6 +13,7 @@ import type {
   StudentLmsTurnInState,
   SubmissionResult
 } from "@lockedscreen/shared-types";
+import { recoverGoogleAssignmentBinding } from "./student-lms-binding";
 
 interface StudentOAuthTokens {
   accessToken: string;
@@ -766,18 +767,24 @@ export const turnInSubmissionToLms = async (
   submission: SubmissionResult,
   options: TurnInOptions = {}
 ): Promise<StudentLmsTurnInState> => {
-  const binding = configPackage.studentLmsBinding;
+  let binding = configPackage.studentLmsBinding;
   if (!binding.enabled) {
     throw new Error("Student LMS turn-in is not enabled for this package.");
   }
 
-  if (!binding.courseId.trim() || !binding.assignmentId.trim()) {
-    throw new Error("This package is missing the LMS course or assignment reference.");
+  if (!binding.courseId.trim()) {
+    throw new Error("This package is missing the LMS class reference.");
   }
 
   const allowedEmailDomains = normalizeEmailDomains(configPackage.studentAccessPolicy.allowedEmailDomains);
   const tokens = await signInStudent(binding, parentWindow, allowedEmailDomains);
   assertStudentEmailDomainAllowed(configPackage, tokens.profileEmail);
+  if (!binding.assignmentId.trim()) {
+    if (binding.provider !== "google-classroom") {
+      throw new Error("This package is missing the LMS assignment reference.");
+    }
+    binding = await recoverGoogleAssignmentBinding(configPackage, exam, tokens.accessToken);
+  }
   const artifact = buildSubmissionArtifact(exam, submission);
 
   if (binding.provider === "google-classroom") {

@@ -544,7 +544,8 @@ export const publishConnectionCourseWork = async (
     title: string;
     description: string;
     fileName: string;
-    packageJson: string;
+    initialPackageJson: string;
+    buildFinalPackageJson: (courseWork: LmsCourseWork) => string;
     maxPoints?: number;
   },
   vault: OAuthVault,

@@ -1029,6 +1029,7 @@ app.whenReady().then(async () => {
     const safePackageLabel = configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package";
     const fileName = `${safePackageLabel}.lscp`;
     const totalPoints = exam.questions.reduce((sum, question) => sum + question.points, 0);
+    let boundExportPackage: ExamConfigPackage | null = null;
     const published = await publishConnectionCourseWork(
       connection,
       {
@@ -1041,7 +1042,23 @@ app.whenReady().then(async () => {
           configPackage.description.trim()
         ].filter(Boolean).join("\n\n"),
         fileName,
-        packageJson: JSON.stringify(protectedFile, null, 2),
+        initialPackageJson: JSON.stringify(protectedFile, null, 2),
+        buildFinalPackageJson: (courseWork) => {
+          boundExportPackage = {
+            ...exportPackage,
+            studentLmsBinding: {
+              ...exportPackage.studentLmsBinding,
+              assignmentId: courseWork.id,
+              assignmentLabel: courseWork.title
+            },
+            updatedAt: new Date().toISOString()
+          };
+          return JSON.stringify(
+            protectConfigPackage(boundExportPackage, automaticPackagePassword, exam),
+            null,
+            2
+          );
+        },
         maxPoints: totalPoints > 0 ? totalPoints : undefined
       },
       oauthVault,
@@ -1050,7 +1067,7 @@ app.whenReady().then(async () => {
 
     const nextPackage: ExamConfigPackage = {
       ...configPackage,
-      studentAccessPolicy: exportPackage.studentAccessPolicy,
+      studentAccessPolicy: (boundExportPackage ?? exportPackage).studentAccessPolicy,
       studentLmsBinding: {
         ...binding,
         assignmentId: published.courseWork.id,
