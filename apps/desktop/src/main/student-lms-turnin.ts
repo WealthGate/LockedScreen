@@ -15,6 +15,7 @@ import type {
 } from "@lockedscreen/shared-types";
 
 import { buildGoogleClassroomStudentSubmissionActionUrl } from "./student-lms-url";
+import { syncGoogleClassroomGrade } from "./google-classroom-grade-sync";
 import { recoverGoogleAssignmentBinding } from "./student-lms-binding";
 
 interface StudentOAuthTokens {
@@ -497,94 +498,12 @@ const uploadGoogleArtifact = async (accessToken: string, artifact: SubmissionArt
   };
 };
 
-const readGoogleCourseWorkMaxPoints = async (
-  binding: StudentLmsBinding,
-  teacherAccessToken: string
-): Promise<number | null> => {
-  const response = await fetch(
-    `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}`,
-    {
-      headers: { Authorization: `Bearer ${teacherAccessToken}` }
-    }
-  );
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    return null;
-  }
-
-  const maxPoints = Number(payload.maxPoints ?? Number.NaN);
-  return Number.isFinite(maxPoints) && maxPoints > 0 ? maxPoints : null;
-};
-
-const googleGradeValue = async (
-  binding: StudentLmsBinding,
-  teacherAccessToken: string,
-  submission: SubmissionResult
-): Promise<number> => {
-  const maxPoints = await readGoogleCourseWorkMaxPoints(binding, teacherAccessToken);
-  const totalPoints = Number(submission.totalPoints);
-  const score = Number(submission.score);
-
-  if (maxPoints && Number.isFinite(totalPoints) && totalPoints > 0) {
-    return Math.round((score / totalPoints) * maxPoints * 100) / 100;
-  }
-
-  return Math.round(score * 100) / 100;
-};
-
-const syncGoogleClassroomGrade = async (
-  binding: StudentLmsBinding,
-  teacherAccessToken: string | undefined,
-  studentSubmissionId: string,
-  submission: SubmissionResult
-): Promise<Pick<StudentLmsTurnInState, "gradeSyncStatus" | "gradeSyncedAt" | "gradeValue" | "gradeSyncError">> => {
-  if (!teacherAccessToken) {
-    return {
-      gradeSyncStatus: "skipped",
-      gradeSyncError:
-        "Grade sync needs the teacher's Google Classroom connection on this device. Student sign-in can turn in work, but students cannot write grades."
-    };
-  }
-
-  try {
-    const gradeValue = await googleGradeValue(binding, teacherAccessToken, submission);
-    await fetchJson<Record<string, unknown>>(
-      `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}/studentSubmissions/${encodeURIComponent(studentSubmissionId)}?updateMask=draftGrade,assignedGrade`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${teacherAccessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          draftGrade: gradeValue,
-          assignedGrade: gradeValue
-        })
-      },
-      "Unable to sync the grade to Google Classroom."
-    );
-
-    return {
-      gradeSyncStatus: "success",
-      gradeSyncedAt: new Date().toISOString(),
-      gradeValue
-    };
-  } catch (error) {
-    return {
-      gradeSyncStatus: "failed",
-      gradeSyncError:
-        error instanceof Error
-          ? error.message
-          : "Google Classroom did not accept the grade update. Reconnect the teacher account and try again."
-    };
-  }
-};
-
 const turnInGoogleClassroom = async (
   binding: StudentLmsBinding,
   accessToken: string,
   artifact: SubmissionArtifact,
   submission: SubmissionResult,
+  studentEmail: string | undefined,
   options: TurnInOptions = {}
 ): Promise<StudentLmsTurnInState> => {
   const baseUrl = `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}`;
@@ -601,7 +520,15 @@ const turnInGoogleClassroom = async (
   }
 
   if (studentSubmission.state === "TURNED_IN" || studentSubmission.state === "RETURNED") {
-    const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission);
+    const gradeSync = await syncGoogleClassroomGrade(
+      binding,
+      {
+        teacherAccessToken: options.teacherAccessToken,
+        studentSubmissionId: studentSubmission.id,
+        studentEmail
+      },
+      submission
+    );
     return {
       provider: "google-classroom",
       status: "success",
@@ -648,7 +575,15 @@ const turnInGoogleClassroom = async (
     "Unable to turn in the Google Classroom submission."
   );
 
-  const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission);
+  const gradeSync = await syncGoogleClassroomGrade(
+    binding,
+    {
+      teacherAccessToken: options.teacherAccessToken,
+      studentSubmissionId: studentSubmission.id,
+      studentEmail
+    },
+    submission
+  );
 
   return {
     provider: "google-classroom",
@@ -792,7 +727,7 @@ export const turnInSubmissionToLms = async (
   const artifact = buildSubmissionArtifact(exam, submission);
 
   if (binding.provider === "google-classroom") {
-    return turnInGoogleClassroom(binding, tokens.accessToken, artifact, submission, options);
+    return turnInGoogleClassroom(binding, tokens.accessToken, artifact, submission, tokens.profileEmail, options);
   }
 
   return turnInMicrosoft365(binding, tokens.accessToken, artifact);
