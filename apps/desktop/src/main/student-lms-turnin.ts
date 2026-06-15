@@ -13,6 +13,8 @@ import type {
   StudentLmsTurnInState,
   SubmissionResult
 } from "@lockedscreen/shared-types";
+
+import { buildGoogleClassroomStudentSubmissionActionUrl } from "./student-lms-url";
 import { recoverGoogleAssignmentBinding } from "./student-lms-binding";
 
 interface StudentOAuthTokens {
@@ -438,7 +440,9 @@ const fetchJson = async <T>(url: string, init: RequestInit, fallbackMessage: str
   const contentType = response.headers.get("content-type") ?? "";
   const payload = contentType.includes("application/json")
     ? ((await response.json()) as Record<string, unknown>)
-    : { message: await response.text() };
+    : {
+        message: contentType.includes("text/html") ? undefined : (await response.text()).trim() || undefined
+      };
   const errorPayload =
     typeof payload.error === "object" && payload.error !== null ? (payload.error as Record<string, unknown>) : undefined;
 
@@ -610,7 +614,7 @@ const turnInGoogleClassroom = async (
 
   const uploadedFile = await uploadGoogleArtifact(accessToken, artifact);
   await fetchJson<Record<string, unknown>>(
-    `${baseUrl}/studentSubmissions/${encodeURIComponent(studentSubmission.id)}/modifyAttachments`,
+    buildGoogleClassroomStudentSubmissionActionUrl(baseUrl, studentSubmission.id, "modifyAttachments"),
     {
       method: "POST",
       headers: {
@@ -632,7 +636,7 @@ const turnInGoogleClassroom = async (
     "Unable to attach the Lockedscreen submission to Google Classroom."
   );
   await fetchJson<Record<string, unknown>>(
-    `${baseUrl}/studentSubmissions/${encodeURIComponent(studentSubmission.id)}:turnIn`,
+    buildGoogleClassroomStudentSubmissionActionUrl(baseUrl, studentSubmission.id, "turnIn"),
     {
       method: "POST",
       headers: {
