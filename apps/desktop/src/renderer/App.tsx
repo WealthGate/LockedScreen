@@ -1005,6 +1005,8 @@ const AppFrame = () => {
           navigationKey={`${launchContext.route}|${launchContext.packageImport?.filePath ?? ""}`}
         />
       ) : null}
+      {updateState?.currentVersion ? <AppVersionBadge version={updateState.currentVersion} /> : null}
+      {updateState?.status === "installing" ? <UpdateInstallOverlay state={updateState} /> : null}
     </div>
   );
 };
@@ -6802,6 +6804,7 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
     state.status === "downloading" ||
     state.status === "downloaded" ||
     state.status === "installing" ||
+    state.status === "installed" ||
     state.status === "error";
 
   if (!visible || dismissedVersion === `${state.status}:${state.availableVersion ?? state.message ?? ""}`) {
@@ -6815,9 +6818,11 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
         ? "Update ready to install"
         : state.status === "installing"
           ? "Installing Lockedscreen update"
-          : state.status === "downloading"
-            ? "Downloading Lockedscreen update"
-            : "Update check needs attention";
+          : state.status === "installed"
+            ? `Lockedscreen ${state.currentVersion} update complete`
+            : state.status === "downloading"
+              ? "Downloading Lockedscreen update"
+              : "Update check needs attention";
   const message =
     state.message ??
     (state.status === "available"
@@ -6864,11 +6869,74 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
               variant="secondary"
               onClick={() => setDismissedVersion(`${state.status}:${state.availableVersion ?? state.message ?? ""}`)}
             >
-              Later
+              {state.status === "installed" ? "Dismiss" : "Later"}
             </Button>
           ) : null}
         </div>
       </div>
+    </div>
+  );
+};
+
+const AppVersionBadge = ({ version }: { version: string }) => (
+  <div className="pointer-events-none fixed bottom-3 right-3 z-30 rounded-full border border-slate-300/80 bg-white/90 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-700 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/90 dark:text-slate-200">
+    LOCKEDSCREEN <span className="ml-1 normal-case tracking-normal text-teal-700 dark:text-teal-300">v{version}</span>
+  </div>
+);
+
+const UpdateInstallOverlay = ({ state }: { state: AppUpdateState }) => {
+  const [secondsRemaining, setSecondsRemaining] = useState(4);
+
+  useEffect(() => {
+    setSecondsRemaining(4);
+    const timer = window.setInterval(() => {
+      setSecondsRemaining((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [state.availableVersion]);
+
+  return (
+    <div
+      role="alertdialog"
+      aria-live="assertive"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-6 backdrop-blur-sm"
+    >
+      <Card className="w-full max-w-xl border-teal-200 bg-white p-7 text-slate-950 shadow-2xl dark:border-teal-800 dark:bg-slate-950 dark:text-slate-50">
+        <div className="flex items-start gap-4">
+          <div className="rounded-2xl bg-teal-100 p-3 text-teal-700 dark:bg-teal-950 dark:text-teal-200">
+            <Loader2 className="size-7 animate-spin" />
+          </div>
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700 dark:text-teal-300">
+                Update in progress
+              </div>
+              <h2 className="mt-1 text-2xl font-semibold">
+                Installing Lockedscreen {state.availableVersion ?? ""}
+              </h2>
+            </div>
+            <p className="text-sm leading-6 text-slate-700 dark:text-slate-200">
+              {secondsRemaining > 0
+                ? `The Windows installer will open in ${secondsRemaining} second${secondsRemaining === 1 ? "" : "s"}.`
+                : "Opening the Windows installer now..."}
+            </p>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+              <div className="flex gap-2">
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-teal-600" />
+                <span>Keep this device switched on and follow the Windows installer steps.</span>
+              </div>
+              <div className="flex gap-2">
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-teal-600" />
+                <span>Lockedscreen will close briefly, finish the update, and reopen automatically.</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Do not start an exam or shut down the computer while this update is being installed.
+            </p>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 };

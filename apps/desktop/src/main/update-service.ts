@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { app, BrowserWindow, ipcMain, Notification } from "electron";
@@ -11,6 +11,8 @@ const { autoUpdater } = updater;
 const updateCacheFilePattern = /lockedscreen.*\.(exe|blockmap|yml)$/i;
 const startupUpdateCheckDelayMs = 15000;
 const periodicUpdateCheckIntervalMs = 4 * 60 * 60 * 1000;
+const updateInstallHandoffDelayMs = 4000;
+const pendingUpdateMarkerName = "pending-update-install.json";
 
 let updateState: AppUpdateState = {
   status: "idle",
@@ -56,6 +58,52 @@ const showUpdateNotification = (window: BrowserWindow | null, title: string, bod
     window.focus();
   });
   notification.show();
+};
+
+const pendingUpdateMarkerPath = (): string => join(app.getPath("userData"), pendingUpdateMarkerName);
+
+const rememberPendingUpdate = async (targetVersion?: string): Promise<void> => {
+  if (!targetVersion) {
+    return;
+  }
+
+  await writeFile(
+    pendingUpdateMarkerPath(),
+    JSON.stringify({
+      targetVersion,
+      requestedAt: new Date().toISOString()
+    }),
+    "utf-8"
+  );
+};
+
+const restoreCompletedUpdate = async (getMainWindow: () => BrowserWindow | null): Promise<void> => {
+  const markerPath = pendingUpdateMarkerPath();
+  const marker = await readFile(markerPath, "utf-8")
+    .then((value) => JSON.parse(value) as { targetVersion?: unknown })
+    .catch(() => null);
+
+  if (!marker) {
+    return;
+  }
+
+  await rm(markerPath, { force: true }).catch(() => undefined);
+  if (typeof marker.targetVersion !== "string" || marker.targetVersion !== app.getVersion()) {
+    return;
+  }
+
+  const window = getMainWindow();
+  setUpdateState(window, {
+    status: "installed",
+    availableVersion: app.getVersion(),
+    percent: 100,
+    message: `Update complete. Lockedscreen ${app.getVersion()} is now installed and ready to use.`
+  });
+  showUpdateNotification(
+    window,
+    "Lockedscreen update complete",
+    `Version ${app.getVersion()} is installed and ready to use.`
+  );
 };
 
 const friendlyUpdateError = (error: unknown): string => {
@@ -107,6 +155,7 @@ export const configureAppUpdates = (
   autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = false;
 
+  void restoreCompletedUpdate(getMainWindow);
   void cleanupOldUpdateFiles();
 
   autoUpdater.on("checking-for-update", () => {
@@ -150,6 +199,7 @@ export const configureAppUpdates = (
 
   autoUpdater.on("update-downloaded", (info) => {
     const window = getMainWindow();
+    window?.setProgressBar(-1);
     setUpdateState(getMainWindow(), {
       status: "downloaded",
       availableVersion: info.version,
@@ -160,6 +210,7 @@ export const configureAppUpdates = (
   });
 
   autoUpdater.on("error", (error) => {
+    getMainWindow()?.setProgressBar(-1);
     updateInstallRequested = false;
     setUpdateState(getMainWindow(), {
       status: "error",
@@ -244,18 +295,34 @@ export const configureAppUpdates = (
     }
 
     updateInstallRequested = true;
+    if (window && !window.isDestroyed()) {
+      if (window.isMinimized()) {
+        window.restore();
+      }
+      window.show();
+      window.focus();
+      window.setProgressBar(2, { mode: "indeterminate" });
+    }
     setUpdateState(window, {
       status: "installing",
       percent: 100,
-      message: "Installing update. Approve the Windows prompt; Lockedscreen will close and reopen automatically."
+      message:
+        "Preparing the Windows installer. Keep this device on, follow the installer steps, and Lockedscreen will reopen when the update finishes."
     });
+    showUpdateNotification(
+      window,
+      "Lockedscreen update is starting",
+      "The Windows installer will open next. Keep the device on; Lockedscreen will reopen after installation."
+    );
 
     try {
+      await rememberPendingUpdate(updateState.availableVersion).catch(() => undefined);
       options.onBeforeInstall?.();
       setTimeout(() => {
         try {
-          autoUpdater.quitAndInstall(true, true);
+          autoUpdater.quitAndInstall(false, true);
         } catch (error) {
+          window?.setProgressBar(-1);
           updateInstallRequested = false;
           setUpdateState(window, {
             status: "error",
@@ -263,8 +330,9 @@ export const configureAppUpdates = (
             message: friendlyUpdateError(error)
           });
         }
-      }, 250);
+      }, updateInstallHandoffDelayMs);
     } catch (error) {
+      window?.setProgressBar(-1);
       updateInstallRequested = false;
       setUpdateState(window, {
         status: "error",
@@ -286,7 +354,8 @@ const checkForUpdatesQuietly = async (): Promise<void> => {
     updateState.status === "checking" ||
     updateState.status === "downloading" ||
     updateState.status === "downloaded" ||
-    updateState.status === "installing"
+    updateState.status === "installing" ||
+    updateState.status === "installed"
   ) {
     return;
   }
