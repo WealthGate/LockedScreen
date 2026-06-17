@@ -155,6 +155,19 @@ const friendlyStudentLmsTurnInError = (error: unknown): string => {
     return "No matching Google Classroom submission was found for this student account. The local exam submission is saved. Confirm the student is enrolled in the selected class and that the package is connected to the correct Classroom assignment.";
   }
 
+  if (
+    lowerMessage.includes("developer console project") ||
+    lowerMessage.includes("developer project") ||
+    lowerMessage.includes("created the corresponding course work") ||
+    lowerMessage.includes("requesting developer")
+  ) {
+    return "Google Classroom will only accept turn-in, attachment, and grade updates for assignments created by this same Lockedscreen Google app. The local exam submission is saved. Repost/export the exam to Classroom from Lockedscreen with the connected teacher account, then have the student retry LMS turn-in.";
+  }
+
+  if (lowerMessage.includes("addattachments") || lowerMessage.includes("modifyattachments")) {
+    return "Google Classroom rejected the result attachment request. The local exam submission is saved. Update Lockedscreen, confirm the Classroom item is an Assignment created from Lockedscreen, then retry LMS turn-in.";
+  }
+
   return message;
 };
 const initialPackageImportPath = getPackageImportArg(process.argv);

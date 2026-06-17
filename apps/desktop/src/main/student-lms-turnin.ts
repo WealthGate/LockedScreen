@@ -16,6 +16,10 @@ import type {
 
 import { buildGoogleClassroomStudentSubmissionActionUrl } from "./student-lms-url";
 import { syncGoogleClassroomGrade } from "./google-classroom-grade-sync";
+import {
+  attachGoogleClassroomSubmissionArtifact,
+  type GoogleClassroomUploadedFile
+} from "./google-classroom-submission-attachments";
 import { recoverGoogleAssignmentBinding } from "./student-lms-binding";
 
 interface StudentOAuthTokens {
@@ -29,12 +33,6 @@ interface SubmissionArtifact {
   fileName: string;
   mimeType: string;
   content: Buffer;
-}
-
-interface GoogleUploadedFile {
-  id: string;
-  name: string;
-  webViewLink?: string;
 }
 
 interface MicrosoftUploadedFile {
@@ -462,7 +460,10 @@ const fetchJson = async <T>(url: string, init: RequestInit, fallbackMessage: str
   return payload as T;
 };
 
-const uploadGoogleArtifact = async (accessToken: string, artifact: SubmissionArtifact): Promise<GoogleUploadedFile> => {
+const uploadGoogleArtifact = async (
+  accessToken: string,
+  artifact: SubmissionArtifact
+): Promise<GoogleClassroomUploadedFile> => {
   const boundary = `lockedscreen-${randomBytes(12).toString("hex")}`;
   const delimiter = `--${boundary}`;
   const metadata = Buffer.from(
@@ -540,27 +541,11 @@ const turnInGoogleClassroom = async (
   }
 
   const uploadedFile = await uploadGoogleArtifact(accessToken, artifact);
-  await fetchJson<Record<string, unknown>>(
-    buildGoogleClassroomStudentSubmissionActionUrl(baseUrl, studentSubmission.id, "modifyAttachments"),
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        addAttachments: [
-          {
-            driveFile: {
-              id: uploadedFile.id,
-              title: uploadedFile.name,
-              alternateLink: uploadedFile.webViewLink
-            }
-          }
-        ]
-      })
-    },
-    "Unable to attach the Lockedscreen submission to Google Classroom."
+  const attachmentWarning = await attachGoogleClassroomSubmissionArtifact(
+    baseUrl,
+    studentSubmission.id,
+    accessToken,
+    uploadedFile
   );
   await fetchJson<Record<string, unknown>>(
     buildGoogleClassroomStudentSubmissionActionUrl(baseUrl, studentSubmission.id, "turnIn"),
@@ -591,6 +576,7 @@ const turnInGoogleClassroom = async (
     lastAttemptAt: new Date().toISOString(),
     submittedAt: new Date().toISOString(),
     externalReference: `${binding.courseId}/${binding.assignmentId}/${studentSubmission.id}`,
+    lastError: attachmentWarning,
     ...gradeSync
   };
 };
