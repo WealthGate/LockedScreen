@@ -6,24 +6,8 @@ LOCKEDSCREEN imports multiple-choice questions from existing exam documents and 
 
 - `.doc`
 - `.docx`
-- `.docm`
 - `.pdf`
 - `.txt`
-- `.text`
-- `.md`
-- `.markdown`
-- `.csv`
-- `.tsv`
-- `.rtf`
-- `.odt`
-- `.pptx`
-- `.pptm`
-- `.xlsx`
-- `.xlsm`
-- `.odp`
-- `.ods`
-- `.html`
-- `.htm`
 - `.png`
 - `.jpg`
 - `.jpeg`
@@ -32,7 +16,7 @@ LOCKEDSCREEN imports multiple-choice questions from existing exam documents and 
 - `.bmp`
 - `.webp`
 
-Legacy `.doc` import is best-effort on Windows and may depend on Microsoft Word being available on the device. If that path fails, convert the file to `.docx` or `.pdf` first. Office, OpenDocument, HTML, Markdown, and spreadsheet files still need to use the question and option labels described below.
+Legacy `.doc` import is best-effort on Windows and may depend on Microsoft Word being available on the device. If that path fails, convert the file to `.docx` or `.pdf` first.
 
 Scanned PDFs and image files are read with OCR. OCR works best when the scan is straight, high contrast, and uses the same question and option labels described below. Teachers should still review OCR imports carefully before saving because poor scan quality can confuse letters, numbers, and option labels.
 
@@ -111,12 +95,14 @@ The parser should reject or flag:
 - Use plain option keys such as `A`, `B`, `C`, `D`.
 - Do not add explanations on the `ANS:` line.
 - Keep question numbering unique in classic format.
-- For math and science content, use plain text or LaTeX-compatible notation that the app can render later.
+- Use `<sup>...</sup>` and `<sub>...</sub>` for simple powers and chemical formulas.
+- Wrap LaTeX math in `\(...\)` for inline expressions or `$$...$$` for display equations.
+- Add images from the app editor after import, or embed a data URL image with `<img src="data:image/png;base64,..." alt="Diagram" />`.
 
 Examples:
 
 ```text
-Q2. Simplify \sqrt{49}.
+Q2. Simplify \(\sqrt{49}\).
 A. 6
 B. 7
 C. 8
@@ -128,13 +114,13 @@ ANS: B
 [QUESTION]
 Which ion is written correctly for sulfate?
 [OPTION]
-A. SO_3^{2-}
+A. \(SO_3^{2-}\)
 [OPTION]
-B. SO_4^{2-}
+B. \(SO_4^{2-}\)
 [OPTION]
-C. SO_4^{-}
+C. \(SO_4^{-}\)
 [OPTION]
-D. S_4O^{2-}
+D. \(S_4O^{2-}\)
 [ANSWER]
 B
 [/QUESTION]
@@ -142,7 +128,7 @@ B
 
 ## Import Workflow
 
-1. Prepare a supported document, text, spreadsheet, presentation, PDF, or image exam file.
+1. Prepare a `.doc`, `.docx`, `.pdf`, `.txt`, or supported image exam file.
 2. Open the teacher dashboard and choose `Import Questions`.
 3. Upload the file.
 4. For scanned PDFs or image files, wait for OCR to finish.
@@ -151,18 +137,6 @@ B
 7. Select the correct option for every question.
 8. Fix any flagged issues in the correction UI.
 9. Save the cleaned question set into a new or existing exam.
-
-## Images And Audio Passages
-
-After importing or creating questions, the question builder can attach:
-
-- one PNG, JPEG, or WebP image to an individual question
-- one audio file to an individual question
-- a shared image and/or audio passage to a group of questions
-
-Supported audio files are MP3, WAV, OGG, M4A, AAC, MP4, and WebM. Images are limited to 5 MB and audio files to 20 MB so exported exam packages remain practical to distribute.
-
-For listening assessments, the teacher can enter an optional maximum number of plays. Leaving the field blank allows unlimited plays. The desktop and mobile learner runtimes track plays across every question that uses the same shared audio passage.
 
 ## Sample Files
 

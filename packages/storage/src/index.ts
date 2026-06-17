@@ -11,12 +11,10 @@ import type {
   Exam,
   ExamConfigPackage,
   ExamSession,
+  ExternalDeliveryMode,
   GoogleIntegrationSettings,
   LmsConnection,
   ProcessPolicy,
-  QuestionAudioAsset,
-  QuestionGroup,
-  QuestionImageAsset,
   ResultDestination,
   SchoolBranding,
   SecurityLogCategory,
@@ -35,26 +33,15 @@ import type {
 
 const defaultGoogleClassroomScopes = [
   "openid",
-  "https://www.googleapis.com/auth/userinfo.email",
-  "https://www.googleapis.com/auth/userinfo.profile",
+  "email",
+  "profile",
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
   "https://www.googleapis.com/auth/classroom.rosters.readonly",
   "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/classroom.coursework.me"
+  "https://www.googleapis.com/auth/spreadsheets"
 ];
-
-const normalizeGoogleScope = (scope: string): string => {
-  const trimmed = scope.trim();
-  if (trimmed === "email") {
-    return "https://www.googleapis.com/auth/userinfo.email";
-  }
-  if (trimmed === "profile") {
-    return "https://www.googleapis.com/auth/userinfo.profile";
-  }
-  return trimmed;
-};
 
 const defaultGoogleIntegration = (): GoogleIntegrationSettings => ({
   enabled: false,
@@ -81,9 +68,9 @@ const defaultSettings: AppSettings = {
 
 const defaultSecurityProfile: SecurityProfile = {
   kioskConfigured: false,
-  kioskMode: "windows-native-companion",
+  kioskMode: "not-configured",
   dedicatedExamAccount: false,
-  nativeCompanionVerified: true
+  nativeCompanionVerified: false
 };
 
 const defaultTeacherOptions = (): TeacherOptions => ({
@@ -97,7 +84,6 @@ const defaultTeacherOptions = (): TeacherOptions => ({
 const defaultStudentAccessPolicy = (): StudentAccessPolicy => ({
   assignedClassNames: [],
   assignedCandidateIds: [],
-  allowedEmailDomains: [],
   availableFrom: undefined,
   availableUntil: undefined,
   allowStudentDeletionAfterCompletion: true,
@@ -152,21 +138,7 @@ export const withStampedIntegrity = (candidate: ExamConfigPackage): ExamConfigPa
 const defaultBlockedShortcuts = (enforcement: EnforcementLevel): string[] =>
   enforcement === "app-enforced"
     ? ["F5", "Ctrl+R", "Ctrl+W", "Ctrl+P", "Alt+Left", "Alt+Right", "Ctrl+C", "Ctrl+V"]
-    : [
-        "Windows key",
-        "Windows-key combinations",
-        "Alt+Tab",
-        "Alt+Esc",
-        "Alt+F4",
-        "Alt+Space",
-        "Alt+Enter",
-        "Ctrl+Esc",
-        "Ctrl+Shift+Esc",
-        "Print Screen",
-        "Alt+Print Screen",
-        "browser and application launch keys",
-        "media and volume overlay keys"
-      ];
+    : ["Windows-key paths require a native Windows lockdown companion or official Windows kiosk deployment"];
 
 const defaultBranding = (exam: Exam): SchoolBranding => ({
   schoolName: exam.branding.schoolName,
@@ -188,205 +160,59 @@ const defaultStudentLmsBinding = (): StudentLmsBinding => ({
   assignmentLabel: ""
 });
 
-const defaultStudentLmsScope = (provider: StudentLmsProviderType): string =>
+const defaultStudentLmsScopes = (provider: StudentLmsProviderType): string =>
   provider === "google-classroom"
     ? [
         "openid",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
+        "email",
+        "profile",
         "https://www.googleapis.com/auth/classroom.coursework.me",
         "https://www.googleapis.com/auth/drive.file"
       ].join(" ")
     : ["offline_access", "openid", "profile", "User.Read", "EduAssignments.ReadWrite", "Files.ReadWrite"].join(" ");
 
-const looksLikeGoogleSheetUrl = (value?: string): boolean => {
-  const trimmed = value?.trim() ?? "";
-  return trimmed.includes("docs.google.com/spreadsheets/");
-};
+const normalizeResultDestination = (destination: ResultDestination): ResultDestination => ({
+  ...destination,
+  authMode: destination.authMode ?? "none",
+  examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
+  connectionId: destination.connectionId?.trim() || undefined,
+  assignmentId: destination.assignmentId?.trim() || undefined,
+  assignmentLabel: destination.assignmentLabel?.trim() || undefined,
+  bridgeEndpointUrl: destination.bridgeEndpointUrl?.trim() || undefined,
+  sortByLastName: destination.sortByLastName === true,
+  includeResponses: destination.includeResponses ?? true
+});
 
-const looksLikeAppsScriptUrl = (value?: string): boolean => {
-  const trimmed = value?.trim() ?? "";
-  return trimmed.includes("script.google.com/macros/");
-};
-
-const destinationUsesSheetFields = (destination: ResultDestination): boolean =>
-  destination.type === "google-sheets" || destination.type === "google-forms-quiz-classroom-sync";
-const destinationUsesClassroomFields = (destination: ResultDestination): boolean =>
-  destination.type === "google-classroom" ||
-  destination.type === "google-classroom-grade-sync" ||
-  destination.type === "google-forms-quiz-classroom-sync";
-const destinationUsesProviderReference = (destination: ResultDestination): boolean => destination.type !== "google-sheets";
-
-const normalizeResultDestination = (destination: ResultDestination): ResultDestination => {
-  const endpointUrl = destination.endpointUrl?.trim() ?? "";
-  const sheetFieldsEnabled = destinationUsesSheetFields(destination);
-  const classroomFieldsEnabled = destinationUsesClassroomFields(destination);
-  const next: ResultDestination = {
-    ...destination,
-    endpointUrl,
-    authMode: destination.authMode ?? "none",
-    examIds: Array.isArray(destination.examIds) ? destination.examIds : [],
-    authToken: destination.authMode === "none" ? undefined : destination.authToken?.trim() || undefined,
-    apiKeyHeader: destination.authMode === "api-key" ? destination.apiKeyHeader?.trim() || "x-api-key" : undefined,
-    className: destination.className?.trim() || undefined,
-    courseId: destinationUsesProviderReference(destination) ? destination.courseId?.trim() || undefined : undefined,
-    connectionId: sheetFieldsEnabled || classroomFieldsEnabled ? destination.connectionId?.trim() || undefined : undefined,
-    assignmentId: classroomFieldsEnabled ? destination.assignmentId?.trim() || undefined : undefined,
-    assignmentLabel: classroomFieldsEnabled ? destination.assignmentLabel?.trim() || undefined : undefined,
-    bridgeEndpointUrl: sheetFieldsEnabled ? destination.bridgeEndpointUrl?.trim() || undefined : undefined,
-    sheetName: sheetFieldsEnabled ? destination.sheetName?.trim() || undefined : undefined,
-    sortByLastName: sheetFieldsEnabled ? destination.sortByLastName === true : undefined,
-    notes: destination.notes?.trim() || undefined,
-    includeResponses: destination.includeResponses ?? true
-  };
-
-  if (next.type === "google-classroom-grade-sync" && looksLikeGoogleSheetUrl(next.endpointUrl)) {
-    next.endpointUrl = "";
-  }
-
-  if (next.type === "google-sheets" && looksLikeAppsScriptUrl(next.endpointUrl)) {
-    next.bridgeEndpointUrl = next.bridgeEndpointUrl || next.endpointUrl;
-    next.endpointUrl = "";
-  }
-
-  if (next.type === "google-sheets" && looksLikeGoogleSheetUrl(next.bridgeEndpointUrl)) {
-    next.bridgeEndpointUrl = undefined;
-  }
-
-  if (next.type !== "google-sheets" && looksLikeGoogleSheetUrl(next.endpointUrl)) {
-    next.endpointUrl = "";
-  }
-
-  return next;
-};
-
-const maxQuestionImageDataUrlLength = 7_000_000;
-const maxQuestionAudioDataUrlLength = 28_000_000;
-const supportedQuestionImageMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
-const supportedQuestionAudioMimeTypes = new Set([
-  "audio/mpeg",
-  "audio/mp3",
-  "audio/wav",
-  "audio/x-wav",
-  "audio/ogg",
-  "audio/mp4",
-  "audio/x-m4a",
-  "audio/aac",
-  "audio/webm"
-]);
-
-const normalizeQuestionImage = (image: unknown): QuestionImageAsset | undefined => {
-  if (!image || typeof image !== "object") {
-    return undefined;
-  }
-
-  const candidate = image as Partial<QuestionImageAsset>;
-  if (
-    typeof candidate.id !== "string" ||
-    typeof candidate.fileName !== "string" ||
-    typeof candidate.mimeType !== "string" ||
-    !supportedQuestionImageMimeTypes.has(candidate.mimeType) ||
-    typeof candidate.dataUrl !== "string" ||
-    candidate.dataUrl.length > maxQuestionImageDataUrlLength ||
-    !candidate.dataUrl.startsWith(`data:${candidate.mimeType};base64,`)
-  ) {
-    return undefined;
-  }
-
-  return {
-    id: candidate.id,
-    fileName: candidate.fileName,
-    mimeType: candidate.mimeType as QuestionImageAsset["mimeType"],
-    dataUrl: candidate.dataUrl,
-    altText: typeof candidate.altText === "string" ? candidate.altText : "",
-    caption: typeof candidate.caption === "string" && candidate.caption.trim() ? candidate.caption : undefined
-  };
-};
-
-const normalizeQuestionAudio = (audio: unknown): QuestionAudioAsset | undefined => {
-  if (!audio || typeof audio !== "object") {
-    return undefined;
-  }
-
-  const candidate = audio as Partial<QuestionAudioAsset>;
-  if (
-    typeof candidate.id !== "string" ||
-    typeof candidate.fileName !== "string" ||
-    typeof candidate.mimeType !== "string" ||
-    !supportedQuestionAudioMimeTypes.has(candidate.mimeType) ||
-    typeof candidate.dataUrl !== "string" ||
-    candidate.dataUrl.length > maxQuestionAudioDataUrlLength ||
-    !candidate.dataUrl.startsWith(`data:${candidate.mimeType};base64,`)
-  ) {
-    return undefined;
-  }
-
-  const maxPlays =
-    typeof candidate.maxPlays === "number" && Number.isInteger(candidate.maxPlays) && candidate.maxPlays > 0
-      ? Math.min(candidate.maxPlays, 99)
-      : undefined;
-
-  return {
-    id: candidate.id,
-    fileName: candidate.fileName,
-    mimeType: candidate.mimeType as QuestionAudioAsset["mimeType"],
-    dataUrl: candidate.dataUrl,
-    title: typeof candidate.title === "string" ? candidate.title : "",
-    transcript: typeof candidate.transcript === "string" && candidate.transcript.trim() ? candidate.transcript : undefined,
-    maxPlays
-  };
-};
-
-const normalizeQuestionGroup = (group: unknown): QuestionGroup | null => {
-  if (!group || typeof group !== "object") {
-    return null;
-  }
-
-  const candidate = group as Partial<QuestionGroup>;
-  if (typeof candidate.id !== "string") {
-    return null;
-  }
-
-  return {
-    id: candidate.id,
-    title: typeof candidate.title === "string" ? candidate.title : "",
-    instructions:
-      typeof candidate.instructions === "string" && candidate.instructions.trim() ? candidate.instructions : undefined,
-    image: normalizeQuestionImage(candidate.image),
-    audio: normalizeQuestionAudio(candidate.audio)
-  };
-};
-
-const normalizeExam = (exam: Exam): Exam => {
-  const questionGroups = (Array.isArray(exam.questionGroups) ? exam.questionGroups : [])
-    .map(normalizeQuestionGroup)
-    .filter((group): group is QuestionGroup => group !== null);
-  const questionGroupIds = new Set(questionGroups.map((group) => group.id));
-
-  return {
-    ...exam,
-    form: exam.form ?? "",
-    questionGroups,
-    questions: exam.questions.map((question) => ({
-      ...question,
-      groupId: question.groupId && questionGroupIds.has(question.groupId) ? question.groupId : undefined,
-      image: normalizeQuestionImage(question.image),
-      audio: normalizeQuestionAudio(question.audio)
-    }))
-  };
-};
+const normalizeExam = (exam: Exam): Exam => ({
+  ...exam,
+  form: exam.form ?? ""
+});
 
 const normalizeStudentLmsBinding = (binding: StudentLmsBinding | null | undefined): StudentLmsBinding => ({
   ...defaultStudentLmsBinding(),
   ...(binding ?? {}),
   clientId: binding?.clientId?.trim() ?? "",
   clientSecret: binding?.clientSecret?.trim() || undefined,
-  scope:
-    binding?.provider === "google-classroom"
-      ? defaultStudentLmsScope("google-classroom")
-      : binding?.scope ?? "",
+  scope: defaultStudentLmsScopes(binding?.provider ?? "google-classroom"),
   courseId: binding?.courseId ?? "",
   assignmentId: binding?.assignmentId ?? ""
+});
+
+const normalizeExternalDeliveryMode = (mode: unknown): ExternalDeliveryMode =>
+  mode === "lockdown-only" || mode === "integrated" ? mode : "integrated";
+
+const disableStudentLmsBinding = (binding: StudentLmsBinding): StudentLmsBinding => ({
+  ...binding,
+  enabled: false,
+  connectionId: undefined,
+  clientId: "",
+  clientSecret: undefined,
+  tenantId: binding.provider === "microsoft-365" ? "common" : "",
+  scope: "",
+  courseId: "",
+  courseLabel: "",
+  assignmentId: "",
+  assignmentLabel: ""
 });
 
 const normalizeStudentAccessPolicy = (policy: StudentAccessPolicy | null | undefined): StudentAccessPolicy => ({
@@ -394,31 +220,26 @@ const normalizeStudentAccessPolicy = (policy: StudentAccessPolicy | null | undef
   ...(policy ?? {}),
   assignedClassNames: Array.isArray(policy?.assignedClassNames) ? policy.assignedClassNames : [],
   assignedCandidateIds: Array.isArray(policy?.assignedCandidateIds) ? policy.assignedCandidateIds : [],
-  allowedEmailDomains: Array.isArray(policy?.allowedEmailDomains)
-    ? Array.from(
-        new Set(
-          policy.allowedEmailDomains
-            .map((entry) => entry.trim().replace(/^@+/, "").toLowerCase())
-            .filter(Boolean)
-        )
-      )
-    : [],
   startCodeHash: policy?.startCodeHash?.trim() || undefined,
   startCodeSalt: policy?.startCodeSalt?.trim() || undefined,
   startCodeHint: policy?.startCodeHint?.trim() || undefined
 });
 
 const normalizeConfigPackage = (configPackage: ExamConfigPackage): ExamConfigPackage => {
+  const externalDeliveryMode = normalizeExternalDeliveryMode(configPackage.externalDeliveryMode);
+  const studentLmsBinding = normalizeStudentLmsBinding(configPackage.studentLmsBinding);
+  const resultDestinations = Array.isArray(configPackage.resultDestinations)
+    ? configPackage.resultDestinations.map(normalizeResultDestination)
+    : [];
   const normalized: ExamConfigPackage = {
     ...configPackage,
+    externalDeliveryMode,
     teacherOptions: {
       ...defaultTeacherOptions(),
       ...(configPackage.teacherOptions ?? {})
     },
-    studentLmsBinding: normalizeStudentLmsBinding(configPackage.studentLmsBinding),
-    resultDestinations: Array.isArray(configPackage.resultDestinations)
-      ? configPackage.resultDestinations.map(normalizeResultDestination)
-      : [],
+    studentLmsBinding: externalDeliveryMode === "lockdown-only" ? disableStudentLmsBinding(studentLmsBinding) : studentLmsBinding,
+    resultDestinations: externalDeliveryMode === "lockdown-only" ? [] : resultDestinations,
     studentAccessPolicy: normalizeStudentAccessPolicy(configPackage.studentAccessPolicy)
   };
 
@@ -443,8 +264,9 @@ const normalizeGoogleIntegration = (
   settings: Partial<GoogleIntegrationSettings> | null | undefined
 ): GoogleIntegrationSettings => {
   const requestedScopes = Array.isArray(settings?.requestedScopes)
-    ? Array.from(new Set(settings.requestedScopes.map(normalizeGoogleScope).filter(Boolean)))
-    : [...defaultGoogleClassroomScopes];
+    ? settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean)
+    : [];
+  const mergedScopes = Array.from(new Set([...(requestedScopes.length > 0 ? requestedScopes : []), ...defaultGoogleClassroomScopes]));
 
   return {
     ...defaultGoogleIntegration(),
@@ -452,7 +274,7 @@ const normalizeGoogleIntegration = (
     enabled: settings?.enabled === true,
     clientId: settings?.clientId?.trim() ?? "",
     clientSecret: settings?.clientSecret?.trim() ?? "",
-    requestedScopes,
+    requestedScopes: mergedScopes,
     connectionStatus:
       settings?.connectionStatus === "connected" || settings?.connectionStatus === "error"
         ? settings.connectionStatus
@@ -471,8 +293,9 @@ const buildSubmissionSyncStates = (destinations: ResultDestination[]): Submissio
   }));
 
 const normalizeSubmission = (submission: SubmissionResult, destinations: ResultDestination[]): SubmissionResult => {
+  const effectiveDestinations = submission.externalDeliveryMode === "lockdown-only" ? [] : destinations;
   const existingStates = new Map(submission.syncStates?.map((state) => [state.destinationId, state]) ?? []);
-  const mergedStates = destinations.map((destination) => {
+  const mergedStates = effectiveDestinations.map((destination) => {
     const existing = existingStates.get(destination.id);
     if (existing) {
       return {
@@ -515,6 +338,7 @@ export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
         : "Native exam package with local runtime and full-kiosk lockdown defaults.",
     status: "active",
     packageVersion: 1,
+    externalDeliveryMode: "lockdown-only",
     sourceMode: exam.mode,
     securityMode,
     browserPolicy: {
@@ -565,10 +389,10 @@ export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
       enforcement: "app-enforced"
     },
     keyRestrictionPolicy: {
-      enforcement: "native-companion-enforced",
+      enforcement: "app-enforced",
       metadata:
-        "Full Kiosk Mode uses the native Windows lockdown companion to block Windows shell shortcuts, task switching, screen capture keys, application launch keys, and browser/media hardware keys. Ctrl+Alt+Del remains reserved by Windows.",
-      blockedShortcuts: defaultBlockedShortcuts("native-companion-enforced")
+        "Lockedscreen blocks browser-level shortcuts in Restricted App Mode. Windows key paths require a native Windows lockdown companion or official Windows kiosk deployment.",
+      blockedShortcuts: defaultBlockedShortcuts("app-enforced")
     },
     teacherOptions: defaultTeacherOptions(),
     studentAccessPolicy: defaultStudentAccessPolicy(),
@@ -605,29 +429,118 @@ const logEntry = (
   details
 });
 
-const isLegacyDemoExam = (exam: Exam): boolean =>
-  (exam.title === "Year 10 Chemistry Midterm" &&
-    exam.subject === "Chemistry" &&
-    exam.className === "Year 10" &&
-    exam.branding.schoolName === "Northfield Academy") ||
-  (exam.title === "History LMS Assessment" &&
-    exam.subject === "History" &&
-    exam.className === "Year 11" &&
-    exam.branding.schoolName === "Northfield Academy");
+const sampleExam = (): Exam => {
+  const now = new Date().toISOString();
+
+  return {
+    id: randomUUID(),
+    mode: "app",
+    title: "Year 10 Chemistry Midterm",
+    subject: "Chemistry",
+    className: "Year 10",
+    form: "A",
+    instructions:
+      "Read each question carefully. Select one answer for each item. Use the flag action for questions you want to revisit before submitting.",
+    durationMinutes: 45,
+    branding: {
+      schoolName: "Northfield Academy",
+      accentColor: "#0f766e"
+    },
+    appearance: {
+      theme: "system",
+      headerLayout: "split",
+      fontScale: 1,
+      density: "comfortable"
+    },
+    questions: [
+      {
+        id: randomUUID(),
+        type: "multiple-choice",
+        prompt: "What is the chemical symbol for sodium?",
+        points: 1,
+        options: [
+          { id: randomUUID(), label: "A", content: "S" },
+          { id: randomUUID(), label: "B", content: "Na" },
+          { id: randomUUID(), label: "C", content: "So" },
+          { id: randomUUID(), label: "D", content: "Sd" }
+        ],
+        correctOptionId: ""
+      },
+      {
+        id: randomUUID(),
+        type: "multiple-choice",
+        prompt: "Which expression represents the quadratic formula discriminant?",
+        points: 1,
+        options: [
+          { id: randomUUID(), label: "A", content: "\\(b^2 - 4ac\\)" },
+          { id: randomUUID(), label: "B", content: "\\(a^2 + b^2\\)" },
+          { id: randomUUID(), label: "C", content: "\\(2ab + c\\)" },
+          { id: randomUUID(), label: "D", content: "\\(4a^2 - c^2\\)" }
+        ],
+        correctOptionId: ""
+      }
+    ],
+    createdAt: now,
+    updatedAt: now
+  };
+};
 
 const seedState = (): AppStateSnapshot => {
+  const seededExam = sampleExam();
+  const firstQuestion = seededExam.questions.at(0);
+  const secondQuestion = seededExam.questions.at(1);
+  const firstQuestionSecondOption = firstQuestion?.options.at(1);
+  const secondQuestionFirstOption = secondQuestion?.options.at(0);
+
+  if (firstQuestion && firstQuestionSecondOption) {
+    firstQuestion.correctOptionId = firstQuestionSecondOption.id;
+  }
+
+  if (secondQuestion && secondQuestionFirstOption) {
+    secondQuestion.correctOptionId = secondQuestionFirstOption.id;
+  }
+
+  const hostedExam: Exam = {
+    id: randomUUID(),
+    mode: "link",
+    title: "History LMS Assessment",
+    subject: "History",
+    className: "Year 11",
+    form: "B",
+    instructions: "The linked LMS opens inside the secure session shell. Keep your candidate details visible.",
+    durationMinutes: 60,
+    branding: {
+      schoolName: "Northfield Academy",
+      accentColor: "#1d4ed8"
+    },
+    appearance: {
+      theme: "light",
+      headerLayout: "centered",
+      fontScale: 1,
+      density: "comfortable"
+    },
+    questions: [],
+    linkConfig: {
+      url: "https://docs.google.com/forms/",
+      allowedDomains: ["docs.google.com"]
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  const exams = [seededExam, hostedExam];
+
   return {
-    exams: [],
-    configPackages: [],
+    exams,
+    configPackages: exams.map((exam) => createConfigPackageFromExam(exam)),
     submissions: [],
     studentExamStates: [],
     resultDestinations: [],
-    resultDestinationTemplates: [],
     lmsConnections: [],
     settings: defaultSettings,
     securityProfile: defaultSecurityProfile,
     securityLogs: [
-      logEntry("package", "info", "Initialized empty Lockedscreen exam workspace."),
+      logEntry("package", "info", "Seeded default exam configuration packages."),
       logEntry("kiosk", "info", "Windows kiosk posture starts as not configured until an administrator verifies deployment.")
     ]
   };
@@ -677,26 +590,16 @@ const reconcilePackages = (snapshot: AppStateSnapshot): AppStateSnapshot => {
 const hydrateSnapshot = (raw: Partial<AppStateSnapshot> | null | undefined): AppStateSnapshot => {
   const seeded = seedState();
   const resultDestinations = (raw?.resultDestinations ?? seeded.resultDestinations).map(normalizeResultDestination);
-  const resultDestinationTemplates = (raw?.resultDestinationTemplates ?? seeded.resultDestinationTemplates).map(normalizeResultDestination);
   const lmsConnections = (raw?.lmsConnections ?? seeded.lmsConnections).map(normalizeLmsConnection);
-  const normalizedExams = (raw?.exams ?? seeded.exams).map(normalizeExam);
-  const legacyDemoExamIds = new Set(normalizedExams.filter(isLegacyDemoExam).map((exam) => exam.id));
-  const exams = normalizedExams.filter((exam) => !legacyDemoExamIds.has(exam.id));
   const snapshot: AppStateSnapshot = {
-    exams,
+    exams: (raw?.exams ?? seeded.exams).map(normalizeExam),
     configPackages: (raw?.configPackages ?? []).map(normalizeConfigPackage),
-    submissions: (raw?.submissions ?? [])
-      .map((submission) => normalizeSubmission(submission, resultDestinations))
-      .filter((submission) => !legacyDemoExamIds.has(submission.examId)),
+    submissions: (raw?.submissions ?? []).map((submission) => normalizeSubmission(submission, resultDestinations)),
     studentExamStates: (raw?.studentExamStates ?? []).filter(
       (entry): entry is StudentExamState =>
-        typeof entry?.examId === "string" &&
-        !legacyDemoExamIds.has(entry.examId) &&
-        typeof entry?.candidateId === "string" &&
-        typeof entry?.hiddenAt === "string"
+        typeof entry?.examId === "string" && typeof entry?.candidateId === "string" && typeof entry?.hiddenAt === "string"
     ),
     resultDestinations,
-    resultDestinationTemplates,
     lmsConnections,
     settings: {
       ...defaultSettings,
@@ -792,18 +695,20 @@ export interface StorageService {
   saveSecurityProfile(profile: SecurityProfile): Promise<AppStateSnapshot>;
   saveConfigPackage(configPackage: ExamConfigPackage): Promise<AppStateSnapshot>;
   saveResultDestination(destination: ResultDestination): Promise<AppStateSnapshot>;
-  saveResultDestinationTemplate(destination: ResultDestination): Promise<AppStateSnapshot>;
   saveLmsConnection(connection: LmsConnection): Promise<AppStateSnapshot>;
   deleteLmsConnection(connectionId: string): Promise<AppStateSnapshot>;
   deleteResultDestination(destinationId: string): Promise<AppStateSnapshot>;
-  deleteResultDestinationTemplate(destinationId: string): Promise<AppStateSnapshot>;
   updateSubmissionSyncState(submissionId: string, syncState: SubmissionSyncState): Promise<AppStateSnapshot>;
   updateSubmissionStudentLmsTurnIn(submissionId: string, state: StudentLmsTurnInState): Promise<AppStateSnapshot>;
   importExamBundle(exam: Exam, configPackage: ExamConfigPackage): Promise<AppStateSnapshot>;
   deleteConfigPackage(packageId: string): Promise<AppStateSnapshot>;
   duplicateConfigPackage(packageId: string): Promise<AppStateSnapshot>;
   appendSecurityLog(entry: Omit<SecurityLogEntry, "id" | "timestamp">): Promise<AppStateSnapshot>;
-  recordSubmission(exam: Exam, session: ExamSession): Promise<SubmissionResult>;
+  recordSubmission(
+    exam: Exam,
+    session: ExamSession,
+    options?: { externalDeliveryMode?: ExternalDeliveryMode; packageId?: string; resultDestinations?: ResultDestination[] }
+  ): Promise<SubmissionResult>;
   exportCsv(examId?: string): Promise<string>;
 }
 
@@ -962,29 +867,6 @@ class JsonStorageService implements StorageService {
     return this.write(snapshot);
   }
 
-  async saveResultDestinationTemplate(destination: ResultDestination): Promise<AppStateSnapshot> {
-    const snapshot = await this.read();
-    const now = new Date().toISOString();
-    const nextDestination = normalizeResultDestination({
-      ...destination,
-      enabled: true,
-      createdAt: destination.createdAt || now,
-      updatedAt: now
-    });
-    const existing = snapshot.resultDestinationTemplates.findIndex((candidate) => candidate.id === destination.id);
-
-    if (existing >= 0) {
-      snapshot.resultDestinationTemplates[existing] = nextDestination;
-    } else {
-      snapshot.resultDestinationTemplates.unshift(nextDestination);
-    }
-
-    snapshot.securityLogs.unshift(
-      logEntry("results", "info", `Saved reusable grade-sync setup "${nextDestination.label}".`, nextDestination.type)
-    );
-    return this.write(snapshot);
-  }
-
   async saveLmsConnection(connection: LmsConnection): Promise<AppStateSnapshot> {
     const snapshot = await this.read();
     const nextConnection = normalizeLmsConnection({
@@ -1020,13 +902,6 @@ class JsonStorageService implements StorageService {
       syncStates: submission.syncStates.filter((state) => state.destinationId !== destinationId)
     }));
     snapshot.securityLogs.unshift(logEntry("results", "warning", `Deleted result destination ${destinationId}.`));
-    return this.write(snapshot);
-  }
-
-  async deleteResultDestinationTemplate(destinationId: string): Promise<AppStateSnapshot> {
-    const snapshot = await this.read();
-    snapshot.resultDestinationTemplates = snapshot.resultDestinationTemplates.filter((candidate) => candidate.id !== destinationId);
-    snapshot.securityLogs.unshift(logEntry("results", "warning", `Deleted reusable grade-sync setup ${destinationId}.`));
     return this.write(snapshot);
   }
 
@@ -1149,12 +1024,19 @@ class JsonStorageService implements StorageService {
     return this.write(snapshot);
   }
 
-  async recordSubmission(exam: Exam, session: ExamSession): Promise<SubmissionResult> {
+  async recordSubmission(
+    exam: Exam,
+    session: ExamSession,
+    options?: { externalDeliveryMode?: ExternalDeliveryMode; packageId?: string; resultDestinations?: ResultDestination[] }
+  ): Promise<SubmissionResult> {
     const snapshot = await this.read();
+    const resultDestinations = options?.resultDestinations ?? snapshot.resultDestinations;
     const result = {
       ...scoreSubmission(exam, session),
+      packageId: options?.packageId,
+      externalDeliveryMode: options?.externalDeliveryMode,
       candidateClassName: session.candidate.className?.trim() || undefined,
-      syncStates: buildSubmissionSyncStates(snapshot.resultDestinations)
+      syncStates: buildSubmissionSyncStates(resultDestinations)
     };
     snapshot.submissions.unshift(result);
     snapshot.securityLogs.unshift(

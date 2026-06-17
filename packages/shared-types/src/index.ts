@@ -11,6 +11,7 @@ export type PrintMode = "allow" | "block";
 export type UrlRuleKind = "domain" | "prefix";
 export type UrlRuleRole = "start" | "exam" | "resource" | "help" | "exit";
 export type ConfigPackageStatus = "draft" | "active" | "archived";
+export type ExternalDeliveryMode = "lockdown-only" | "integrated";
 export type SessionTimeoutAction = "submit" | "restart" | "lock" | "open-exit-link";
 export type ProcessViolationAction = "log-only" | "review-recommended";
 export type ApprovedAppSupervision = "launch-and-monitor" | "monitor-only";
@@ -18,7 +19,6 @@ export type NativeLockdownFeatureLevel = "none" | "partial" | "desktop-lockdown"
 export type ResultDestinationType =
   | "google-classroom"
   | "google-classroom-grade-sync"
-  | "google-forms-quiz-classroom-sync"
   | "microsoft-teams"
   | "google-sheets"
   | "generic-lms";
@@ -74,45 +74,6 @@ export interface MultipleChoiceOption {
   content: string;
 }
 
-export type QuestionImageMimeType = "image/png" | "image/jpeg" | "image/webp";
-export type QuestionAudioMimeType =
-  | "audio/mpeg"
-  | "audio/mp3"
-  | "audio/wav"
-  | "audio/x-wav"
-  | "audio/ogg"
-  | "audio/mp4"
-  | "audio/x-m4a"
-  | "audio/aac"
-  | "audio/webm";
-
-export interface QuestionImageAsset {
-  id: string;
-  fileName: string;
-  mimeType: QuestionImageMimeType;
-  dataUrl: string;
-  altText: string;
-  caption?: string;
-}
-
-export interface QuestionAudioAsset {
-  id: string;
-  fileName: string;
-  mimeType: QuestionAudioMimeType;
-  dataUrl: string;
-  title: string;
-  transcript?: string;
-  maxPlays?: number;
-}
-
-export interface QuestionGroup {
-  id: string;
-  title: string;
-  instructions?: string;
-  image?: QuestionImageAsset;
-  audio?: QuestionAudioAsset;
-}
-
 export interface MultipleChoiceQuestion {
   id: string;
   type: "multiple-choice";
@@ -121,9 +82,6 @@ export interface MultipleChoiceQuestion {
   points: number;
   options: MultipleChoiceOption[];
   correctOptionId: string;
-  groupId?: string;
-  image?: QuestionImageAsset;
-  audio?: QuestionAudioAsset;
   flagged?: boolean;
 }
 
@@ -146,7 +104,6 @@ export interface Exam {
   branding: SchoolBranding;
   appearance: ExamAppearance;
   questions: Question[];
-  questionGroups?: QuestionGroup[];
   linkConfig?: LinkExamConfig;
   createdAt: string;
   updatedAt: string;
@@ -170,7 +127,6 @@ export interface ExamSession {
   startedAt: string;
   endsAt: string;
   responses: ExamResponse[];
-  mediaPlayCounts?: Record<string, number>;
   mode: ExamMode;
 }
 
@@ -178,6 +134,8 @@ export interface SubmissionResult {
   id: string;
   examId: string;
   examTitle: string;
+  packageId?: string;
+  externalDeliveryMode?: ExternalDeliveryMode;
   candidateName: string;
   candidateId: string;
   candidateClassName?: string;
@@ -397,7 +355,6 @@ export interface TeacherOptions {
 export interface StudentAccessPolicy {
   assignedClassNames: string[];
   assignedCandidateIds: string[];
-  allowedEmailDomains: string[];
   availableFrom?: string;
   availableUntil?: string;
   allowStudentDeletionAfterCompletion: boolean;
@@ -426,6 +383,7 @@ export interface ExamConfigPackage {
   description: string;
   status: ConfigPackageStatus;
   packageVersion: number;
+  externalDeliveryMode: ExternalDeliveryMode;
   sourceMode: ExamMode;
   securityMode: SecurityMode;
   browserPolicy: BrowserRuntimePolicy;
@@ -576,7 +534,6 @@ export interface AppStateSnapshot {
   submissions: SubmissionResult[];
   studentExamStates: StudentExamState[];
   resultDestinations: ResultDestination[];
-  resultDestinationTemplates: ResultDestination[];
   lmsConnections: LmsConnection[];
   settings: AppSettings;
   securityProfile: SecurityProfile;
@@ -618,7 +575,7 @@ export interface ImportedExamMetadata {
   durationMinutes?: number;
 }
 
-export type ImportExtractionMethod = "text" | "docx" | "doc" | "office" | "pdf-text" | "pdf-ocr" | "image-ocr";
+export type ImportExtractionMethod = "text" | "docx" | "doc" | "pdf-text" | "pdf-ocr" | "image-ocr";
 
 export interface ImportExtractionInfo {
   method: ImportExtractionMethod;

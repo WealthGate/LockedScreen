@@ -1,6 +1,6 @@
 {
   "name": "@lockedscreen/desktop",
-  "version": "0.6.44",
+  "version": "0.6.46",
   "private": true,
   "description": "Lockedscreen secure exam kiosk and controlled runtime for managed Windows deployments",
   "author": {
@@ -12,7 +12,6 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/main/integrations/google/google-classroom-service.test.ts src/main/student-lms-binding.test.ts src/main/student-lms-url.test.ts src/main/google-classroom-grade-sync.test.ts src/main/google-classroom-submission-attachments.test.ts",
     "dist": "npm run dist:win",
     "dist:win": "npm run build && electron-builder --win nsis portable",
     "dist:mac": "npm run build && electron-builder --mac dmg zip",
@@ -42,22 +41,22 @@
     ],
     "extraResources": [
       {
-        "from": "../windows-lockdown/publish/service",
-        "to": "lockedscreen-security/service",
+        "from": "../windows-lockdown/Lockedscreen.Security.Service/bin/Release/net8.0-windows",
+        "to": "lockedscreen-security",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": "../windows-lockdown/publish/client",
-        "to": "lockedscreen-security/client",
+        "from": "../windows-lockdown/Lockedscreen.Security.Client/bin/Release/net8.0-windows",
+        "to": "lockedscreen-security",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": "../windows-lockdown/publish/agent",
-        "to": "lockedscreen-security/agent",
+        "from": "../windows-lockdown/Lockedscreen.Security.Agent/bin/Release/net8.0-windows",
+        "to": "lockedscreen-security",
         "filter": [
           "**/*"
         ]
@@ -125,8 +124,6 @@
     },
     "nsis": {
       "oneClick": false,
-      "perMachine": true,
-      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
@@ -159,7 +156,6 @@
     "framer-motion": "^12.7.2",
     "katex": "^0.16.11",
     "lucide-react": "^0.511.0",
-    "officeparser": "^7.2.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.6.1",
@@ -176,7 +172,6 @@
     "electron-vite": "^3.1.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.22.4",
     "typescript": "^5.7.2",
     "vite": "^6.0.6"
   }

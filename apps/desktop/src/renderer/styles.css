@@ -27,23 +27,10 @@ body {
   margin: 0;
   min-height: 100vh;
   background: transparent;
-  overflow-x: hidden;
 }
 
 #root {
   min-height: 100vh;
-}
-
-:where(main, section, aside, article, header, footer, div, form, label, p, span) {
-  min-width: 0;
-}
-
-:where(p, span, div) {
-  overflow-wrap: break-word;
-}
-
-:where(input, select, textarea, button) {
-  max-width: 100%;
 }
 
 ::-webkit-scrollbar {
@@ -54,4 +41,54 @@ body {
 ::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.45);
   border-radius: 999px;
+}
+
+.rich-content {
+  overflow-wrap: anywhere;
+}
+
+.rich-content p {
+  margin: 0.5rem 0;
+}
+
+.rich-content ul,
+.rich-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.4rem;
+}
+
+.rich-content ul {
+  list-style: disc;
+}
+
+.rich-content ol {
+  list-style: decimal;
+}
+
+.rich-content img {
+  display: block;
+  max-width: min(100%, 720px);
+  max-height: 420px;
+  margin: 0.75rem 0;
+  border-radius: 0.75rem;
+  object-fit: contain;
+}
+
+.rich-content table {
+  width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+}
+
+.rich-content th,
+.rich-content td {
+  border: 1px solid rgb(203 213 225);
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.rich-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
 }

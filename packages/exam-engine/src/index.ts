@@ -21,7 +21,6 @@ export const createSession = (exam: Exam, candidate: Candidate): ExamSession => 
     mode: exam.mode,
     startedAt: startedAt.toISOString(),
     endsAt: addMinutes(startedAt, exam.durationMinutes).toISOString(),
-    mediaPlayCounts: {},
     responses: exam.questions.map((question) => ({
       questionId: question.id,
       selectedOptionId: undefined,

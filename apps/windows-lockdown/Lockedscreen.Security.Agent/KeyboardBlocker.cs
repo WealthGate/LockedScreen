@@ -46,9 +46,14 @@ internal sealed class KeyboardBlocker : IDisposable
         var winPressed = IsPressed(Keys.LWin) || IsPressed(Keys.RWin);
 
         var shouldBlock =
+            key is Keys.LWin or Keys.RWin or Keys.Apps or Keys.Sleep ||
+            key is Keys.PrintScreen or Keys.Snapshot ||
+            key is Keys.BrowserBack or Keys.BrowserForward or Keys.BrowserHome or Keys.BrowserSearch or Keys.BrowserFavorites ||
             winPressed ||
-            IsBlockedSystemKey(key) ||
-            IsBlockedShellShortcut(key, altPressed, ctrlPressed, shiftPressed);
+            (altPressed && (key is Keys.Tab or Keys.Escape or Keys.F4 or Keys.Space)) ||
+            (ctrlPressed && (key is Keys.Escape or Keys.LWin or Keys.RWin)) ||
+            (ctrlPressed && shiftPressed && key is Keys.Escape) ||
+            (ctrlPressed && altPressed && (key is Keys.Delete or Keys.Escape));
 
         if (shouldBlock)
         {
@@ -64,22 +69,6 @@ internal sealed class KeyboardBlocker : IDisposable
         message == NativeMethods.WmKeyUp ||
         message == NativeMethods.WmSysKeyDown ||
         message == NativeMethods.WmSysKeyUp;
-
-    private static bool IsBlockedSystemKey(Keys key) =>
-        key is Keys.LWin or Keys.RWin or Keys.Apps or Keys.Sleep or Keys.Help or
-            Keys.PrintScreen or Keys.Snapshot or
-            Keys.BrowserBack or Keys.BrowserForward or Keys.BrowserHome or Keys.BrowserSearch or Keys.BrowserFavorites or
-            Keys.BrowserRefresh or Keys.BrowserStop or
-            Keys.LaunchMail or Keys.SelectMedia or Keys.LaunchApplication1 or Keys.LaunchApplication2 or
-            Keys.MediaNextTrack or Keys.MediaPreviousTrack or Keys.MediaPlayPause or Keys.MediaStop or
-            Keys.VolumeMute or Keys.VolumeDown or Keys.VolumeUp;
-
-    private static bool IsBlockedShellShortcut(Keys key, bool altPressed, bool ctrlPressed, bool shiftPressed) =>
-        (altPressed && (key is Keys.Tab or Keys.Escape or Keys.F4 or Keys.Space or Keys.Enter or Keys.PrintScreen or Keys.Snapshot)) ||
-        (altPressed && shiftPressed && (key is Keys.ShiftKey or Keys.LShiftKey or Keys.RShiftKey)) ||
-        (ctrlPressed && (key is Keys.Escape or Keys.LWin or Keys.RWin)) ||
-        (ctrlPressed && shiftPressed && key is Keys.Escape) ||
-        (ctrlPressed && altPressed && (key is Keys.Delete or Keys.Escape or Keys.Tab or Keys.Left or Keys.Right or Keys.Up or Keys.Down));
 
     private static bool IsPressed(Keys key) => (NativeMethods.GetAsyncKeyState((int)key) & 0x8000) != 0;
 }

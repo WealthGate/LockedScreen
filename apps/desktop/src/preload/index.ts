@@ -28,15 +28,12 @@ export interface LockedscreenApi {
   getUpdateState: () => Promise<AppUpdateState>;
   checkForUpdates: () => Promise<AppUpdateState>;
   downloadUpdate: () => Promise<AppUpdateState>;
-  installUpdate: () => Promise<AppUpdateState>;
+  installUpdate: () => Promise<void>;
   onUpdateStateChanged: (callback: (state: AppUpdateState) => void) => () => void;
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
   onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
-  onHostedGoogleSignInStarted: (callback: (payload: { url?: string }) => void) => () => void;
-  onHostedGoogleSignInFinished: (
-    callback: (payload: { status: "completed" | "cancelled"; url?: string }) => void
-  ) => () => void;
+  onEmbeddedGoogleSignInBlocked: (callback: (payload: { url?: string }) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
   deleteExam: (examId: string) => Promise<AppStateSnapshot>;
@@ -45,7 +42,6 @@ export interface LockedscreenApi {
   saveSecurityProfile: (profile: SecurityProfile) => Promise<AppStateSnapshot>;
   saveConfigPackage: (configPackage: ExamConfigPackage) => Promise<AppStateSnapshot>;
   saveResultDestination: (destination: ResultDestination) => Promise<AppStateSnapshot>;
-  saveResultDestinationTemplate: (destination: ResultDestination) => Promise<AppStateSnapshot>;
   saveLmsConnection: (connection: LmsConnection) => Promise<AppStateSnapshot>;
   deleteLmsConnection: (connectionId: string) => Promise<AppStateSnapshot>;
   connectLmsConnection: (connectionId: string) => Promise<AppStateSnapshot>;
@@ -55,7 +51,6 @@ export interface LockedscreenApi {
   listLmsCourseWork: (payload: { connectionId: string; courseId: string }) => Promise<LmsCourseWork[]>;
   listLmsStudents: (payload: { connectionId: string; courseId: string }) => Promise<LmsStudent[]>;
   deleteResultDestination: (destinationId: string) => Promise<AppStateSnapshot>;
-  deleteResultDestinationTemplate: (destinationId: string) => Promise<AppStateSnapshot>;
   deleteConfigPackage: (packageId: string) => Promise<AppStateSnapshot>;
   duplicateConfigPackage: (packageId: string) => Promise<AppStateSnapshot>;
   exportConfigPackage: (payload: { packageId: string }) => Promise<string | null>;
@@ -70,7 +65,7 @@ export interface LockedscreenApi {
   syncSubmissionResults: (submissionId: string) => Promise<AppStateSnapshot>;
   syncPendingResults: () => Promise<AppStateSnapshot>;
   captureScreenshot: () => Promise<string | null>;
-  openExternal: (url: string) => Promise<void>;
+  openGoogleAppsScript: () => Promise<void>;
   beginSession: (request: SessionStartRequest) => Promise<AppStateSnapshot>;
   endSession: (reason?: string) => Promise<AppStateSnapshot>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot>;
@@ -109,18 +104,10 @@ const api: LockedscreenApi = {
     ipcRenderer.on("session:exitBlocked", listener);
     return () => ipcRenderer.removeListener("session:exitBlocked", listener);
   },
-  onHostedGoogleSignInStarted: (callback) => {
+  onEmbeddedGoogleSignInBlocked: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { url?: string }) => callback(payload);
-    ipcRenderer.on("session:hostedGoogleSignInStarted", listener);
-    return () => ipcRenderer.removeListener("session:hostedGoogleSignInStarted", listener);
-  },
-  onHostedGoogleSignInFinished: (callback) => {
-    const listener = (
-      _event: Electron.IpcRendererEvent,
-      payload: { status: "completed" | "cancelled"; url?: string }
-    ) => callback(payload);
-    ipcRenderer.on("session:hostedGoogleSignInFinished", listener);
-    return () => ipcRenderer.removeListener("session:hostedGoogleSignInFinished", listener);
+    ipcRenderer.on("session:embeddedGoogleSignInBlocked", listener);
+    return () => ipcRenderer.removeListener("session:embeddedGoogleSignInBlocked", listener);
   },
   refreshSecurityOverview: () => ipcRenderer.invoke("security:refreshOverview"),
   saveExam: (exam) => ipcRenderer.invoke("exam:save", exam),
@@ -130,7 +117,6 @@ const api: LockedscreenApi = {
   saveSecurityProfile: (profile) => ipcRenderer.invoke("security:save", profile),
   saveConfigPackage: (configPackage) => ipcRenderer.invoke("configPackage:save", configPackage),
   saveResultDestination: (destination) => ipcRenderer.invoke("resultsDestination:save", destination),
-  saveResultDestinationTemplate: (destination) => ipcRenderer.invoke("resultsDestinationTemplate:save", destination),
   saveLmsConnection: (connection) => ipcRenderer.invoke("lmsConnection:save", connection),
   deleteLmsConnection: (connectionId) => ipcRenderer.invoke("lmsConnection:delete", connectionId),
   connectLmsConnection: (connectionId) => ipcRenderer.invoke("lmsConnection:connect", connectionId),
@@ -140,7 +126,6 @@ const api: LockedscreenApi = {
   listLmsCourseWork: (payload) => ipcRenderer.invoke("lmsConnection:listCourseWork", payload),
   listLmsStudents: (payload) => ipcRenderer.invoke("lmsConnection:listStudents", payload),
   deleteResultDestination: (destinationId) => ipcRenderer.invoke("resultsDestination:delete", destinationId),
-  deleteResultDestinationTemplate: (destinationId) => ipcRenderer.invoke("resultsDestinationTemplate:delete", destinationId),
   deleteConfigPackage: (packageId) => ipcRenderer.invoke("configPackage:delete", packageId),
   duplicateConfigPackage: (packageId) => ipcRenderer.invoke("configPackage:duplicate", packageId),
   exportConfigPackage: (payload) => ipcRenderer.invoke("configPackage:export", payload),
@@ -152,7 +137,7 @@ const api: LockedscreenApi = {
   syncSubmissionResults: (submissionId) => ipcRenderer.invoke("results:syncSubmission", submissionId),
   syncPendingResults: () => ipcRenderer.invoke("results:syncPending"),
   captureScreenshot: () => ipcRenderer.invoke("window:captureScreenshot"),
-  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
+  openGoogleAppsScript: () => ipcRenderer.invoke("help:openGoogleAppsScript"),
   beginSession: (request) => ipcRenderer.invoke("session:begin", request),
   endSession: (reason) => ipcRenderer.invoke("session:end", reason),
   launchApprovedApplication: (payload) => ipcRenderer.invoke("applications:launch", payload),

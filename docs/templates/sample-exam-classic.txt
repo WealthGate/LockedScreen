@@ -5,7 +5,7 @@ C. So
 D. Sd
 ANS: B
 
-Q2. Simplify \sqrt{49}.
+Q2. Simplify \(\sqrt{49}\).
 A. 5
 B. 6
 C. 7
@@ -14,7 +14,7 @@ ANS: C
 
 Q3. Which chemical formula represents water?
 A. HO
-B. H_2O
-C. H_2O_2
-D. O_2H
+B. H<sub>2</sub>O
+C. H<sub>2</sub>O<sub>2</sub>
+D. O<sub>2</sub>H
 ANS: B

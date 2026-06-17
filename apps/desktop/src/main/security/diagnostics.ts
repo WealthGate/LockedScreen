@@ -60,17 +60,14 @@ export const detectWindowsEdition = (): RuntimeEnvironment["windowsEdition"] => 
 
 const candidateNativeHelperPaths = (): string[] => {
   const exeDir = dirname(process.execPath);
-  const developmentRoot = join(process.cwd(), "apps", "windows-lockdown");
+  const developmentRoot = join(process.cwd(), "apps", "windows-lockdown", "Lockedscreen.Security.Client", "bin");
   return [
-    join(process.resourcesPath, "lockedscreen-security", "client", "Lockedscreen.Security.Client.exe"),
     join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
     join(process.resourcesPath, "Lockedscreen.Security.Client.exe"),
     join(exeDir, "Lockedscreen.Security.Client.exe"),
-    join(exeDir, "lockedscreen-security", "client", "Lockedscreen.Security.Client.exe"),
     join(exeDir, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
-    join(developmentRoot, "publish", "client", "Lockedscreen.Security.Client.exe"),
-    join(developmentRoot, "Lockedscreen.Security.Client", "bin", "Release", "net8.0-windows", "Lockedscreen.Security.Client.exe"),
-    join(developmentRoot, "Lockedscreen.Security.Client", "bin", "Debug", "net8.0-windows", "Lockedscreen.Security.Client.exe")
+    join(developmentRoot, "Release", "net8.0-windows", "Lockedscreen.Security.Client.exe"),
+    join(developmentRoot, "Debug", "net8.0-windows", "Lockedscreen.Security.Client.exe")
   ];
 };
 
@@ -363,11 +360,10 @@ const buildValidationItems = (
       snapshot.securityProfile.kioskMode === "shell-launcher" ||
       snapshot.securityProfile.kioskMode === "hybrid");
   const nativeLockdownReady =
+    snapshot.securityProfile.nativeCompanionVerified &&
     runtime.nativeLockdown.lockdownCapable &&
-    (runtime.platform === "windows" ||
-      (snapshot.securityProfile.nativeCompanionVerified &&
-        (snapshot.securityProfile.kioskMode === "windows-native-companion" ||
-          snapshot.securityProfile.kioskMode === "hybrid")));
+    (snapshot.securityProfile.kioskMode === "windows-native-companion" ||
+      snapshot.securityProfile.kioskMode === "hybrid");
   const deploymentReady = officialKioskReady || nativeLockdownReady;
   const fullKioskRequested = snapshot.configPackages.some((candidate) => candidate.securityMode === "full-kiosk");
 

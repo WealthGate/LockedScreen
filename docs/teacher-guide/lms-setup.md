@@ -1,6 +1,6 @@
 # LMS Setup Guide
 
-LOCKEDSCREEN works without Google Classroom, Microsoft 365, or any LMS. If a school only wants local secure exams, package export, and local result export, skip this guide.
+LOCKEDSCREEN works without Google Classroom, Microsoft 365, or any LMS. If a school only wants local secure exams, package export, and local result export, choose `Lockdown-only exam app` in `Admin Console > Overview > Package use`, save/export the package, and skip this guide.
 
 Use LMS setup only when the school wants one of these workflows:
 
@@ -62,28 +62,16 @@ Google's desktop OAuth documentation explains that Windows desktop apps can use 
 - https://developers.google.com/identity/protocols/oauth2/native-app
 - https://developers.google.com/workspace/classroom/guides/auth
 
-Default teacher/admin permission scopes currently used by LOCKEDSCREEN:
+Default teacher permission scopes currently used by LOCKEDSCREEN:
 
 ```text
-openid
-https://www.googleapis.com/auth/userinfo.email
-https://www.googleapis.com/auth/userinfo.profile
-https://www.googleapis.com/auth/classroom.courses.readonly
-https://www.googleapis.com/auth/classroom.coursework.students
-https://www.googleapis.com/auth/classroom.coursework.students.readonly
-https://www.googleapis.com/auth/classroom.rosters.readonly
-https://www.googleapis.com/auth/drive.file
-https://www.googleapis.com/auth/classroom.coursework.me
+openid email profile https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.coursework.students https://www.googleapis.com/auth/classroom.coursework.students.readonly https://www.googleapis.com/auth/classroom.rosters.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets
 ```
 
 Default student permission scopes currently used by LOCKEDSCREEN:
 
 ```text
-openid
-https://www.googleapis.com/auth/userinfo.email
-https://www.googleapis.com/auth/userinfo.profile
-https://www.googleapis.com/auth/classroom.coursework.me
-https://www.googleapis.com/auth/drive.file
+openid email profile https://www.googleapis.com/auth/classroom.coursework.me https://www.googleapis.com/auth/drive.file
 ```
 
 ### Microsoft 365 Education
@@ -134,6 +122,71 @@ After a teacher account is connected:
 
 All students in the selected class are selected by default. A teacher only needs to change this when assigning to a smaller group.
 
+## Package Use: Lockdown-only vs Integrations
+
+Every package starts from `Admin Console > Overview > Package use`.
+
+Choose `Lockdown-only exam app` when students only need the secure Lockedscreen exam runtime and local result storage. In this mode, the package omits Google Classroom, Microsoft 365, LMS turn-in, grade-sync destinations, and Google Sheets targets.
+
+Choose `LMS / grade integrations` only when the package should connect to Google Classroom, Microsoft 365, Google Sheets, or a school-owned sync endpoint. The LMS setup tabs and grade-sync controls are intended for this mode.
+
+## App-based Google Classroom Grade Sync
+
+For an app-based Lockedscreen exam, grades are always calculated locally first. Google Classroom receives grades only after the package has enough Classroom information and a permitted grade-write path.
+
+Recommended setup:
+
+1. Open `Admin Console > Overview`.
+2. Select the package for the app-based exam.
+3. Set `Package use` to `LMS / grade integrations`.
+4. Open `Google Classroom`.
+5. Enable Google Classroom if it is not enabled.
+6. In `LMS connections`, choose or create the teacher Google Classroom connection.
+7. Click `Save connection`.
+8. Click `Connect Google Classroom` or `Reconnect Google Classroom`.
+9. Complete Google sign-in with the teacher's school account.
+10. Click `Load classes` and confirm the expected class appears.
+11. Open `Student turn-in`.
+12. Enable `post-submit student LMS turn-in`.
+13. Choose the connected teacher Google account.
+14. Click `Load classes`, select the class, then click `Load assignments`.
+15. Select the Google Classroom assignment, or use `Post package to class` to create the assignment from Lockedscreen.
+16. Click `Set up grade sync for this class` or open `Grade sync` and click `Import Classroom details`.
+17. In `Grade sync`, confirm the `Classroom course ID` and `Classroom assignment ID`.
+18. Enter the school-owned `Grade-sync server URL`.
+19. Set the trigger to `Auto sync after submission`.
+20. Click `Save destination`.
+21. Click `Save package`, then export or post the package.
+
+The Classroom assignment ID is the Google Classroom `courseWork.id`. It is obtained automatically when the teacher selects an existing assignment from `Load assignments`, or when `Post package to class` creates a new Classroom assignment and Classroom returns the new ID.
+
+If a package is exported before the Classroom assignment exists, that exported package cannot contain the assignment ID. Student LMS turn-in will not work until the teacher selects/posts the assignment, saves the package, and exports/posts the updated package. A school-owned grade-sync bridge may still accept a blank assignment ID only if it maps the Lockedscreen exam/package to a Classroom assignment on the server side.
+
+Important: student machines should not contain teacher refresh tokens. If students take the exam on separate devices, use the `Google Classroom grade sync server` destination. The school-owned server or Apps Script web app owns teacher authorization and writes `draftGrade` / `assignedGrade` to Classroom.
+
+If the same teacher/admin device is used for testing, Lockedscreen can attempt direct Classroom grade sync after student turn-in because the teacher connection exists locally. In normal student-package use, the server-side grade-sync destination is the reliable path.
+
+## Microsoft 365 / Teams Grade Sync
+
+Microsoft 365 turn-in uses the connected class and assignment in the same `Student turn-in` workflow. For grade passback, use a school-owned Microsoft Graph middleware or Power Automate flow as a `Result destination`.
+
+Teacher-facing setup:
+
+1. Open `Admin Console > Overview`.
+2. Set `Package use` to `LMS / grade integrations`.
+3. Open `Google Classroom` / `LMS connections`.
+4. Choose `Microsoft 365`.
+5. Save and connect the teacher account.
+6. Open `Student turn-in`.
+7. Enable LMS turn-in.
+8. Choose the connected Microsoft 365 account, class, and assignment.
+9. Open `Grade sync`.
+10. Choose `Microsoft Teams` or `Generic LMS`.
+11. Enter the school-owned endpoint supplied by IT.
+12. Save the destination, save the package, then export it.
+
+The Microsoft endpoint must perform the teacher/application-grade write through Microsoft Graph. Lockedscreen sends the local score payload; the school service writes the grade and returns/updates submissions according to the school's Microsoft policy.
+
 ## What Students See
 
 Student flow:
@@ -177,24 +230,6 @@ Recommended flow:
 9. For another test in the same subject/class Sheet, the endpoint keeps the same student rows and adds new exam columns.
 
 Do not put teacher Google tokens or service account secrets into exported student packages. See `docs/google-sheets-sync-endpoint.md` for the endpoint payload and a minimal Apps Script example.
-
-## Reusable Grade Sync Setups
-
-Teachers can save grade-sync settings with custom names on the teacher PC.
-
-Use this when the same school endpoint, Google Sheet pattern, Classroom grade-sync bridge, Forms quiz sync setup, Microsoft Teams endpoint, or generic LMS endpoint will be reused for several exams.
-
-Recommended flow:
-
-1. Open `Admin Console > Grade sync`.
-2. Configure the destination once.
-3. Enter a clear custom name, such as `Physics Classroom + Sheet`, `Google Forms Quiz Sync`, or `WHS Grade Sync Server`.
-4. Click `Save as setup`.
-5. For a new exam, open `Grade sync`, choose the saved setup, and click `Apply setup`.
-6. Review the class, assignment, exam scope, and Sheet/Form links.
-7. Click `Save destination`.
-
-Reusable setups are local templates. They do not sync grades until a teacher applies them to an active result destination for an exam.
 
 ## Troubleshooting
 

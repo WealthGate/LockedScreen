@@ -15,8 +15,7 @@ export interface GoogleClassroomApi {
       title: string;
       description: string;
       fileName: string;
-      initialPackageJson: string;
-      buildFinalPackageJson: (courseWork: LmsCourseWork) => string;
+      packageJson: string;
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult>;
@@ -24,7 +23,7 @@ export interface GoogleClassroomApi {
 
 type ClassroomRequestError = Error & { status?: number };
 
-const googleApiError = (status: number, payload: unknown, fallbackMessage: string): ClassroomRequestError => {
+const classroomApiError = (status: number, payload: unknown): ClassroomRequestError => {
   const record = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
   const errorRecord = typeof record.error === "object" && record.error !== null ? (record.error as Record<string, unknown>) : {};
   const message = typeof errorRecord.message === "string" ? errorRecord.message : "";
@@ -64,7 +63,7 @@ const googleApiError = (status: number, payload: unknown, fallbackMessage: strin
     return error;
   }
 
-  const error = new Error(message ? `${fallbackMessage} Google said: ${message}` : fallbackMessage) as ClassroomRequestError;
+  const error = new Error("Google Classroom could not load classes right now. Check your connection and try again.") as ClassroomRequestError;
   error.status = status;
   return error;
 };
@@ -93,13 +92,10 @@ const parseCourseWork = (item: Record<string, unknown>, courseId: string): LmsCo
   };
 };
 
-const readClassroomJson = async <T>(
-  response: Response,
-  fallbackMessage = "Google Classroom could not load classes right now. Check your connection and try again."
-): Promise<T> => {
+const readClassroomJson = async <T>(response: Response): Promise<T> => {
   const payload = (await response.json().catch(() => ({}))) as unknown;
   if (!response.ok) {
-    throw googleApiError(response.status, payload, fallbackMessage);
+    throw classroomApiError(response.status, payload);
   }
 
   return payload as T;
@@ -109,7 +105,6 @@ const requiredPublishScopes = [
   "https://www.googleapis.com/auth/classroom.coursework.students",
   "https://www.googleapis.com/auth/drive.file"
 ] as const;
-const lockedscreenPackageMimeType = "application/octet-stream";
 
 const assertPublishScopesConfigured = (settings: GoogleIntegrationSettings): void => {
   const configuredScopes = new Set(settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean));
@@ -240,8 +235,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       title: string;
       description: string;
       fileName: string;
-      initialPackageJson: string;
-      buildFinalPackageJson: (courseWork: LmsCourseWork) => string;
+      packageJson: string;
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult> {
@@ -256,7 +250,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     const boundary = `lockedscreen-${Date.now().toString(36)}`;
     const metadata = {
       name: request.fileName,
-      mimeType: lockedscreenPackageMimeType
+      mimeType: "application/json"
     };
     const uploadBody = [
       `--${boundary}`,
@@ -264,15 +258,15 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       "",
       JSON.stringify(metadata),
       `--${boundary}`,
-      `Content-Type: ${lockedscreenPackageMimeType}`,
+      "Content-Type: application/json; charset=UTF-8",
       "",
-      request.initialPackageJson,
+      request.packageJson,
       `--${boundary}--`,
       ""
     ].join("\r\n");
 
     const uploadResponse = await fetch(
-      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
+      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink`,
       {
         method: "POST",
         headers: {
@@ -284,10 +278,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     );
     let driveFile: Record<string, unknown>;
     try {
-      driveFile = await readClassroomJson<Record<string, unknown>>(
-        uploadResponse,
-        "Google Drive could not upload the Lockedscreen package for Classroom."
-      );
+      driveFile = await readClassroomJson<Record<string, unknown>>(uploadResponse);
     } catch (error) {
       if ((error as ClassroomRequestError).status === 403) {
         throw classroomPublishPermissionError();
@@ -303,7 +294,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       title: request.title,
       description: request.description,
       workType: "ASSIGNMENT",
-      state: "DRAFT",
+      state: "PUBLISHED",
       materials: [
         {
           driveFile: {
@@ -332,65 +323,13 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       }
     );
     try {
-      const draftCourseWork = await readClassroomJson<Record<string, unknown>>(
-        courseWorkResponse,
-        "Google Classroom could not post the Lockedscreen package to the selected class."
-      );
-      const parsedDraftCourseWork = parseCourseWork(draftCourseWork, normalizedCourseId);
-      if (!parsedDraftCourseWork.id) {
-        throw new Error("Google Classroom did not return an assignment id for the posted package.");
-      }
-
-      const finalPackageJson = request.buildFinalPackageJson(parsedDraftCourseWork);
-      const updateFileResponse = await fetch(
-        `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files/${encodeURIComponent(driveFileId)}?uploadType=media&fields=id,name,webViewLink,webContentLink,mimeType`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": lockedscreenPackageMimeType
-          },
-          body: finalPackageJson
-        }
-      );
-      try {
-        await readClassroomJson<Record<string, unknown>>(
-          updateFileResponse,
-          "Google Drive could not finalize the Lockedscreen package with its Classroom assignment reference."
-        );
-      } catch (error) {
-        if ((error as ClassroomRequestError).status === 403) {
-          throw classroomPublishPermissionError();
-        }
-        throw error;
-      }
-
-      const publishResponse = await fetch(
-        `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork/${encodeURIComponent(parsedDraftCourseWork.id)}?updateMask=state`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ state: "PUBLISHED" })
-        }
-      );
-      const publishedCourseWork = await readClassroomJson<Record<string, unknown>>(
-        publishResponse,
-        "Google Classroom created the assignment draft but could not publish it after finalizing the package."
-      );
+      const courseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
 
       return {
-        courseWork: parseCourseWork(publishedCourseWork, normalizedCourseId),
+        courseWork: parseCourseWork(courseWork, normalizedCourseId),
         driveFileId,
         driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
-        driveFileLink:
-          typeof driveFile.webContentLink === "string"
-            ? driveFile.webContentLink
-            : typeof driveFile.webViewLink === "string"
-              ? driveFile.webViewLink
-              : undefined
+        driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined
       };
     } catch (error) {
       if ((error as ClassroomRequestError).status === 403) {

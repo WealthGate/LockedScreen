@@ -17,7 +17,7 @@ Windows packaging currently produces two main deliverables:
 - `Lockedscreen-Portable-<version>.exe`
   Portable build that can be run without a traditional install.
 
-For students and staff, prefer the standard installer unless you specifically need portable distribution. On student-owned devices, a parent, guardian, or administrator should approve the Windows administrator prompt during setup. The installer then installs and starts the Lockedscreen Security Service automatically, which is required for Full Kiosk Mode exams.
+For students and staff, prefer the standard installer unless you specifically need portable distribution.
 
 ## How To Use The App
 
@@ -52,7 +52,7 @@ Launch flow:
 
 ### LMS Integration
 
-LMS integration is optional. Schools that do not use Google Classroom, Microsoft 365, or another LMS can skip LMS setup and still use local exams, package export/import, OCR import, and CSV result export.
+LMS integration is optional. Schools that do not use Google Classroom, Microsoft 365, or another LMS can skip LMS setup and still use local exams, package export/import, OCR import, and CSV result export. In `Admin Console > Overview > Package use`, choose `Lockdown-only exam app` before exporting a package when the package should contain no LMS turn-in, Google Classroom, Google Sheets, or grade-sync setup.
 
 Teachers can connect after the school app registration is configured:
 
@@ -151,6 +151,8 @@ See:
 ## Reinstall Vs Update
 
 You do not always need to uninstall first.
+
+Installed builds check for updates shortly after startup. When a newer release is available, users see an in-app update alert outside active exam sessions. Teachers/admins can also open `Admin Console > Controls > App Updates` to check manually, download the update, and install it.
 
 ### Standard Installer Update
 

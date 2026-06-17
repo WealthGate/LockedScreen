@@ -34,15 +34,13 @@ interface AlternateDesktopLaunchRequest {
 
 const developmentRoot = join(process.cwd(), "apps", "windows-lockdown");
 const executableDir = dirname(process.execPath);
+const nativeCommandTimeoutMs = 5000;
 
 const candidateClientPaths = (): string[] => [
-  join(process.resourcesPath, "lockedscreen-security", "client", "Lockedscreen.Security.Client.exe"),
   join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
   join(process.resourcesPath, "Lockedscreen.Security.Client.exe"),
-  join(executableDir, "lockedscreen-security", "client", "Lockedscreen.Security.Client.exe"),
   join(executableDir, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
   join(executableDir, "Lockedscreen.Security.Client.exe"),
-  join(developmentRoot, "publish", "client", "Lockedscreen.Security.Client.exe"),
   join(
     developmentRoot,
     "Lockedscreen.Security.Client",
@@ -62,13 +60,10 @@ const candidateClientPaths = (): string[] => [
 ];
 
 const candidateServicePaths = (): string[] => [
-  join(process.resourcesPath, "lockedscreen-security", "service", "Lockedscreen.Security.Service.exe"),
   join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Service.exe"),
   join(process.resourcesPath, "Lockedscreen.Security.Service.exe"),
-  join(executableDir, "lockedscreen-security", "service", "Lockedscreen.Security.Service.exe"),
   join(executableDir, "lockedscreen-security", "Lockedscreen.Security.Service.exe"),
   join(executableDir, "Lockedscreen.Security.Service.exe"),
-  join(developmentRoot, "publish", "service", "Lockedscreen.Security.Service.exe"),
   join(
     developmentRoot,
     "Lockedscreen.Security.Service",
@@ -88,13 +83,10 @@ const candidateServicePaths = (): string[] => [
 ];
 
 const candidateAgentPaths = (): string[] => [
-  join(process.resourcesPath, "lockedscreen-security", "agent", "Lockedscreen.Security.Agent.exe"),
   join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Agent.exe"),
   join(process.resourcesPath, "Lockedscreen.Security.Agent.exe"),
-  join(executableDir, "lockedscreen-security", "agent", "Lockedscreen.Security.Agent.exe"),
   join(executableDir, "lockedscreen-security", "Lockedscreen.Security.Agent.exe"),
   join(executableDir, "Lockedscreen.Security.Agent.exe"),
-  join(developmentRoot, "publish", "agent", "Lockedscreen.Security.Agent.exe"),
   join(
     developmentRoot,
     "Lockedscreen.Security.Agent",
@@ -128,40 +120,20 @@ const runAgent = async (args: string[]): Promise<{ stdout: string; stderr: strin
   }
 
   return new Promise((resolve, reject) => {
+    let settled = false;
     const child = spawn(agentPath, args, {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
 
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      resolve({ stdout, stderr, code });
-    });
-  });
-};
-
-const runClient = async (args: string[]): Promise<NativeCompanionResponse> => {
-  const clientPath = locateExecutable(candidateClientPaths());
-  if (!clientPath) {
-    throw new Error("Native Windows lockdown client executable was not found.");
-  }
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(clientPath, args, {
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
+      settled = true;
+      child.kill();
+      reject(new Error(`Native lockdown agent command "${args[0] ?? "run"}" timed out.`));
+    }, nativeCommandTimeoutMs);
 
     let stdout = "";
     let stderr = "";
@@ -175,10 +147,76 @@ const runClient = async (args: string[]): Promise<NativeCompanionResponse> => {
     });
 
     child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      resolve({ stdout, stderr, code });
+    });
+  });
+};
+
+const runClient = async (args: string[]): Promise<NativeCompanionResponse> => {
+  const clientPath = locateExecutable(candidateClientPaths());
+  if (!clientPath) {
+    throw new Error("Native Windows lockdown client executable was not found.");
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const child = spawn(clientPath, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      child.kill();
+      reject(new Error(`Native lockdown client command "${args[0] ?? "status"}" timed out.`));
+    }, nativeCommandTimeoutMs);
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
       reject(error);
     });
 
     child.on("exit", (code) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
       if (code !== 0) {
         reject(new Error(stderr.trim() || stdout.trim() || `Native lockdown client exited with code ${code ?? 1}.`));
         return;
@@ -388,13 +426,38 @@ export const launchAlternateDesktopExamShell = async (
 };
 
 export const endNativeLockdownSession = async (recordSecurityEvent: SecurityEventRecorder): Promise<void> => {
+  let released = false;
   try {
-    await runAgent(["stop"]);
+    const stopResult = await runAgent(["stop"]);
+    if (stopResult.code !== 0) {
+      await recordSecurityEvent(
+        "kiosk",
+        "warning",
+        "Native Windows lockdown agent stop returned a non-zero status.",
+        stopResult.stderr.trim() || stopResult.stdout.trim() || `Exit code ${stopResult.code ?? 1}`
+      );
+    }
+  } catch (error) {
+    await recordSecurityEvent(
+      "kiosk",
+      "warning",
+      "Native Windows lockdown agent stop did not confirm before release continued.",
+      error instanceof Error ? error.message : "Unknown native agent stop error."
+    );
+  }
+
+  try {
     const response = await runClient(["end-session", "Electron session ended"]);
     if (response.ok) {
+      released = true;
       await recordSecurityEvent("kiosk", "info", "Released native Windows lockdown companion.", response.message);
     }
-  } catch {
-    // Best-effort cleanup only.
+  } catch (error) {
+    await recordSecurityEvent(
+      "kiosk",
+      released ? "info" : "warning",
+      "Native Windows lockdown companion release did not confirm before app cleanup continued.",
+      error instanceof Error ? error.message : "Unknown native companion release error."
+    );
   }
 };

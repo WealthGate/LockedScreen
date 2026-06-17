@@ -16,7 +16,8 @@ The desktop app sends JSON with schema `lockedscreen.google-classroom.grade-sync
 Important fields:
 
 - `classroom.courseId`: Google Classroom course id or the configured class reference.
-- `classroom.courseWorkId`: Lockedscreen exam/package reference for the server to map to Classroom coursework.
+- `classroom.courseWorkId`: Google Classroom coursework/assignment id when the package is bound to an assignment; otherwise a local Lockedscreen exam id for server-side mapping. If the app package was exported before the Classroom assignment existed, the bridge must map by `lockedscreenExamId`, package metadata, course id, or another school-owned mapping.
+- `classroom.lockedscreenExamId`: local Lockedscreen exam id.
 - `classroom.studentSubmissionId`: Classroom student submission reference when available.
 - `student.candidateId`: student id captured by Lockedscreen.
 - `grade.score`, `grade.totalPoints`, `grade.percentage`: local grading result.
@@ -31,7 +32,3 @@ Important fields:
 - Keep a server-side audit log of every Classroom grade write.
 
 The desktop app supports the bridge contract; the production server still needs deployment with the school's Google authorization policy and Classroom write permissions.
-
-For a simple Google Apps Script implementation, see:
-
-`docs/google-classroom-grade-sync-apps-script.md`

@@ -13,7 +13,7 @@ B
 [/QUESTION]
 
 [QUESTION]
-Simplify \sqrt{49}.
+Simplify \(\sqrt{49}\).
 [OPTION]
 A. 5
 [OPTION]
@@ -31,11 +31,11 @@ Which chemical formula represents water?
 [OPTION]
 A. HO
 [OPTION]
-B. H_2O
+B. H<sub>2</sub>O
 [OPTION]
-C. H_2O_2
+C. H<sub>2</sub>O<sub>2</sub>
 [OPTION]
-D. O_2H
+D. O<sub>2</sub>H
 [ANSWER]
 B
 [/QUESTION]

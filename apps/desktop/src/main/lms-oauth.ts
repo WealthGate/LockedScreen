@@ -69,14 +69,14 @@ const providerDefaultScope = (provider: LmsProviderType): string =>
   provider === "google-classroom"
     ? [
         "openid",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
+        "email",
+        "profile",
         "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.coursework.students",
         "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
         "https://www.googleapis.com/auth/classroom.rosters.readonly",
         "https://www.googleapis.com/auth/drive.file",
-        "https://www.googleapis.com/auth/classroom.coursework.me"
+        "https://www.googleapis.com/auth/spreadsheets"
       ].join(" ")
     : provider === "microsoft-365"
       ? [
@@ -544,8 +544,7 @@ export const publishConnectionCourseWork = async (
     title: string;
     description: string;
     fileName: string;
-    initialPackageJson: string;
-    buildFinalPackageJson: (courseWork: LmsCourseWork) => string;
+    packageJson: string;
     maxPoints?: number;
   },
   vault: OAuthVault,

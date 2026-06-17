@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 
-import { extractExamDocumentText, parseExamDocument, supportedQuestionImportExtensions } from "@lockedscreen/parser";
+import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
   Candidate,
   AppSettings,
@@ -25,6 +25,7 @@ import type {
   ResultDestination,
   RuntimeEnvironment,
   SecurityProfile,
+  StudentLmsBinding,
   StudentLmsTurnInState,
   SubmissionResult,
   SessionStartRequest
@@ -79,6 +80,14 @@ D. <Option D>
 <Single option key such as A, B, C, or D>
 [/QUESTION]
 
+Formatting examples:
+
+- Superscript and subscript: x<sup>2</sup>, H<sub>2</sub>O
+- Inline math: \\(x^2 + y^2 = z^2\\)
+- Fractions: \\(\\frac{3}{4}\\) or $$\\frac{a+b}{c}$$
+- Division: \\(12 \\div 3 = 4\\)
+- Images: use Add image in the app editor. Embedded images are stored as <img src="data:image/png;base64,..." alt="Diagram" />.
+
 Header fields the app can detect:
 
 Title: <Exam title>
@@ -94,6 +103,7 @@ Notes:
 - Use plain option keys such as A, B, C, and D.
 - Keep the answer line exact and unambiguous.
 - Do not add explanations on the ANS: or [ANSWER] line.
+- Wrap LaTeX math with \\(...\\) for inline expressions or $$...$$ for display equations.
 - Remove Word bullets or smart numbering if they change the option keys.
 - Save as .docx, .pdf, or .txt before import when possible.
 - For scans, use a straight, high-contrast image or PDF page.
@@ -105,7 +115,6 @@ import {
   configureWebContents,
   endManagedSession,
   getActivePackage,
-  getActiveSession,
   launchApprovedApplication,
   setNavigationGuard,
   urlAllowedByGuard
@@ -124,52 +133,6 @@ const launchedByNativeHost = process.argv.includes("--lockedscreen-native-hosted
 const requiresSingleInstanceLock = !launchedByNativeHost;
 const getPackageImportArg = (argv: string[]): string | null =>
   argv.find((entry) => entry.toLowerCase().endsWith(".lscp") && existsSync(entry)) ?? null;
-
-const canOpenExternalHelpUrl = (targetUrl: string): boolean => {
-  try {
-    const target = new URL(targetUrl);
-    const normalWebLink = target.protocol === "https:" || target.protocol === "http:";
-    if (!normalWebLink) {
-      return false;
-    }
-
-    return getActiveSession() ? urlAllowedByGuard(targetUrl) : true;
-  } catch {
-    return false;
-  }
-};
-
-const friendlyStudentLmsTurnInError = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : "Student LMS turn-in failed.";
-  const lowerMessage = message.toLowerCase();
-
-  if (lowerMessage.includes("access_not_configured") || lowerMessage.includes("institution") || lowerMessage.includes("admin")) {
-    return "Google blocked this student account because the school's Google Workspace admin has not allowed Lockedscreen for students. The local exam submission is saved. Ask the Google admin to review/allow the Lockedscreen OAuth app for the student organizational unit, then retry LMS turn-in.";
-  }
-
-  if (lowerMessage.includes("closed before it completed") || lowerMessage.includes("access_denied")) {
-    return "Student Google sign-in did not finish. The local exam submission is saved. If Google says the institution admin needs to review Lockedscreen, ask the Google Workspace admin to allow the app for students, then retry LMS turn-in.";
-  }
-
-  if (lowerMessage.includes("no google classroom submission")) {
-    return "No matching Google Classroom submission was found for this student account. The local exam submission is saved. Confirm the student is enrolled in the selected class and that the package is connected to the correct Classroom assignment.";
-  }
-
-  if (
-    lowerMessage.includes("developer console project") ||
-    lowerMessage.includes("developer project") ||
-    lowerMessage.includes("created the corresponding course work") ||
-    lowerMessage.includes("requesting developer")
-  ) {
-    return "Google Classroom will only accept turn-in, attachment, and grade updates for assignments created by this same Lockedscreen Google app. The local exam submission is saved. Repost/export the exam to Classroom from Lockedscreen with the connected teacher account, then have the student retry LMS turn-in.";
-  }
-
-  if (lowerMessage.includes("addattachments") || lowerMessage.includes("modifyattachments")) {
-    return "Google Classroom rejected the result attachment request. The local exam submission is saved. Update Lockedscreen, confirm the Classroom item is an Assignment created from Lockedscreen, then retry LMS turn-in.";
-  }
-
-  return message;
-};
 const initialPackageImportPath = getPackageImportArg(process.argv);
 const readInstalledRole = (): InstalledAppRole => {
   const rolePath = join(process.resourcesPath, "install-role.json");
@@ -203,7 +166,6 @@ const preloadPath = (() => {
 let mainWindow: BrowserWindow | null = null;
 let processMonitorTimer: NodeJS.Timeout | null = null;
 let lastProcessAlert = "";
-let updateInstallRestarting = false;
 let pendingLaunchContext: LaunchContext = {
   route: launchRoute,
   nativeHosted: launchedByNativeHost,
@@ -376,7 +338,7 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
 
 const syncSubmissionResultsInternal = async (
   submissionId: string,
-  options?: { autoOnly?: boolean; packageDestinations?: ResultDestination[]; destinationTypes?: ResultDestination["type"][] }
+  options?: { autoOnly?: boolean; includeLocalDestinations?: boolean; packageDestinations?: ResultDestination[] }
 ): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
   const submission = snapshot.submissions.find((candidate) => candidate.id === submissionId);
@@ -390,11 +352,9 @@ const syncSubmissionResultsInternal = async (
   }
 
   const destinationMap = new Map<string, ResultDestination>();
-  [...snapshot.resultDestinations, ...(options?.packageDestinations ?? [])].forEach((destination) => {
+  const localDestinations = options?.includeLocalDestinations === false ? [] : snapshot.resultDestinations;
+  [...localDestinations, ...(options?.packageDestinations ?? [])].forEach((destination) => {
     if (options?.autoOnly && destination.trigger !== "auto-on-submit") {
-      return;
-    }
-    if (options?.destinationTypes && !options.destinationTypes.includes(destination.type)) {
       return;
     }
     destinationMap.set(destination.id, destination);
@@ -447,10 +407,6 @@ const sanitizePackageResultDestination = (destination: ResultDestination): Resul
     return null;
   }
 
-  if (destination.type === "google-forms-quiz-classroom-sync") {
-    return null;
-  }
-
   return {
     ...destination,
     authToken: undefined,
@@ -466,68 +422,53 @@ const sanitizePackageResultDestination = (destination: ResultDestination): Resul
 const packageResultDestinationsForExport = (
   snapshot: AppStateSnapshot,
   configPackage: ExamConfigPackage
-): ResultDestination[] =>
-  snapshot.resultDestinations
+): ResultDestination[] => {
+  if (configPackage.externalDeliveryMode === "lockdown-only") {
+    return [];
+  }
+
+  return snapshot.resultDestinations
     .filter((destination) => destination.examIds.length === 0 || destination.examIds.includes(configPackage.examId))
     .map(sanitizePackageResultDestination)
     .filter((destination): destination is ResultDestination => destination !== null);
-
-const normalizeEmailDomain = (value: string): string =>
-  value.trim().replace(/^@+/, "").toLowerCase();
-
-const uniqueEmailDomains = (domains: string[]): string[] =>
-  Array.from(new Set(domains.map(normalizeEmailDomain).filter(Boolean)));
-
-const domainFromEmail = (email?: string): string | null => {
-  const trimmed = email?.trim().toLowerCase();
-  const atIndex = trimmed?.lastIndexOf("@") ?? -1;
-  return trimmed && atIndex >= 0 ? normalizeEmailDomain(trimmed.slice(atIndex + 1)) : null;
 };
 
-const connectedTeacherDomainForPackage = (
-  snapshot: AppStateSnapshot,
-  configPackage: ExamConfigPackage
-): string | null => {
-  const binding = configPackage.studentLmsBinding;
-  const connection = binding.connectionId
-    ? snapshot.lmsConnections.find((candidate) => candidate.id === binding.connectionId)
-    : snapshot.lmsConnections.find((candidate) => candidate.provider === binding.provider && candidate.status === "connected");
-  return (
-    domainFromEmail(connection?.accountEmail) ??
-    (binding.provider === "google-classroom" ? domainFromEmail(snapshot.settings.googleIntegration.accountEmail) : null)
-  );
-};
+const lockdownOnlyStudentLmsBinding = (binding: StudentLmsBinding): StudentLmsBinding => ({
+  ...binding,
+  enabled: false,
+  connectionId: undefined,
+  clientId: "",
+  clientSecret: undefined,
+  tenantId: binding.provider === "microsoft-365" ? "common" : "",
+  scope: "",
+  courseId: "",
+  courseLabel: undefined,
+  assignmentId: "",
+  assignmentLabel: undefined
+});
 
-const applyStudentEmailDomainDefaults = (
+const configPackageForExport = (
   snapshot: AppStateSnapshot,
   configPackage: ExamConfigPackage
 ): ExamConfigPackage => {
-  const explicitDomains = uniqueEmailDomains(configPackage.studentAccessPolicy.allowedEmailDomains ?? []);
-  const fallbackDomain = explicitDomains.length === 0 ? connectedTeacherDomainForPackage(snapshot, configPackage) : null;
-  return {
+  const basePackage: ExamConfigPackage = {
     ...configPackage,
-    studentAccessPolicy: {
-      ...configPackage.studentAccessPolicy,
-      allowedEmailDomains: explicitDomains.length > 0 ? explicitDomains : fallbackDomain ? [fallbackDomain] : []
-    }
+    passwordHint: undefined
+  };
+
+  if (configPackage.externalDeliveryMode === "lockdown-only") {
+    return {
+      ...basePackage,
+      studentLmsBinding: lockdownOnlyStudentLmsBinding(configPackage.studentLmsBinding),
+      resultDestinations: []
+    };
+  }
+
+  return {
+    ...basePackage,
+    resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
   };
 };
-
-const preparePackageForStudentExport = (
-  snapshot: AppStateSnapshot,
-  configPackage: ExamConfigPackage
-): ExamConfigPackage => ({
-  ...applyStudentEmailDomainDefaults(snapshot, configPackage),
-  passwordHint: undefined,
-  resultDestinations: packageResultDestinationsForExport(snapshot, configPackage)
-});
-
-const postTurnInGradeSyncDestinations = (configPackage: ExamConfigPackage): ResultDestination[] =>
-  configPackage.resultDestinations.filter(
-    (destination) =>
-      destination.trigger === "auto-on-submit" &&
-      destination.type === "google-classroom-grade-sync"
-  );
 
 const syncPendingResultsInternal = async (): Promise<AppStateSnapshot> => {
   const snapshot = await storage.getSnapshot();
@@ -566,10 +507,6 @@ const createWindow = async (): Promise<void> => {
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.on("close", (event) => {
-    if (updateInstallRestarting) {
-      return;
-    }
-
     if (!getActivePackage()) {
       return;
     }
@@ -672,17 +609,7 @@ app.whenReady().then(async () => {
     await queuePackageImportLaunch(initialPackageImportPath);
   }
 
-  configureAppUpdates(() => mainWindow, {
-    onBeforeInstall: () => {
-      updateInstallRestarting = true;
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        return;
-      }
-
-      mainWindow.setAlwaysOnTop(false);
-      mainWindow.setFullScreen(false);
-    }
-  });
+  configureAppUpdates(() => mainWindow);
 
   ipcMain.handle("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
   ipcMain.handle("app:getLaunchContext", async () => pendingLaunchContext);
@@ -737,8 +664,7 @@ app.whenReady().then(async () => {
       throw new Error("Invalid configuration package payload.");
     }
 
-    const snapshot = await storage.getSnapshot();
-    return withRuntime(storage.saveConfigPackage(applyStudentEmailDomainDefaults(snapshot, configPackage)));
+    return withRuntime(storage.saveConfigPackage(configPackage));
   });
 
   ipcMain.handle("resultsDestination:save", async (_event, destination: unknown) => {
@@ -747,14 +673,6 @@ app.whenReady().then(async () => {
     }
 
     return withRuntime(storage.saveResultDestination(destination));
-  });
-
-  ipcMain.handle("resultsDestinationTemplate:save", async (_event, destination: unknown) => {
-    if (!isResultDestination(destination)) {
-      throw new Error("Invalid reusable grade-sync setup payload.");
-    }
-
-    return withRuntime(storage.saveResultDestinationTemplate(destination));
   });
 
   ipcMain.handle("lmsConnection:save", async (_event, connection: unknown) => {
@@ -952,14 +870,6 @@ app.whenReady().then(async () => {
     return withRuntime(storage.deleteResultDestination(destinationId));
   });
 
-  ipcMain.handle("resultsDestinationTemplate:delete", async (_event, destinationId: unknown) => {
-    if (typeof destinationId !== "string") {
-      throw new Error("Invalid reusable grade-sync setup id.");
-    }
-
-    return withRuntime(storage.deleteResultDestinationTemplate(destinationId));
-  });
-
   ipcMain.handle("configPackage:delete", async (_event, packageId: unknown) => {
     if (typeof packageId !== "string") {
       throw new Error("Invalid configuration package id.");
@@ -991,7 +901,7 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const exportPackage = preparePackageForStudentExport(snapshot, configPackage);
+    const exportPackage = configPackageForExport(snapshot, configPackage);
     const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
 
     const output = await dialog.showSaveDialog({
@@ -1023,6 +933,10 @@ app.whenReady().then(async () => {
     }
 
     const binding = configPackage.studentLmsBinding;
+    if (configPackage.externalDeliveryMode === "lockdown-only") {
+      throw new Error("Switch this package to LMS/grade integrations before posting it to Google Classroom.");
+    }
+
     if (!binding.enabled || binding.provider !== "google-classroom" || !binding.connectionId || !binding.courseId) {
       throw new Error("Select a connected Google Classroom class before posting this package.");
     }
@@ -1037,12 +951,11 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const exportPackage = preparePackageForStudentExport(snapshot, configPackage);
+    const exportPackage = configPackageForExport(snapshot, configPackage);
     const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
     const safePackageLabel = configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package";
     const fileName = `${safePackageLabel}.lscp`;
     const totalPoints = exam.questions.reduce((sum, question) => sum + question.points, 0);
-    let boundExportPackage: ExamConfigPackage | null = null;
     const published = await publishConnectionCourseWork(
       connection,
       {
@@ -1050,28 +963,11 @@ app.whenReady().then(async () => {
         title: exam.title || configPackage.label || "Lockedscreen exam",
         description: [
           "Open the attached Lockedscreen exam package on the school device to begin.",
-          "Download the .lscp attachment first, then double-click the downloaded file if Lockedscreen is installed.",
-          "Do not open the package in a text editor or Google Drive preview.",
+          "Double-click the .lscp attachment if Lockedscreen is installed.",
           configPackage.description.trim()
         ].filter(Boolean).join("\n\n"),
         fileName,
-        initialPackageJson: JSON.stringify(protectedFile, null, 2),
-        buildFinalPackageJson: (courseWork) => {
-          boundExportPackage = {
-            ...exportPackage,
-            studentLmsBinding: {
-              ...exportPackage.studentLmsBinding,
-              assignmentId: courseWork.id,
-              assignmentLabel: courseWork.title
-            },
-            updatedAt: new Date().toISOString()
-          };
-          return JSON.stringify(
-            protectConfigPackage(boundExportPackage, automaticPackagePassword, exam),
-            null,
-            2
-          );
-        },
+        packageJson: JSON.stringify(protectedFile, null, 2),
         maxPoints: totalPoints > 0 ? totalPoints : undefined
       },
       oauthVault,
@@ -1080,7 +976,6 @@ app.whenReady().then(async () => {
 
     const nextPackage: ExamConfigPackage = {
       ...configPackage,
-      studentAccessPolicy: (boundExportPackage ?? exportPackage).studentAccessPolicy,
       studentLmsBinding: {
         ...binding,
         assignmentId: published.courseWork.id,
@@ -1155,7 +1050,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("import:questions", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters: [{ name: "Supported exam files", extensions: [...supportedQuestionImportExtensions] }]
+      filters: [{ name: "Supported exam files", extensions: ["txt", "doc", "docx", "pdf", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"] }]
     });
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -1247,12 +1142,10 @@ app.whenReady().then(async () => {
       throw new Error("Configuration package not found.");
     }
 
-    const windowsFullKioskPackage = process.platform === "win32" && configPackage.securityMode === "full-kiosk";
     const needsNativeCompanion =
       !launchedByNativeHost &&
-      (windowsFullKioskPackage ||
-        ((configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
-          nativeCompanionRequired(snapshot.securityProfile)));
+      (configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
+      nativeCompanionRequired(snapshot.securityProfile);
 
     if (needsNativeCompanion) {
       await beginNativeLockdownSession(request, configPackage, recordSecurityEvent);
@@ -1290,7 +1183,7 @@ app.whenReady().then(async () => {
       throw new Error("Configuration package not found.");
     }
 
-    if (configPackage.securityMode !== "full-kiosk") {
+    if (configPackage.securityMode !== "full-kiosk" || !nativeCompanionRequired(snapshot.securityProfile)) {
       return false;
     }
 
@@ -1351,11 +1244,16 @@ app.whenReady().then(async () => {
       throw new Error("Invalid submission payload.");
     }
 
-    const result = await storage.recordSubmission(payload.exam, payload.session);
     const activePackage = getActivePackage();
+    const activePackageIsLockdownOnly = activePackage?.externalDeliveryMode === "lockdown-only";
+    const result = await storage.recordSubmission(payload.exam, payload.session, {
+      externalDeliveryMode: activePackage?.externalDeliveryMode,
+      packageId: activePackage?.id,
+      resultDestinations: activePackageIsLockdownOnly ? [] : undefined
+    });
     let snapshot = await storage.getSnapshot();
 
-    if (activePackage?.studentLmsBinding.enabled) {
+    if (!activePackageIsLockdownOnly && activePackage?.studentLmsBinding.enabled) {
       const pendingTurnInState: StudentLmsTurnInState = {
         provider: activePackage.studentLmsBinding.provider,
         status: "pending",
@@ -1366,7 +1264,10 @@ app.whenReady().then(async () => {
       result.studentLmsTurnIn = pendingTurnInState;
     }
 
-    const packageAutoDestinations = activePackage?.resultDestinations.filter((destination) => destination.trigger === "auto-on-submit") ?? [];
+    const packageAutoDestinations =
+      activePackageIsLockdownOnly
+        ? []
+        : activePackage?.resultDestinations.filter((destination) => destination.trigger === "auto-on-submit") ?? [];
     for (const destination of packageAutoDestinations) {
       const pendingSyncState = {
         destinationId: destination.id,
@@ -1383,6 +1284,7 @@ app.whenReady().then(async () => {
 
     void syncSubmissionResultsInternal(result.id, {
       autoOnly: true,
+      includeLocalDestinations: !activePackageIsLockdownOnly,
       packageDestinations: packageAutoDestinations
     }).catch(() => {
       // Best-effort auto-sync must never block local submission completion.
@@ -1407,6 +1309,10 @@ app.whenReady().then(async () => {
     const configPackage = snapshot.configPackages.find((candidate) => candidate.id === payload.packageId);
     if (!configPackage) {
       throw new Error("Configuration package not found.");
+    }
+
+    if (configPackage.externalDeliveryMode === "lockdown-only") {
+      throw new Error("This package is configured for lockdown-only use and has no LMS turn-in.");
     }
 
     const exam = snapshot.exams.find((candidate) => candidate.id === configPackage.examId);
@@ -1435,28 +1341,23 @@ app.whenReady().then(async () => {
         throw new Error("Updated submission not found.");
       }
 
-      const postTurnInDestinations = postTurnInGradeSyncDestinations(configPackage);
-      if (postTurnInDestinations.length > 0) {
-        void syncSubmissionResultsInternal(submission.id, {
-          autoOnly: true,
-          packageDestinations: postTurnInDestinations,
-          destinationTypes: ["google-classroom-grade-sync"]
-        }).catch((syncError) => {
-          void recordSecurityEvent(
-            "results",
-            "warning",
-            `Post-turn-in grade sync failed for "${submission.examTitle}".`,
-            syncError instanceof Error ? syncError.message : "Post-turn-in grade sync failed."
-          );
-        });
-      }
-
       await recordSecurityEvent(
         "results",
         "info",
         `Student LMS turn-in succeeded for "${submission.examTitle}".`,
         state.externalReference
       );
+
+      const packageAutoDestinations = configPackage.resultDestinations.filter(
+        (destination) => destination.trigger === "auto-on-submit"
+      );
+      void syncSubmissionResultsInternal(submission.id, {
+        autoOnly: true,
+        includeLocalDestinations: true,
+        packageDestinations: packageAutoDestinations
+      }).catch(() => {
+        // Best-effort retry after LMS turn-in must not block the post-submit screen.
+      });
 
       return {
         state,
@@ -1468,7 +1369,7 @@ app.whenReady().then(async () => {
         provider: configPackage.studentLmsBinding.provider,
         status: "failed",
         lastAttemptAt: new Date().toISOString(),
-        lastError: friendlyStudentLmsTurnInError(error)
+        lastError: error instanceof Error ? error.message : "Student LMS turn-in failed."
       };
       const nextSnapshot = await storage.updateSubmissionStudentLmsTurnIn(submission.id, failedState);
       const updatedSubmission = nextSnapshot.submissions.find((candidate) => candidate.id === submission.id);
@@ -1510,11 +1411,13 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("shell:openExternal", async (_event, url: unknown) => {
-    if (typeof url !== "string" || !canOpenExternalHelpUrl(url)) {
-      throw new Error("This link cannot be opened right now.");
+    if (typeof url === "string" && urlAllowedByGuard(url)) {
+      await shell.openExternal(url);
     }
+  });
 
-    await shell.openExternal(url);
+  ipcMain.handle("help:openGoogleAppsScript", async () => {
+    await shell.openExternal("https://script.google.com/home/projects/create");
   });
 
   await createWindow();

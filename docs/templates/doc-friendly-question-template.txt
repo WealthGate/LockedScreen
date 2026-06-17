@@ -15,5 +15,9 @@ Answer: <Single option key such as A, B, C, or D>
 Notes:
 - Use plain letters for options.
 - Keep the answer line exact and unambiguous.
+- Use <sup>...</sup> for superscript and <sub>...</sub> for subscript, such as x<sup>2</sup> or H<sub>2</sub>O.
+- Wrap inline math in \(...\), such as \(x^2 + y^2 = z^2\).
+- Use $$...$$ for display equations, such as $$\frac{3}{4} \div 2 = \frac{3}{8}$$.
+- In the app editor, use the image button to embed PNG, JPG, GIF, or WebP images directly into a question or option.
 - If you draft in Word, remove bullets and smart numbering before export if they alter the option keys.
 - Save as plain text before import when possible.
