@@ -6206,13 +6206,67 @@ const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
               : state?.status === "error"
                 ? "Update check failed"
                 : "Update not checked";
+  const busy = state?.status === "checking" || state?.status === "downloading" || state?.status === "installing";
+  const action =
+    state?.status === "available"
+      ? {
+          label: "Download update",
+          icon: <Download className="size-4" />,
+          onClick: () => void window.lockedscreenApi.downloadUpdate(),
+          disabled: false
+        }
+      : state?.status === "downloaded"
+        ? {
+            label: "Install update",
+            icon: null,
+            onClick: () => void window.lockedscreenApi.installUpdate(),
+            disabled: false
+          }
+        : state?.status === "downloading"
+          ? {
+              label: typeof state.percent === "number" ? `Downloading ${state.percent}%` : "Downloading",
+              icon: <Loader2 className="size-4 animate-spin" />,
+              onClick: () => undefined,
+              disabled: true
+            }
+          : state?.status === "checking"
+            ? {
+                label: "Checking",
+                icon: <Loader2 className="size-4 animate-spin" />,
+                onClick: () => undefined,
+                disabled: true
+              }
+            : state?.status === "installing"
+              ? {
+                  label: "Installing",
+                  icon: <Loader2 className="size-4 animate-spin" />,
+                  onClick: () => undefined,
+                  disabled: true
+                }
+              : {
+                  label: state?.status === "error" ? "Check again" : "Check for updates",
+                  icon: null,
+                  onClick: () => void window.lockedscreenApi.checkForUpdates(),
+                  disabled: false
+                };
 
   return (
-    <div className="pointer-events-none fixed bottom-3 right-3 z-40">
-      <div className="rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-800 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 dark:text-slate-100">
-        <span>{label}</span>
-        <span className="mx-2 text-slate-400">|</span>
-        <span>{status}</span>
+    <div className="fixed bottom-3 right-3 z-40 max-w-[calc(100vw-1.5rem)]">
+      <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-800 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 dark:text-slate-100 sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <span>{label}</span>
+          <span className="mx-2 text-slate-400">|</span>
+          <span>{status}</span>
+        </div>
+        <Button
+          variant={state?.status === "downloaded" ? "primary" : "secondary"}
+          className="h-8 shrink-0 px-3 text-xs"
+          onClick={action.onClick}
+          disabled={busy || action.disabled}
+        >
+          {action.icon}
+          {action.label}
+        </Button>
       </div>
     </div>
   );
