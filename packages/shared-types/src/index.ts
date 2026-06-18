@@ -213,6 +213,7 @@ export interface GoogleClassroomPublishResult {
   driveFileId?: string;
   driveFileName?: string;
   driveFileLink?: string;
+  driveFileDownloadLink?: string;
 }
 
 export interface LmsStudent {

@@ -15,13 +15,17 @@ export interface GoogleClassroomApi {
       title: string;
       description: string;
       fileName: string;
-      packageJson: string;
+      packageJson: PublishPackageJsonBuilder;
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult>;
 }
 
 type ClassroomRequestError = Error & { status?: number };
+type PublishPackageJsonContext = Pick<LmsCourseWork, "id" | "title"> | null;
+type PublishPackageJsonBuilder = string | ((context: PublishPackageJsonContext) => string);
+
+const lockedscreenPackageMimeType = "application/octet-stream";
 
 const classroomApiError = (status: number, payload: unknown): ClassroomRequestError => {
   const record = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
@@ -100,6 +104,31 @@ const readClassroomJson = async <T>(response: Response): Promise<T> => {
 
   return payload as T;
 };
+
+const packageJsonForContext = (builder: PublishPackageJsonBuilder, context: PublishPackageJsonContext): string =>
+  typeof builder === "function" ? builder(context) : builder;
+
+const driveDownloadLink = (driveFileId: string, driveFile: Record<string, unknown>): string =>
+  typeof driveFile.webContentLink === "string"
+    ? driveFile.webContentLink
+    : `https://drive.google.com/uc?export=download&id=${encodeURIComponent(driveFileId)}`;
+
+const createPackageUploadBody = (boundary: string, fileName: string, packageJson: string): string =>
+  [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify({
+      name: fileName,
+      mimeType: lockedscreenPackageMimeType
+    }),
+    `--${boundary}`,
+    `Content-Type: ${lockedscreenPackageMimeType}`,
+    "",
+    packageJson,
+    `--${boundary}--`,
+    ""
+  ].join("\r\n");
 
 const requiredPublishScopes = [
   "https://www.googleapis.com/auth/classroom.coursework.students",
@@ -235,7 +264,7 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       title: string;
       description: string;
       fileName: string;
-      packageJson: string;
+      packageJson: PublishPackageJsonBuilder;
       maxPoints?: number;
     }
   ): Promise<GoogleClassroomPublishResult> {
@@ -248,25 +277,10 @@ export class GoogleClassroomService implements GoogleClassroomApi {
 
     const accessToken = await this.oauth.getAccessToken(connectionId, settings);
     const boundary = `lockedscreen-${Date.now().toString(36)}`;
-    const metadata = {
-      name: request.fileName,
-      mimeType: "application/json"
-    };
-    const uploadBody = [
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      JSON.stringify(metadata),
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      request.packageJson,
-      `--${boundary}--`,
-      ""
-    ].join("\r\n");
+    const uploadBody = createPackageUploadBody(boundary, request.fileName, packageJsonForContext(request.packageJson, null));
 
     const uploadResponse = await fetch(
-      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink`,
+      `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
       {
         method: "POST",
         headers: {
@@ -289,12 +303,13 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     if (!driveFileId) {
       throw new Error("Google Drive did not return a file id for the exported package.");
     }
+    const downloadLink = driveDownloadLink(driveFileId, driveFile);
 
     const courseWorkBody: Record<string, unknown> = {
       title: request.title,
       description: request.description,
       workType: "ASSIGNMENT",
-      state: "PUBLISHED",
+      state: "DRAFT",
       materials: [
         {
           driveFile: {
@@ -303,6 +318,12 @@ export class GoogleClassroomService implements GoogleClassroomApi {
               title: request.fileName
             },
             shareMode: "VIEW"
+          }
+        },
+        {
+          link: {
+            url: downloadLink,
+            title: `Download ${request.fileName}`
           }
         }
       ]
@@ -323,13 +344,48 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       }
     );
     try {
-      const courseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
+      const createdCourseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
+      const draftCourseWork = parseCourseWork(createdCourseWork, normalizedCourseId);
+
+      if (typeof request.packageJson === "function") {
+        const updateBoundary = `lockedscreen-${Date.now().toString(36)}-final`;
+        const updateResponse = await fetch(
+          `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files/${encodeURIComponent(driveFileId)}?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
+          {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": `multipart/related; boundary=${updateBoundary}`
+            },
+            body: createPackageUploadBody(
+              updateBoundary,
+              request.fileName,
+              packageJsonForContext(request.packageJson, draftCourseWork)
+            )
+          }
+        );
+        driveFile = await readClassroomJson<Record<string, unknown>>(updateResponse);
+      }
+
+      const publishResponse = await fetch(
+        `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork/${encodeURIComponent(draftCourseWork.id)}?updateMask=state`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ state: "PUBLISHED" })
+        }
+      );
+      const publishedCourseWork = await readClassroomJson<Record<string, unknown>>(publishResponse);
 
       return {
-        courseWork: parseCourseWork(courseWork, normalizedCourseId),
+        courseWork: parseCourseWork(publishedCourseWork, normalizedCourseId),
         driveFileId,
         driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
-        driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined
+        driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined,
+        driveFileDownloadLink: driveDownloadLink(driveFileId, driveFile)
       };
     } catch (error) {
       if ((error as ClassroomRequestError).status === 403) {

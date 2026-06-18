@@ -4593,8 +4593,8 @@ const SettingsPage = () => {
             <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950">
               <div className="font-semibold">Post this test to Google Classroom</div>
               <p className="mt-1">
-                Lockedscreen will upload the protected `.lscp` package to the teacher's Google Drive and publish it as
-                classwork in the selected class: {packageDraft.studentLmsBinding.courseLabel || "choose a class above first"}.
+                Lockedscreen will post a downloadable `.lscp` package and a direct download link as classwork in the
+                selected class: {packageDraft.studentLmsBinding.courseLabel || "choose a class above first"}.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button

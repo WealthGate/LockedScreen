@@ -952,7 +952,20 @@ app.whenReady().then(async () => {
     }
 
     const exportPackage = configPackageForExport(snapshot, configPackage);
-    const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
+    const packageJson = (courseWork: Pick<LmsCourseWork, "id" | "title"> | null): string => {
+      const packageForUpload = courseWork
+        ? {
+            ...exportPackage,
+            studentLmsBinding: {
+              ...exportPackage.studentLmsBinding,
+              assignmentId: courseWork.id,
+              assignmentLabel: courseWork.title
+            },
+            updatedAt: new Date().toISOString()
+          }
+        : exportPackage;
+      return JSON.stringify(protectConfigPackage(packageForUpload, automaticPackagePassword, exam), null, 2);
+    };
     const safePackageLabel = configPackage.label.replace(/[<>:\"/\\\\|?*]+/g, "-").slice(0, 60) || "lockedscreen-package";
     const fileName = `${safePackageLabel}.lscp`;
     const totalPoints = exam.questions.reduce((sum, question) => sum + question.points, 0);
@@ -962,12 +975,13 @@ app.whenReady().then(async () => {
         courseId: binding.courseId,
         title: exam.title || configPackage.label || "Lockedscreen exam",
         description: [
-          "Open the attached Lockedscreen exam package on the school device to begin.",
-          "Double-click the .lscp attachment if Lockedscreen is installed.",
+          "Download the attached Lockedscreen .lscp exam package on the school device to begin.",
+          "Use the Download Lockedscreen package link, then open the downloaded .lscp file with Lockedscreen.",
+          "Do not use Google Drive preview; the package must be opened by the Lockedscreen app.",
           configPackage.description.trim()
         ].filter(Boolean).join("\n\n"),
         fileName,
-        packageJson: JSON.stringify(protectedFile, null, 2),
+        packageJson,
         maxPoints: totalPoints > 0 ? totalPoints : undefined
       },
       oauthVault,

@@ -158,9 +158,9 @@ Recommended setup:
 20. Click `Save destination`.
 21. Click `Save package`, then export or post the package.
 
-The Classroom assignment ID is the Google Classroom `courseWork.id`. It is obtained automatically when the teacher selects an existing assignment from `Load assignments`, or when `Post package to class` creates a new Classroom assignment and Classroom returns the new ID.
+The Classroom assignment ID is the Google Classroom `courseWork.id`. It is obtained automatically when the teacher selects an existing assignment from `Load assignments`, or when `Post package to class` creates a new Classroom assignment and Classroom returns the new ID. Posted packages are uploaded as downloadable `.lscp` files, not Google text/JSON documents. Students should use the Classroom download link or download the attachment, then open the downloaded `.lscp` file with Lockedscreen.
 
-If a package is exported before the Classroom assignment exists, that exported package cannot contain the assignment ID. Student LMS turn-in will not work until the teacher selects/posts the assignment, saves the package, and exports/posts the updated package. A school-owned grade-sync bridge may still accept a blank assignment ID only if it maps the Lockedscreen exam/package to a Classroom assignment on the server side.
+If a package is manually exported before the Classroom assignment exists, that exported file cannot contain the assignment ID. Student LMS turn-in will not work from that older exported file until the teacher selects or posts the assignment, saves the package, and exports an updated file. `Post package to class` performs this update automatically for the package it posts to Classroom.
 
 Important: student machines should not contain teacher refresh tokens. If students take the exam on separate devices, use the `Google Classroom grade sync server` destination. The school-owned server or Apps Script web app owns teacher authorization and writes `draftGrade` / `assignedGrade` to Classroom.
 
