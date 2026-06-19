@@ -173,7 +173,7 @@ export const RichContentEditor = ({
   ];
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
         {actions.map((action) => {
           const Icon = action.icon;
@@ -208,7 +208,7 @@ export const RichContentEditor = ({
           onChange={uploadImage}
         />
       </div>
-      {imageError ? <div className="border-b border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{imageError}</div> : null}
+      {imageError ? <div className="break-words border-b border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{imageError}</div> : null}
       <Textarea
         ref={textareaRef}
         value={value}

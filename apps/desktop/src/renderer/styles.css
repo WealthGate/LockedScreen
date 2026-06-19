@@ -23,14 +23,42 @@
   color: #e2e8f0;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background: transparent;
 }
 
 #root {
   min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
 }
 
 ::-webkit-scrollbar {
@@ -44,6 +72,8 @@ body {
 }
 
 .rich-content {
+  min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
 
@@ -75,7 +105,10 @@ body {
 }
 
 .rich-content table {
+  display: block;
   width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
   margin: 0.75rem 0;
   border-collapse: collapse;
 }

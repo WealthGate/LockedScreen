@@ -492,8 +492,8 @@ const createWindow = async (): Promise<void> => {
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
-    minWidth: Math.min(1200, windowWidth),
-    minHeight: Math.min(760, windowHeight),
+    minWidth: Math.min(360, windowWidth),
+    minHeight: Math.min(560, windowHeight),
     backgroundColor: "#e2e8f0",
     title: "LOCKEDSCREEN",
     autoHideMenuBar: true,

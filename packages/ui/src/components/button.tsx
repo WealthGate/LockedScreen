@@ -22,7 +22,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       ref={ref}
       type={props.type ?? "button"}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-2xl border border-transparent px-4 py-2.5 text-sm font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-slate-950",
+        "inline-flex min-w-0 max-w-full items-center justify-center gap-2 whitespace-normal break-words rounded-2xl border border-transparent px-4 py-2.5 text-center text-sm font-semibold leading-5 transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-slate-950 [&>svg]:shrink-0",
         variants[variant],
         className
       )}

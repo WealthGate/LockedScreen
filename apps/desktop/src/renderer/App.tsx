@@ -589,7 +589,7 @@ const feedbackTone = (tone: "success" | "error" | "info"): string =>
       : "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/70 dark:bg-blue-950/60 dark:text-blue-100";
 
 const selectClassName =
-  "h-11 rounded-2xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/25 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-offset-slate-950";
+  "h-11 w-full min-w-0 max-w-full rounded-2xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/25 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-offset-slate-950";
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) {
@@ -791,7 +791,7 @@ const AppFrame = () => {
   }
 
   return (
-    <div className={`min-h-screen text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-4 sm:p-6"}`}>
+    <div className={`min-h-screen min-w-0 max-w-full overflow-x-hidden text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-3 sm:p-6"}`}>
       {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
         <Routes>
@@ -845,19 +845,19 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
   const navigate = useNavigate();
 
   return (
-    <div className="grid min-h-[calc(100vh-2rem)] gap-6 lg:grid-cols-[280px_1fr]">
-      <aside className="rounded-[32px] border border-white/60 bg-slate-950/90 p-6 text-white shadow-2xl shadow-slate-900/30">
-        <div className="mb-10 flex items-center gap-3">
+    <div className="grid min-w-0 gap-4 xl:min-h-[calc(100vh-2rem)] xl:grid-cols-[260px_minmax(0,1fr)] xl:gap-6">
+      <aside className="min-w-0 rounded-[28px] border border-white/60 bg-slate-950/90 p-4 text-white shadow-2xl shadow-slate-900/30 sm:p-6 xl:rounded-[32px]">
+        <div className="mb-5 flex min-w-0 items-center gap-3 xl:mb-10">
           <div className="rounded-2xl bg-teal-500/20 p-3 text-teal-200">
             <ShieldCheck className="size-6" />
           </div>
-          <div>
-            <div className="text-sm uppercase tracking-[0.3em] text-slate-400">LOCKEDSCREEN</div>
+          <div className="min-w-0">
+            <div className="break-words text-sm uppercase tracking-[0.3em] text-slate-400">LOCKEDSCREEN</div>
             <div className="text-xl font-semibold">Exam Control</div>
           </div>
         </div>
 
-        <nav className="space-y-2">
+        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:block xl:space-y-2">
           {teacherNavItems.map((item) => {
             const Icon = item.icon;
             return (
@@ -865,19 +865,19 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition ${
+                  `flex min-w-0 items-center justify-center gap-2 rounded-2xl px-3 py-3 text-center text-sm transition xl:justify-start xl:px-4 xl:text-left ${
                     isActive ? "bg-white text-slate-950 shadow-glow" : "text-slate-300 hover:bg-white/10 hover:text-white"
                   }`
                 }
               >
-                <Icon className="size-4" />
-                <span>{item.label}</span>
+                <Icon className="size-4 shrink-0" />
+                <span className="min-w-0 break-words">{item.label}</span>
               </NavLink>
             );
           })}
         </nav>
 
-        <Card className="mt-10 border-none bg-slate-900 p-5 text-white">
+        <Card className="mt-5 border-none bg-slate-900 p-4 text-white sm:p-5 xl:mt-10">
           <CardTitle className="text-white">Deployment note</CardTitle>
           <CardDescription className="mt-2 text-slate-100">
             Real lockdown depends on a verified native Windows lockdown companion or official Windows kiosk deployment. The in-app window assist only reinforces the active exam window.
@@ -885,13 +885,13 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
         </Card>
       </aside>
 
-      <main className="overflow-hidden rounded-[36px] border border-white bg-white p-6 shadow-[0_50px_100px_-48px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-950">
+      <main className="min-w-0 overflow-hidden rounded-[28px] border border-white bg-white p-3 shadow-[0_50px_100px_-48px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-950 sm:p-6 xl:rounded-[36px]">
         {error ? (
           <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
         ) : null}
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
-          <div>
+          <div className="min-w-0">
             <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-800 dark:text-slate-100">Teacher / School</div>
             <div className="text-sm text-slate-900 dark:text-slate-100">Use Back, Forward, or Dashboard to move around the admin workspace.</div>
           </div>
@@ -934,12 +934,12 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
   return (
     <motion.div key="profile-select" {...animation} className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl items-center">
       <div className="grid w-full gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card className="relative overflow-hidden bg-slate-950 p-8 text-white">
+        <Card className="relative overflow-hidden bg-slate-950 p-5 text-white sm:p-8">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.35),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.25),transparent_30%)]" />
           <div className="relative space-y-6">
             <Badge className="bg-white/10 text-white">LOCKEDSCREEN</Badge>
             <div className="space-y-3">
-              <h1 className="text-4xl font-semibold tracking-tight">Choose how you are using the exam app.</h1>
+              <h1 className="break-words text-3xl font-semibold tracking-tight sm:text-4xl">Choose how you are using the exam app.</h1>
               <p className="max-w-2xl text-sm leading-7 text-slate-300">
                 Students only see exam information, sign in with their details, and start the exam. Teachers and schools get the full setup and administration workspace.
               </p>
@@ -1108,7 +1108,7 @@ const StudentPortalPage = () => {
           <div className="relative space-y-5">
             <Badge className="bg-white/10 text-white">Student profile</Badge>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">Find the exams assigned to you, then begin.</h1>
+              <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Find the exams assigned to you, then begin.</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
                 Only exam information assigned to your class or student ID is shown here. Completed exams remain visible but cannot be started again.
               </p>
@@ -1307,7 +1307,7 @@ const StudentPortalPage = () => {
                 {examStartCodeError ? <div className="text-sm font-semibold text-rose-700">{examStartCodeError}</div> : null}
               </div>
             ) : null}
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Button variant="secondary" onClick={() => setSelectedExam(null)}>
                 Cancel
               </Button>
@@ -1404,7 +1404,7 @@ const DashboardPage = () => {
           <div className="relative space-y-6">
             <Badge className="bg-white/10 text-white">Teacher Dashboard</Badge>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">Secure examinations, prepared for real deployment.</h1>
+              <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Secure examinations, prepared for real deployment.</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
                 Build app-based exams, supervise linked LMS sessions, export results, and document the Windows kiosk posture for each device.
               </p>
@@ -1497,7 +1497,7 @@ const DashboardPage = () => {
       {launchReviewExam ? (
         <Card className="border-amber-200 bg-amber-50">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex gap-3">
+            <div className="flex min-w-0 gap-3">
               <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
                 <AlertTriangle className="size-5" />
               </div>
@@ -1511,7 +1511,7 @@ const DashboardPage = () => {
                 </CardDescription>
               </div>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               {canUseTestingMode(snapshot) ? (
                 <Button
                   onClick={() => openCandidatePrompt(launchReviewExam)}
@@ -1548,7 +1548,7 @@ const DashboardPage = () => {
                 <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
               </LabelledField>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Button variant="secondary" onClick={() => setLaunchCandidateExam(null)}>
                 Cancel
               </Button>
@@ -1590,14 +1590,14 @@ const BuilderPage = () => {
 
   return (
     <motion.div key={`builder-${examId}`} {...animation} className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{existing ? "Edit exam" : "Create exam"}</h1>
+      <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">{existing ? "Edit exam" : "Create exam"}</h1>
           <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
             Configure teacher settings, compose questions, and preview the student-facing environment.
           </p>
         </div>
-        <Button onClick={() => void saveCurrent()}>
+        <Button className="self-start" onClick={() => void saveCurrent()}>
           <Save className="size-4" />
           Save exam
         </Button>
@@ -1778,12 +1778,12 @@ const QuestionBuilder = ({
 
   return (
     <Card className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <CardTitle>Question builder</CardTitle>
           <CardDescription>Use the editor toolbar for text styling, equations, fractions, powers, division, lists, and images.</CardDescription>
         </div>
-        <Button onClick={addQuestion}>
+        <Button className="self-start" onClick={addQuestion}>
           <Plus className="size-4" />
           Add question
         </Button>
@@ -2032,7 +2032,7 @@ const ImportPage = () => {
   return (
     <motion.div key="import" {...animation} className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Import questions</h1>
+        <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Import questions</h1>
         <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
           Upload `.doc`, `.docx`, `.pdf`, `.txt`, or scanned image exam papers, review the extracted heading and metadata, then select the correct option for each question before saving.
         </p>
@@ -2218,7 +2218,7 @@ B
             </Card>
 
             <Card className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <CardTitle>Import notes</CardTitle>
                 <Badge>{reviewQuestions.length} questions</Badge>
               </div>
@@ -2449,7 +2449,7 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
   return (
     <motion.div key="package-import" {...animation} className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Open exam package</h1>
+        <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Open exam package</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-800 dark:text-slate-100">
           Double-clicked Lockedscreen packages import automatically and open in the student exam environment.
         </p>
@@ -2479,7 +2479,7 @@ const PackageImportPage = ({ launchContext }: { launchContext: LaunchContext | n
               </div>
             ) : null}
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Button variant="secondary" onClick={() => navigate(returnRoute)}>
                 Return to dashboard
               </Button>
@@ -2523,19 +2523,19 @@ const ResultsPage = () => {
 
   return (
     <motion.div key="results" {...animation} className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Results</h1>
+      <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Results</h1>
           <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
             App-based exams auto-grade locally first, then can sync safely to Google Classroom, Microsoft Teams, Google Sheets, or another LMS endpoint from the admin side.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="secondary" onClick={() => void syncPendingResults()} disabled={!hasPendingSync}>
+        <div className="flex w-full flex-wrap gap-3 sm:w-auto">
+          <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => void syncPendingResults()} disabled={!hasPendingSync}>
             <ShieldCheck className="size-4" />
             Sync pending
           </Button>
-          <Button variant="secondary" onClick={() => void exportResultsCsv()}>
+          <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => void exportResultsCsv()}>
             <Download className="size-4" />
             Export CSV
           </Button>
@@ -2567,7 +2567,7 @@ const ResultsPage = () => {
                     {destination.enabled ? destination.trigger : "disabled"}
                   </Badge>
                 </div>
-                <div className="mt-2 text-sm text-slate-800 dark:text-slate-100">
+                <div className="mt-2 break-words text-sm text-slate-800 dark:text-slate-100">
                   {destination.className || "All classes"} / {destination.endpointUrl || "Endpoint pending"}
                 </div>
               </div>
@@ -2577,7 +2577,7 @@ const ResultsPage = () => {
       </Card>
 
       <Card className="space-y-4">
-        <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 border-b border-slate-200 px-1 pb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-900">
+        <div className="hidden grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(4.5rem,0.7fr)_minmax(4.5rem,0.8fr)_minmax(0,1fr)_auto] gap-4 border-b border-slate-200 px-1 pb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-900 xl:grid">
           <span>Candidate</span>
           <span>Exam</span>
           <span>Score</span>
@@ -2590,17 +2590,33 @@ const ResultsPage = () => {
         ) : (
           snapshot.submissions.map((result) => (
             <div key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-              <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.8fr_1fr_auto] gap-4 text-sm text-slate-900 dark:text-slate-100">
-                <span>{result.candidateName}</span>
-                <span>{result.examTitle}</span>
-                <span>
-                  {result.score}/{result.totalPoints}
-                </span>
-                <span>{result.percentage}%</span>
-                <span>{new Date(result.submittedAt).toLocaleString()}</span>
-                <Button variant="secondary" className="px-3 py-2" onClick={() => void syncSubmissionResults(result.id)}>
-                  Sync
-                </Button>
+              <div className="grid min-w-0 gap-3 text-sm text-slate-900 dark:text-slate-100 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(4.5rem,0.7fr)_minmax(4.5rem,0.8fr)_minmax(0,1fr)_auto] xl:items-center xl:gap-4">
+                <div className="min-w-0">
+                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Candidate</span>
+                  <span className="break-words">{result.candidateName}</span>
+                </div>
+                <div className="min-w-0">
+                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Exam</span>
+                  <span className="break-words">{result.examTitle}</span>
+                </div>
+                <div>
+                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Score</span>
+                  <span>{result.score}/{result.totalPoints}</span>
+                </div>
+                <div>
+                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Percent</span>
+                  <span>{result.percentage}%</span>
+                </div>
+                <div className="min-w-0">
+                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Submitted</span>
+                  <span className="break-words">{new Date(result.submittedAt).toLocaleString()}</span>
+                </div>
+                <div className="sm:col-span-2 xl:col-span-1">
+                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Action</span>
+                  <Button variant="secondary" className="w-full px-3 py-2 xl:w-auto" onClick={() => void syncSubmissionResults(result.id)}>
+                    Sync
+                  </Button>
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {result.syncStates.length === 0 ? (
@@ -2630,7 +2646,7 @@ const ResultsPage = () => {
                     .map((state) => (
                       <div
                         key={`${result.id}-${state.destinationId}-error`}
-                        className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        className="break-words rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
                       >
                         {state.destinationLabel}: {state.lastError}
                       </div>
@@ -2638,12 +2654,12 @@ const ResultsPage = () => {
                 </div>
               ) : null}
               {result.studentLmsTurnIn?.lastError ? (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="mt-3 break-words rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   {providerLabel(result.studentLmsTurnIn.provider)}: {result.studentLmsTurnIn.lastError}
                 </div>
               ) : null}
               {result.studentLmsTurnIn?.gradeSyncError ? (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="mt-3 break-words rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   Grade sync: {result.studentLmsTurnIn.gradeSyncError}
                 </div>
               ) : null}
@@ -3683,27 +3699,27 @@ const SettingsPage = () => {
 
   return (
     <motion.div key="settings" {...animation} className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Admin Console</h1>
+      <div className="flex flex-col items-stretch gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Admin Console</h1>
           <p className="mt-2 text-sm text-slate-800 dark:text-slate-100">
             Manage the Lockedscreen kiosk component, exam runtime packages, diagnostics, and Windows deployment posture from one workflow.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="secondary" onClick={() => void handleRefreshDiagnostics()} disabled={adminBusy}>
+        <div className="flex w-full flex-wrap gap-3 lg:w-auto lg:justify-end">
+          <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => void handleRefreshDiagnostics()} disabled={adminBusy}>
             <ShieldCheck className="size-4" />
             {isPending("refresh-diagnostics") ? "Refreshing..." : "Refresh diagnostics"}
           </Button>
-          <Button variant="secondary" onClick={() => void handleSaveSecurityPosture()} disabled={adminBusy}>
+          <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => void handleSaveSecurityPosture()} disabled={adminBusy}>
             <ShieldCheck className="size-4" />
             {isPending("save-posture") ? "Saving..." : "Save posture"}
           </Button>
-          <Button variant="secondary" onClick={() => void handleSavePackage()} disabled={adminBusy}>
+          <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => void handleSavePackage()} disabled={adminBusy}>
             <Save className="size-4" />
             {isPending("save-package") ? "Saving..." : "Save package"}
           </Button>
-          <Button onClick={() => void handleSaveSettings()} disabled={adminBusy}>
+          <Button className="flex-1 sm:flex-none" onClick={() => void handleSaveSettings()} disabled={adminBusy}>
             <Save className="size-4" />
             {isPending("save-settings") ? "Saving..." : "Save settings"}
           </Button>
@@ -3719,7 +3735,7 @@ const SettingsPage = () => {
           <button
             key={tab.id}
             type="button"
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+            className={`min-w-0 flex-1 whitespace-normal break-words rounded-xl px-4 py-2 text-sm font-semibold leading-5 transition sm:flex-none ${
               settingsTab === tab.id
                 ? "bg-teal-600 text-white shadow-sm"
                 : "text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -5466,7 +5482,7 @@ const SettingsPage = () => {
               }))
             }
           />
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
             <span className="font-medium">Student grade after submission</span>
             <Badge className="bg-emerald-100 text-emerald-900">Always shown</Badge>
           </div>
@@ -6575,7 +6591,7 @@ const StudentExamPage = () => {
           </Card>
 
           <Card className="space-y-4 p-4 sm:p-5">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <Badge>Question {currentIndex + 1}</Badge>
                 <RichContent content={question.prompt} className="mt-3 text-lg leading-7 text-slate-900 dark:text-slate-50" />
@@ -6587,7 +6603,7 @@ const StudentExamPage = () => {
               {question.options.map((option) => (
                 <button
                   key={option.id}
-                  className={`rounded-[20px] border px-4 py-3 text-left text-base transition ${
+                  className={`w-full min-w-0 max-w-full break-words rounded-[20px] border px-4 py-3 text-left text-base transition ${
                     response?.selectedOptionId === option.id
                       ? "border-teal-500 bg-teal-50 text-teal-950 shadow-glow dark:border-teal-300 dark:bg-teal-950 dark:text-teal-50"
                       : "border-slate-300 bg-white text-slate-900 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-50 dark:hover:border-slate-400"
@@ -6892,13 +6908,13 @@ const LinkExamPage = () => {
       onZoomChange={setHostedZoom}
       scaleContent={false}
     >
-      <div className="relative flex h-[calc(100vh-8.5rem)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white">
+      <div className="relative flex h-[calc(100dvh-7rem)] min-h-[32rem] flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white sm:h-[calc(100dvh-8.5rem)] sm:rounded-[28px]">
         {submitted ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/90 p-8">
-            <div className="w-full max-w-xl space-y-4 text-center text-white">
+          <div className="absolute inset-0 z-10 flex items-start justify-center overflow-y-auto bg-slate-950/90 p-3 sm:p-8">
+            <div className="my-auto w-full max-w-xl space-y-4 text-center text-white">
               <div className="flex flex-col items-center justify-center gap-4">
                 <ShieldCheck className="size-12 text-emerald-300" />
-                <h2 className="text-3xl font-semibold">Submission recorded</h2>
+                <h2 className="text-2xl font-semibold sm:text-3xl">Submission recorded</h2>
                 <p className="max-w-lg text-sm text-slate-300">
                   Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen.
                 </p>
@@ -6926,9 +6942,9 @@ const LinkExamPage = () => {
             </div>
           </div>
         ) : expired ? (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-950/90 p-8 text-center text-white">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 overflow-y-auto bg-slate-950/90 p-3 text-center text-white sm:p-8">
             <Clock3 className="size-12 text-amber-300" />
-            <h2 className="text-3xl font-semibold">Time expired</h2>
+            <h2 className="text-2xl font-semibold sm:text-3xl">Time expired</h2>
             <p className="max-w-lg text-sm text-slate-300">
               This linked exam session has ended. Submit the session record and wait for the invigilator.
             </p>
@@ -6937,13 +6953,13 @@ const LinkExamPage = () => {
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-900 dark:text-slate-100">
-            <span>
+          <div className="min-w-0 flex-1 text-sm text-slate-900 dark:text-slate-100">
+            <span className="break-words">
               Controlled hosted runtime. Navigation is limited to package-approved domains and URL rules.
             </span>
             {hostedSubmitDetected ? <Badge className="bg-emerald-100 text-emerald-800">Online submission detected</Badge> : null}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             {configPackage?.browserPolicy.showBackToStartButton ? (
               <Button variant="secondary" onClick={returnToStart}>
                 Return to start
@@ -6963,9 +6979,9 @@ const LinkExamPage = () => {
         {embeddedGoogleSignInBlocked ? (
           <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="flex gap-3">
+              <div className="flex min-w-0 gap-3">
                 <AlertTriangle className="mt-0.5 size-5 shrink-0" />
-                <div className="space-y-1 text-sm">
+                <div className="min-w-0 space-y-1 break-words text-sm">
                   <p className="font-semibold">Google sign-in cannot open inside the locked exam browser.</p>
                   <p>
                     This Google Form requires students to sign in. Google blocks account sign-in inside embedded secure
@@ -7217,12 +7233,12 @@ const StudentShell = ({
   };
 
   return (
-    <motion.div {...animation} className="space-y-3">
-      <div className="rounded-[28px] border border-white bg-white px-4 py-3 text-slate-950 shadow-2xl dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50">
+    <motion.div {...animation} className="min-w-0 max-w-full space-y-3">
+      <div className="min-w-0 rounded-[24px] border border-white bg-white px-3 py-3 text-slate-950 shadow-2xl dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 sm:rounded-[28px] sm:px-4">
         <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
+              <h1 className="min-w-0 break-words text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-50 sm:text-2xl">
                 {exam.title || "Exam title"}
               </h1>
               {showSchoolBranding ? (
@@ -7250,15 +7266,15 @@ const StudentShell = ({
               {!secureMode ? <Badge className="bg-amber-100 text-amber-900">{testingModeName}</Badge> : null}
             </div>
             {exam.instructions ? (
-              <p className="mt-1.5 max-w-5xl text-sm leading-5 text-slate-900 dark:text-slate-100">{exam.instructions}</p>
+              <p className="mt-1.5 max-w-5xl break-words text-sm leading-5 text-slate-900 dark:text-slate-100">{exam.instructions}</p>
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <div className="rounded-[18px] border border-slate-200 bg-slate-950 px-3 py-2 text-white">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+            <div className="min-w-0 max-w-full rounded-[18px] border border-slate-200 bg-slate-950 px-3 py-2 text-white">
               <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Student</div>
-              <div className="text-sm font-semibold">{session.candidate.name}</div>
-              {showCandidateId ? <div className="text-xs text-slate-300">{session.candidate.id}</div> : null}
+              <div className="break-words text-sm font-semibold">{session.candidate.name}</div>
+              {showCandidateId ? <div className="break-words text-xs text-slate-300">{session.candidate.id}</div> : null}
             </div>
             {showTimer ? (
               <div className="rounded-[18px] border border-teal-200 bg-teal-50 px-3 py-2 text-teal-950 dark:border-teal-700 dark:bg-teal-950 dark:text-teal-50">
@@ -7306,8 +7322,8 @@ const StudentShell = ({
 
       {configPackage?.allowedApplications.length ? (
         <Card className="space-y-3 border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex items-center justify-between gap-2">
-            <div>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
               <CardTitle>Approved Tools</CardTitle>
               <CardDescription>
                 These applications are package-approved and launched under kiosk supervision when permitted by the invigilator.
@@ -7331,11 +7347,11 @@ const StudentShell = ({
       ) : null}
 
       {unlockOpen ? (
-        <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/80 p-4 pt-20 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/80 p-2 pt-4 backdrop-blur-sm sm:p-4 sm:pt-10 lg:pt-20">
         <Card className="w-full max-w-3xl border-amber-200 bg-white p-4 text-slate-950 shadow-2xl dark:bg-slate-950 dark:text-slate-50">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
+            <div className="min-w-0 space-y-2">
+              <div className="flex min-w-0 items-center gap-3">
                 <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
                   <Lock className="size-5" />
                 </div>
@@ -7382,7 +7398,7 @@ const StudentShell = ({
                 </div>
               ) : null}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
               <Button variant="secondary" className="px-3 py-2" onClick={() => setUnlockOpen(false)} disabled={capturePending || releasePending}>
                 Cancel
               </Button>
@@ -7418,28 +7434,28 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
     }}
   >
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <CardTitle>Student preview</CardTitle>
           <CardDescription>Shows the calm presentation, exam instructions, and navigation density.</CardDescription>
         </div>
         <Badge>{exam.appearance.theme}</Badge>
       </div>
 
-      <div className="rounded-[28px] bg-slate-950 p-5 text-white">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm uppercase tracking-[0.2em] text-slate-400">{exam.branding.schoolName || "School name"}</div>
-            <div className="mt-2 text-2xl font-semibold">{exam.title || "Exam title"}</div>
+      <div className="rounded-[24px] bg-slate-950 p-4 text-white sm:rounded-[28px] sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="break-words text-sm uppercase tracking-[0.2em] text-slate-400">{exam.branding.schoolName || "School name"}</div>
+            <div className="mt-2 break-words text-xl font-semibold sm:text-2xl">{exam.title || "Exam title"}</div>
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
               <Badge className="bg-white/10 text-white">{exam.subject || "Subject"}</Badge>
               <Badge className="bg-white/10 text-white">{exam.className || "Class"}</Badge>
               {exam.form ? <Badge className="bg-white/10 text-white">Form {exam.form}</Badge> : null}
             </div>
           </div>
-          <div className="rounded-2xl bg-white/10 px-4 py-2 text-sm">{exam.durationMinutes} mins</div>
+          <div className="shrink-0 rounded-2xl bg-white/10 px-4 py-2 text-sm">{exam.durationMinutes} mins</div>
         </div>
-        <div className="mt-5 rounded-[24px] bg-white px-5 py-4 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+        <div className="mt-5 min-w-0 rounded-[20px] bg-white px-4 py-4 text-slate-900 dark:bg-slate-800 dark:text-slate-100 sm:rounded-[24px] sm:px-5">
           {exam.mode === "app" ? (
             <>
               <div className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">Question card</div>
@@ -7451,7 +7467,7 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
           ) : (
             <div className="space-y-2">
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Embedded link session</div>
-              <div className="text-sm text-slate-900 dark:text-slate-100">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
+              <div className="break-all text-sm text-slate-900 dark:text-slate-100">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
             </div>
           )}
         </div>
@@ -7461,9 +7477,9 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
 );
 
 const StatCard = ({ label, value }: { label: string; value: string }) => (
-  <div className="rounded-[24px] bg-slate-50 p-4 dark:bg-slate-800/80">
-    <div className="text-xs uppercase tracking-[0.18em] text-slate-900 dark:text-slate-100">{label}</div>
-    <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">{value}</div>
+  <div className="min-w-0 rounded-[24px] bg-slate-50 p-4 dark:bg-slate-800/80">
+    <div className="break-words text-xs uppercase tracking-[0.18em] text-slate-900 dark:text-slate-100">{label}</div>
+    <div className="mt-2 break-words text-2xl font-semibold text-slate-900 dark:text-slate-50">{value}</div>
   </div>
 );
 
@@ -7476,8 +7492,8 @@ const LabelledField = ({
   children: ReactNode;
   labelClassName?: string;
 }) => (
-  <div className="grid gap-2">
-    <span className={`text-sm font-semibold ${labelClassName ?? "text-slate-800 dark:text-slate-100"}`}>{label}</span>
+  <div className="grid min-w-0 max-w-full gap-2">
+    <span className={`min-w-0 break-words text-sm font-semibold ${labelClassName ?? "text-slate-800 dark:text-slate-100"}`}>{label}</span>
     {children}
   </div>
 );
@@ -7491,14 +7507,14 @@ const ToggleField = ({
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) => (
-  <label className="flex items-center gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+  <label className="flex min-w-0 max-w-full items-center gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
     <input
       type="checkbox"
-      className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+      className="size-4 shrink-0 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
       checked={checked}
       onChange={(event) => onChange(event.target.checked)}
     />
-    {label}
+    <span className="min-w-0 break-words">{label}</span>
   </label>
 );
 
