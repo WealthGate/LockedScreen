@@ -765,13 +765,27 @@ const AppFrame = () => {
   }, [snapshot?.settings.defaultTheme]);
 
   if (loading && !snapshot) {
-    return <div className="flex min-h-screen items-center justify-center text-sm text-slate-800 dark:text-slate-100">Loading workspace...</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-slate-800 dark:text-slate-100">
+        Loading workspace...
+        {canShowUpdates ? <AppVersionStatus state={updateState} /> : null}
+      </div>
+    );
   }
 
   if (!snapshot) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-rose-600">
-        {error ?? "Unable to load application state."}
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
+        <div className="w-full max-w-xl rounded-lg border border-rose-200 bg-white p-5 shadow-sm dark:border-rose-900 dark:bg-slate-900">
+          <div className="text-base font-semibold text-slate-950 dark:text-white">Workspace recovery needed</div>
+          <div className="mt-2 break-words text-sm text-rose-700 dark:text-rose-300">
+            {error ?? "Unable to load application state."}
+          </div>
+          <Button className="mt-4" variant="secondary" onClick={() => void load()} disabled={loading}>
+            {loading ? "Retrying..." : "Retry workspace"}
+          </Button>
+        </div>
+        {canShowUpdates ? <AppVersionStatus state={updateState} /> : null}
       </div>
     );
   }
