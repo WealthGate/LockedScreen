@@ -541,9 +541,7 @@ const turnInGoogleClassroom = async (
         addAttachments: [
           {
             driveFile: {
-              id: uploadedFile.id,
-              title: uploadedFile.name,
-              alternateLink: uploadedFile.webViewLink
+              id: uploadedFile.id
             }
           }
         ]
