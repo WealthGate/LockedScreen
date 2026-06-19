@@ -77,7 +77,7 @@ const defaultTeacherOptions = (): TeacherOptions => ({
   showSchoolBranding: true,
   showCandidateId: true,
   showTimer: true,
-  showScoreAfterSubmit: false,
+  showScoreAfterSubmit: true,
   supportMessage: "Contact the invigilator if you need help during the session."
 });
 
@@ -236,7 +236,8 @@ const normalizeConfigPackage = (configPackage: ExamConfigPackage): ExamConfigPac
     externalDeliveryMode,
     teacherOptions: {
       ...defaultTeacherOptions(),
-      ...(configPackage.teacherOptions ?? {})
+      ...(configPackage.teacherOptions ?? {}),
+      showScoreAfterSubmit: true
     },
     studentLmsBinding: externalDeliveryMode === "lockdown-only" ? disableStudentLmsBinding(studentLmsBinding) : studentLmsBinding,
     resultDestinations: externalDeliveryMode === "lockdown-only" ? [] : resultDestinations,

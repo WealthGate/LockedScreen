@@ -5466,19 +5466,10 @@ const SettingsPage = () => {
               }))
             }
           />
-          <ToggleField
-            label="Show student score after submission"
-            checked={packageDraft.teacherOptions.showScoreAfterSubmit}
-            onChange={(checked) =>
-              updatePackage((current) => ({
-                ...current,
-                teacherOptions: {
-                  ...current.teacherOptions,
-                  showScoreAfterSubmit: checked
-                }
-              }))
-            }
-          />
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+            <span className="font-medium">Student grade after submission</span>
+            <Badge className="bg-emerald-100 text-emerald-900">Always shown</Badge>
+          </div>
         </Card>
 
         <Card className="space-y-5">
@@ -6305,15 +6296,29 @@ const StudentLmsTurnInPanel = ({
   const state = submission.studentLmsTurnIn;
   const status = state?.status ?? "pending";
   const actionLabel = status === "success" ? "Turned in" : turningIn ? "Connecting..." : "Turn in to LMS";
+  const providerName = providerLabel(binding.provider);
+  const gradeValue = typeof state?.gradeValue === "number" ? `${state.gradeValue} points` : null;
+  const completionMessage =
+    binding.provider === "google-classroom" && state?.gradeSyncStatus === "success"
+      ? `Your exam was turned in to Google Classroom and your grade was synced successfully${gradeValue ? `: ${gradeValue}` : ""}.`
+      : binding.provider === "google-classroom" && state?.gradeSyncStatus === "failed"
+        ? "Your exam and performance report were turned in to Google Classroom. Automatic grade sync needs teacher attention."
+        : binding.provider === "google-classroom" && state?.gradeSyncStatus === "skipped"
+          ? "Your exam and performance report were turned in to Google Classroom. The teacher connection is needed to publish the grade."
+          : `Your exam and performance report were turned in to ${providerName}.`;
 
   return (
-    <Card className="space-y-4 border-slate-200 bg-white">
+    <Card className={`space-y-4 bg-white ${status === "success" ? "border-emerald-300" : "border-slate-200"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Badge className={studentTurnInTone(status)}>{providerLabel(binding.provider)} turn-in</Badge>
-          <CardTitle className="mt-3">{binding.assignmentLabel || binding.assignmentId || "Assignment link ready"}</CardTitle>
+          <Badge className={studentTurnInTone(status)}>{providerName} turn-in</Badge>
+          <CardTitle className="mt-3">
+            {status === "success" ? "Turn-in complete" : binding.assignmentLabel || binding.assignmentId || "Assignment link ready"}
+          </CardTitle>
           <CardDescription className="mt-2 text-slate-900 dark:text-slate-100">
-            Sign in with the student LMS account to attach the Lockedscreen submission and complete the turn-in.
+            {status === "success"
+              ? completionMessage
+              : "Sign in with the student LMS account to attach the Lockedscreen performance report and complete the turn-in."}
           </CardDescription>
         </div>
         <Button className="px-3 py-2" onClick={onTurnIn} disabled={turningIn || status === "success"}>
@@ -6328,6 +6333,13 @@ const StudentLmsTurnInPanel = ({
       {state?.lastError ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{state.lastError}</div>
       ) : null}
+      {status === "success" ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-950">
+          <div className="font-semibold">Submission confirmed</div>
+          <div className="mt-1">{completionMessage}</div>
+          {state?.submittedAt ? <div className="mt-1 text-xs">Completed {new Date(state.submittedAt).toLocaleString()}</div> : null}
+        </div>
+      ) : null}
       {binding.provider === "google-classroom" && state?.gradeSyncStatus ? (
         <div
           className={`rounded-xl border px-3 py-2 text-sm ${
@@ -6338,14 +6350,17 @@ const StudentLmsTurnInPanel = ({
                 : "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           }`}
         >
-          Grade sync: {state.gradeSyncStatus}
-          {typeof state.gradeValue === "number" ? ` (${state.gradeValue} points)` : ""}
-          {state.gradeSyncError ? ` - ${state.gradeSyncError}` : ""}
-        </div>
-      ) : null}
-      {state?.externalReference ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-all text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-          LMS reference: {state.externalReference}
+          <div className="font-semibold">
+            {state.gradeSyncStatus === "success"
+              ? "Grade synced to Google Classroom"
+              : state.gradeSyncStatus === "failed"
+                ? "Grade sync needs teacher attention"
+                : state.gradeSyncStatus === "skipped"
+                  ? "Grade sync is waiting for the teacher connection"
+                  : "Grade sync is pending"}
+          </div>
+          {gradeValue ? <div className="mt-1">Classroom grade: {gradeValue}</div> : null}
+          {state.gradeSyncError ? <div className="mt-1">{state.gradeSyncError}</div> : null}
         </div>
       ) : null}
     </Card>
@@ -6421,7 +6436,7 @@ const StudentExamPage = () => {
     setSubmitting(false);
     setTurningIn(false);
     setSubmissionResult(null);
-  }, [exam, location.search]);
+  }, [sessionExamId, location.search]);
 
   const handleStudentTurnIn = async (submissionId: string) => {
     if (!configPackage) {
@@ -6508,12 +6523,13 @@ const StudentExamPage = () => {
                 Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen. If this
                 package requires invigilator-controlled exit, the session remains locked until the invigilator unlocks it.
               </CardDescription>
-              {configPackage?.teacherOptions.showScoreAfterSubmit && submissionResult ? (
+              {submissionResult ? (
                 <div className="rounded-2xl border border-emerald-300 bg-white px-4 py-3 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-900 dark:text-emerald-50">
-                  <div className="text-sm font-semibold">Score</div>
+                  <div className="text-sm font-semibold">Your grade</div>
                   <div className="mt-1 text-2xl font-bold">
                     {submissionResult.score}/{submissionResult.totalPoints} ({submissionResult.percentage}%)
                   </div>
+                  <div className="mt-1 text-xs">Calculated from your submitted app-based exam.</div>
                 </div>
               ) : null}
             </Card>
@@ -6755,7 +6771,7 @@ const LinkExamPage = () => {
     setSubmissionResult(null);
     setHostedSubmitDetected(false);
     setEmbeddedGoogleSignInBlocked(false);
-  }, [exam, location.search]);
+  }, [sessionExamId, location.search]);
 
   useEffect(() => {
     if (submitted || expired) {

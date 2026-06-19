@@ -1,6 +1,6 @@
 {
   "name": "lockedscreen",
-  "version": "0.6.51",
+  "version": "0.6.52",
   "private": true,
   "packageManager": "npm@10.8.2",
   "workspaces": [
@@ -16,6 +16,7 @@
     "build": "cmd /c npm run build:native && cmd /c npm run build:desktop",
     "typecheck": "cmd /c npm run typecheck --workspace @lockedscreen/desktop",
     "test:storage": "node --test packages/storage/test/storage-recovery.test.mjs",
+    "test:lms-report": "node --test apps/desktop/test/student-performance-report.test.mjs",
     "dist": "cmd /c npm run dist --workspace @lockedscreen/desktop",
     "dist:mac": "npm run dist:mac --workspace @lockedscreen/desktop",
     "dist:linux": "npm run dist:linux --workspace @lockedscreen/desktop"

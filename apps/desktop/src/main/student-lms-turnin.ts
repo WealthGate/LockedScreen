@@ -6,13 +6,14 @@ import { BrowserWindow } from "electron";
 
 import type {
   Exam,
-  ExamResponse,
   ExamConfigPackage,
   StudentLmsBinding,
   StudentLmsProviderType,
   StudentLmsTurnInState,
   SubmissionResult
 } from "@lockedscreen/shared-types";
+
+import { buildStudentPerformanceReport } from "./student-performance-report";
 
 interface StudentOAuthTokens {
   accessToken: string;
@@ -116,50 +117,51 @@ const sanitizeFileName = (value: string): string =>
     .trim()
     .slice(0, 80) || "lockedscreen-submission";
 
-const buildSubmissionArtifact = (exam: Exam, submission: SubmissionResult): SubmissionArtifact => {
-  const responseLookup = new Map(exam.questions.map((question) => [question.id, question]));
-  const responses = submission.responses.map((response: ExamResponse) => {
-    const question = responseLookup.get(response.questionId);
-    const selectedOption = question?.options.find((option) => option.id === response.selectedOptionId);
-    return {
-      questionId: response.questionId,
-      prompt: question?.prompt ?? "",
-      selectedOptionId: response.selectedOptionId ?? null,
-      selectedOptionLabel: selectedOption?.label ?? null,
-      selectedOptionContent: selectedOption?.content ?? null,
-      flagged: response.flagged
-    };
+const buildSubmissionArtifact = async (
+  parentWindow: BrowserWindow | null,
+  exam: Exam,
+  submission: SubmissionResult
+): Promise<SubmissionArtifact> => {
+  const report = buildStudentPerformanceReport(exam, submission);
+  const stem = sanitizeFileName(`${exam.title || "exam"}-${submission.candidateName || submission.candidateId}`);
+  const reportWindow = new BrowserWindow({
+    show: false,
+    parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
+    width: 794,
+    height: 1123,
+    webPreferences: {
+      backgroundThrottling: false,
+      contextIsolation: true,
+      javascript: false,
+      nodeIntegration: false,
+      sandbox: true
+    }
   });
 
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    exam: {
-      id: exam.id,
-      title: exam.title,
-      subject: exam.subject,
-      className: exam.className,
-      form: exam.form
-    },
-    candidate: {
-      id: submission.candidateId,
-      name: submission.candidateName
-    },
-    submission: {
-      id: submission.id,
-      submittedAt: submission.submittedAt,
-      score: submission.score,
-      totalPoints: submission.totalPoints,
-      percentage: submission.percentage
-    },
-    responses
-  };
-
-  const stem = sanitizeFileName(`${exam.title || "exam"}-${submission.candidateName || submission.candidateId}`);
-  return {
-    fileName: `${stem}.json`,
-    mimeType: "application/json",
-    content: Buffer.from(JSON.stringify(payload, null, 2), "utf-8")
-  };
+  try {
+    const reportUrl = `data:text/html;base64,${Buffer.from(report.html, "utf-8").toString("base64")}`;
+    await reportWindow.loadURL(reportUrl);
+    const pdf = await reportWindow.webContents.printToPDF({
+      pageSize: "A4",
+      preferCSSPageSize: true,
+      printBackground: true
+    });
+    return {
+      fileName: `${stem}-performance-report.pdf`,
+      mimeType: "application/pdf",
+      content: pdf
+    };
+  } catch {
+    return {
+      fileName: `${stem}-performance-report.txt`,
+      mimeType: "text/plain; charset=utf-8",
+      content: Buffer.from(report.plainText, "utf-8")
+    };
+  } finally {
+    if (!reportWindow.isDestroyed()) {
+      reportWindow.destroy();
+    }
+  }
 };
 
 const createAuthorizationListener = async (
@@ -695,7 +697,7 @@ export const turnInSubmissionToLms = async (
   }
 
   const tokens = await signInStudent(binding, parentWindow);
-  const artifact = buildSubmissionArtifact(exam, submission);
+  const artifact = await buildSubmissionArtifact(parentWindow, exam, submission);
 
   if (binding.provider === "google-classroom") {
     return turnInGoogleClassroom(binding, tokens.accessToken, artifact, submission, options);
