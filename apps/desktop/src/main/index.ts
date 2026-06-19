@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
@@ -485,15 +485,19 @@ const syncPendingResultsInternal = async (): Promise<AppStateSnapshot> => {
 
 const createWindow = async (): Promise<void> => {
   configureHostedPartition(recordSecurityEvent);
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+  const windowWidth = Math.min(1540, workArea.width);
+  const windowHeight = Math.min(980, workArea.height);
 
   mainWindow = new BrowserWindow({
-    width: 1540,
-    height: 980,
-    minWidth: 1200,
-    minHeight: 760,
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: Math.min(1200, windowWidth),
+    minHeight: Math.min(760, windowHeight),
     backgroundColor: "#e2e8f0",
     title: "LOCKEDSCREEN",
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -505,6 +509,12 @@ const createWindow = async (): Promise<void> => {
   });
   Menu.setApplicationMenu(null);
 
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.on("close", (event) => {
     if (!getActivePackage()) {
@@ -561,10 +571,14 @@ const refreshProcessPolicyMonitor = async (): Promise<void> => {
     }
   };
 
-  processMonitorTimer = setInterval(() => {
-    void tick();
-  }, Math.max(5, activePackage.processPolicy.pollIntervalSeconds) * 1000);
-  void tick();
+  const runTick = () => {
+    void tick().catch((error) => {
+      console.error("Lockedscreen process policy monitor failed:", error);
+    });
+  };
+
+  processMonitorTimer = setInterval(runTick, Math.max(5, activePackage.processPolicy.pollIntervalSeconds) * 1000);
+  runTick();
 };
 
 app.on("web-contents-created", (_event, contents) => {
@@ -610,6 +624,7 @@ app.whenReady().then(async () => {
   }
 
   configureAppUpdates(() => mainWindow);
+  await storage.getSnapshot();
 
   ipcMain.handle("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
   ipcMain.handle("app:getLaunchContext", async () => pendingLaunchContext);
@@ -1443,6 +1458,18 @@ app.whenReady().then(async () => {
       await createWindow();
     }
   });
+}).catch((error) => {
+  const message = error instanceof Error ? error.message : "An unexpected startup error occurred.";
+  console.error("Lockedscreen startup failed:", error);
+  dialog.showErrorBox("Lockedscreen could not start", message);
+  app.quit();
+});
+
+app.on("will-quit", () => {
+  if (processMonitorTimer) {
+    clearInterval(processMonitorTimer);
+    processMonitorTimer = null;
+  }
 });
 
 app.on("window-all-closed", () => {

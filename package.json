@@ -1,6 +1,6 @@
 {
   "name": "lockedscreen",
-  "version": "0.6.49",
+  "version": "0.6.50",
   "private": true,
   "packageManager": "npm@10.8.2",
   "workspaces": [
@@ -15,6 +15,7 @@
     "build:native": "dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Service\\Lockedscreen.Security.Service.csproj -c Release && dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Client\\Lockedscreen.Security.Client.csproj -c Release && dotnet build apps\\windows-lockdown\\Lockedscreen.Security.Agent\\Lockedscreen.Security.Agent.csproj -c Release",
     "build": "cmd /c npm run build:native && cmd /c npm run build:desktop",
     "typecheck": "cmd /c npm run typecheck --workspace @lockedscreen/desktop",
+    "test:storage": "node --test packages/storage/test/storage-recovery.test.mjs",
     "dist": "cmd /c npm run dist --workspace @lockedscreen/desktop",
     "dist:mac": "npm run dist:mac --workspace @lockedscreen/desktop",
     "dist:linux": "npm run dist:linux --workspace @lockedscreen/desktop"

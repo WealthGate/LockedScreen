@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { scoreSubmission } from "@lockedscreen/exam-engine";
@@ -686,6 +686,39 @@ const extractFirstJsonDocument = (content: string): string | null => {
 const parseSnapshotContent = (content: string): Partial<AppStateSnapshot> =>
   JSON.parse(content.replace(/^\uFEFF/, "")) as Partial<AppStateSnapshot>;
 
+const fileOperationRetryDelays = [40, 120, 240];
+
+const isFileSystemError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;
+
+const isTransientFileSystemError = (error: unknown): boolean =>
+  isFileSystemError(error) &&
+  ["EACCES", "EBUSY", "EEXIST", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"].includes(error.code ?? "");
+
+const delay = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+const withFileOperationRetry = async <T>(operation: () => Promise<T>): Promise<T> => {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= fileOperationRetryDelays.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const retryDelay = fileOperationRetryDelays[attempt];
+      if (!isTransientFileSystemError(error) || retryDelay === undefined) {
+        throw error;
+      }
+      await delay(retryDelay);
+    }
+  }
+
+  throw lastError;
+};
+
 export interface StorageService {
   getSnapshot(): Promise<AppStateSnapshot>;
   saveExam(exam: Exam): Promise<AppStateSnapshot>;
@@ -713,46 +746,171 @@ export interface StorageService {
 }
 
 class JsonStorageService implements StorageService {
-  constructor(private readonly filePath: string) {}
+  private readonly backupPath: string;
+  private readonly corruptPath: string;
+
+  constructor(private readonly filePath: string) {
+    this.backupPath = `${filePath}.backup.json`;
+    this.corruptPath = `${filePath}.corrupt.json`;
+  }
+
+  private parse(content: string, allowTrailingContent = false): AppStateSnapshot | null {
+    try {
+      return hydrateSnapshot(parseSnapshotContent(content));
+    } catch {
+      if (!allowTrailingContent) {
+        return null;
+      }
+
+      const recovered = extractFirstJsonDocument(content.replace(/^\uFEFF/, ""));
+      if (!recovered) {
+        return null;
+      }
+
+      try {
+        return hydrateSnapshot(parseSnapshotContent(recovered));
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  private async readFileWithRetry(filePath: string): Promise<string> {
+    return withFileOperationRetry(() => readFile(filePath, "utf-8"));
+  }
+
+  private async replaceFile(sourcePath: string, destinationPath: string): Promise<void> {
+    try {
+      await withFileOperationRetry(() => rename(sourcePath, destinationPath));
+    } catch (error) {
+      if (!isTransientFileSystemError(error)) {
+        throw error;
+      }
+
+      await withFileOperationRetry(() => rm(destinationPath, { force: true }));
+      await withFileOperationRetry(() => rename(sourcePath, destinationPath));
+    }
+  }
+
+  private async preserveCorruptContent(content: string): Promise<void> {
+    if (!content) {
+      return;
+    }
+
+    try {
+      await writeFile(this.corruptPath, content, { encoding: "utf-8", flush: true });
+    } catch {
+      // Recovery must continue even when the diagnostic copy cannot be written.
+    }
+  }
 
   private async ensureStore(): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
 
     try {
-      await readFile(this.filePath, "utf-8");
-    } catch {
-      await writeFile(this.filePath, JSON.stringify(seedState(), null, 2), "utf-8");
+      await this.readFileWithRetry(this.filePath);
+      return;
+    } catch (error) {
+      if (!isFileSystemError(error) || error.code !== "ENOENT") {
+        return;
+      }
     }
+
+    try {
+      const backupContent = await this.readFileWithRetry(this.backupPath);
+      const backupSnapshot = this.parse(backupContent, true);
+      if (backupSnapshot) {
+        await this.write(backupSnapshot, false);
+        return;
+      }
+    } catch (error) {
+      if (!isFileSystemError(error) || error.code !== "ENOENT") {
+        // A missing or temporarily inaccessible backup must not block first launch.
+      }
+    }
+
+    await this.write(seedState(), false);
   }
 
   private async read(): Promise<AppStateSnapshot> {
     await this.ensureStore();
-    const content = await readFile(this.filePath, "utf-8");
-    try {
-      return hydrateSnapshot(parseSnapshotContent(content));
-    } catch {
-      const recovered = extractFirstJsonDocument(content);
-      if (!recovered) {
-        throw new Error("Unable to recover application state from the local storage file.");
-      }
+    let content = "";
 
-      const parsed = hydrateSnapshot(parseSnapshotContent(recovered));
-      const backupPath = `${this.filePath}.corrupt-${Date.now()}.json`;
-      await writeFile(backupPath, content, "utf-8");
-      await this.write(parsed);
-      return parsed;
+    try {
+      content = await this.readFileWithRetry(this.filePath);
+      const parsed = this.parse(content);
+      if (parsed) {
+        return parsed;
+      }
+    } catch {
+      // The backup below remains readable when security software temporarily locks the live file.
     }
+
+    const recoveredPrimary = this.parse(content, true);
+    if (recoveredPrimary) {
+      await this.preserveCorruptContent(content);
+      recoveredPrimary.securityLogs.unshift(
+        logEntry("application", "warning", "Recovered application data after an interrupted local storage write.")
+      );
+      return this.write(recoveredPrimary, false).catch(() => recoveredPrimary);
+    }
+
+    await this.preserveCorruptContent(content);
+
+    try {
+      const backupContent = await this.readFileWithRetry(this.backupPath);
+      const backupSnapshot = this.parse(backupContent, true);
+      if (backupSnapshot) {
+        backupSnapshot.securityLogs.unshift(
+          logEntry("application", "warning", "Restored application data from the automatic local backup.")
+        );
+        return this.write(backupSnapshot, false).catch(() => backupSnapshot);
+      }
+    } catch {
+      // The final seeded state below keeps startup usable even when no backup survives.
+    }
+
+    const resetSnapshot = seedState();
+    resetSnapshot.securityLogs.unshift(
+      logEntry("application", "error", "Local application data was unreadable and was reset; a diagnostic copy was preserved.")
+    );
+    return this.write(resetSnapshot, false).catch(() => resetSnapshot);
   }
 
-  private async write(snapshot: AppStateSnapshot): Promise<AppStateSnapshot> {
+  private async write(snapshot: AppStateSnapshot, createBackup = true): Promise<AppStateSnapshot> {
     const hydrated = reconcilePackages(snapshot);
-    const tempPath = `${this.filePath}.tmp`;
-    await writeFile(tempPath, JSON.stringify(hydrated, null, 2), "utf-8");
+    const serialized = JSON.stringify(hydrated, null, 2);
+    const tempPath = `${this.filePath}.${process.pid}-${randomUUID()}.tmp`;
+
+    await writeFile(tempPath, serialized, { encoding: "utf-8", flush: true });
+
     try {
-      await rename(tempPath, this.filePath);
-    } catch {
-      await writeFile(this.filePath, JSON.stringify(hydrated, null, 2), "utf-8");
+      if (!this.parse(await this.readFileWithRetry(tempPath))) {
+        throw new Error("Refusing to replace application storage with invalid data.");
+      }
+
+      if (createBackup) {
+        try {
+          const currentContent = await this.readFileWithRetry(this.filePath);
+          if (this.parse(currentContent)) {
+            const backupTempPath = `${this.backupPath}.${process.pid}-${randomUUID()}.tmp`;
+            try {
+              await writeFile(backupTempPath, currentContent, { encoding: "utf-8", flush: true });
+              await this.replaceFile(backupTempPath, this.backupPath);
+            } finally {
+              await rm(backupTempPath, { force: true }).catch(() => undefined);
+            }
+          }
+        } catch {
+          // A backup rotation failure must not prevent a validated state update.
+        }
+      }
+
+      await this.replaceFile(tempPath, this.filePath);
+    } finally {
+      await rm(tempPath, { force: true }).catch(() => undefined);
     }
+
     return hydrated;
   }
 
@@ -1070,5 +1228,100 @@ class JsonStorageService implements StorageService {
   }
 }
 
+class SerializedStorageService implements StorageService {
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(private readonly storage: StorageService) {}
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operationTail.then(operation, operation);
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+
+  getSnapshot(): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.getSnapshot());
+  }
+
+  saveExam(exam: Exam): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.saveExam(exam));
+  }
+
+  deleteExam(examId: string): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.deleteExam(examId));
+  }
+
+  hideExamForStudent(examId: string, candidateId: string): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.hideExamForStudent(examId, candidateId));
+  }
+
+  saveSettings(settings: AppSettings): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.saveSettings(settings));
+  }
+
+  saveSecurityProfile(profile: SecurityProfile): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.saveSecurityProfile(profile));
+  }
+
+  saveConfigPackage(configPackage: ExamConfigPackage): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.saveConfigPackage(configPackage));
+  }
+
+  saveResultDestination(destination: ResultDestination): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.saveResultDestination(destination));
+  }
+
+  saveLmsConnection(connection: LmsConnection): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.saveLmsConnection(connection));
+  }
+
+  deleteLmsConnection(connectionId: string): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.deleteLmsConnection(connectionId));
+  }
+
+  deleteResultDestination(destinationId: string): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.deleteResultDestination(destinationId));
+  }
+
+  updateSubmissionSyncState(submissionId: string, syncState: SubmissionSyncState): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.updateSubmissionSyncState(submissionId, syncState));
+  }
+
+  updateSubmissionStudentLmsTurnIn(submissionId: string, state: StudentLmsTurnInState): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.updateSubmissionStudentLmsTurnIn(submissionId, state));
+  }
+
+  importExamBundle(exam: Exam, configPackage: ExamConfigPackage): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.importExamBundle(exam, configPackage));
+  }
+
+  deleteConfigPackage(packageId: string): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.deleteConfigPackage(packageId));
+  }
+
+  duplicateConfigPackage(packageId: string): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.duplicateConfigPackage(packageId));
+  }
+
+  appendSecurityLog(entry: Omit<SecurityLogEntry, "id" | "timestamp">): Promise<AppStateSnapshot> {
+    return this.enqueue(() => this.storage.appendSecurityLog(entry));
+  }
+
+  recordSubmission(
+    exam: Exam,
+    session: ExamSession,
+    options?: { externalDeliveryMode?: ExternalDeliveryMode; packageId?: string; resultDestinations?: ResultDestination[] }
+  ): Promise<SubmissionResult> {
+    return this.enqueue(() => this.storage.recordSubmission(exam, session, options));
+  }
+
+  exportCsv(examId?: string): Promise<string> {
+    return this.enqueue(() => this.storage.exportCsv(examId));
+  }
+}
+
 export const createStorageService = (dataDir: string): StorageService =>
-  new JsonStorageService(join(dataDir, "lockedscreen-state.json"));
+  new SerializedStorageService(new JsonStorageService(join(dataDir, "lockedscreen-state.json")));
