@@ -305,7 +305,7 @@ const googleSettingsFromConnection = (
     enabled: settings?.enabled ?? true,
     clientId: settings?.clientId?.trim() || connection.clientId,
     requestedScopes:
-      settings?.requestedScopes && settings.requestedScopes.length > 0
+      Array.isArray(settings?.requestedScopes)
         ? settings.requestedScopes
         : (connection.scope.trim() || providerDefaultScope("google-classroom")).split(/\s+/),
     connectionStatus: settings?.connectionStatus ?? connection.status,

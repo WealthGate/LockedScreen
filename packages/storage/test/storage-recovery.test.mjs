@@ -36,6 +36,22 @@ const withDataDirectory = async (operation) => {
   }
 };
 
+test("Google permissions remain administrator-selected after saving and reopening", async () => {
+  await withDataDirectory(async (dataDirectory) => {
+    const storage = createStorageService(dataDirectory);
+    const initial = await storage.getSnapshot();
+    for (const requestedScopes of [["openid", "https://www.googleapis.com/auth/classroom.courses.readonly"], []]) {
+      const saved = await storage.saveSettings({
+        ...initial.settings,
+        googleIntegration: { ...initial.settings.googleIntegration, requestedScopes }
+      });
+      assert.deepEqual(saved.settings.googleIntegration.requestedScopes, requestedScopes);
+      const reopened = await createStorageService(dataDirectory).getSnapshot();
+      assert.deepEqual(reopened.settings.googleIntegration.requestedScopes, requestedScopes);
+    }
+  });
+});
+
 test("restores the last good backup when the live state is truncated", async () => {
   await withDataDirectory(async (dataDirectory) => {
     const storage = createStorageService(dataDirectory);

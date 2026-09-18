@@ -266,8 +266,7 @@ const normalizeGoogleIntegration = (
 ): GoogleIntegrationSettings => {
   const requestedScopes = Array.isArray(settings?.requestedScopes)
     ? settings.requestedScopes.map((scope) => scope.trim()).filter(Boolean)
-    : [];
-  const mergedScopes = Array.from(new Set([...(requestedScopes.length > 0 ? requestedScopes : []), ...defaultGoogleClassroomScopes]));
+    : [...defaultGoogleClassroomScopes];
 
   return {
     ...defaultGoogleIntegration(),
@@ -275,7 +274,7 @@ const normalizeGoogleIntegration = (
     enabled: settings?.enabled === true,
     clientId: settings?.clientId?.trim() ?? "",
     clientSecret: settings?.clientSecret?.trim() ?? "",
-    requestedScopes: mergedScopes,
+    requestedScopes: Array.from(new Set(requestedScopes)),
     connectionStatus:
       settings?.connectionStatus === "connected" || settings?.connectionStatus === "error"
         ? settings.connectionStatus

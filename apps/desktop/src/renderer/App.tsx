@@ -473,9 +473,6 @@ const splitScopes = (value: string): string[] =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-const mergeGoogleDefaultScopes = (scopes: string[]): string[] =>
-  Array.from(new Set([...scopes.map((scope) => scope.trim()).filter(Boolean), ...defaultLmsScope("google-classroom").split(/\s+/)]));
-
 const normalizeStartCode = (value: string): string => value.trim();
 
 const hasExamStartCode = (policy?: StudentAccessPolicy | null): boolean =>
@@ -3158,10 +3155,7 @@ const SettingsPage = () => {
         ...settings.googleIntegration,
         clientId: settings.googleIntegration.clientId.trim(),
         clientSecret: settings.googleIntegration.clientSecret?.trim() ?? "",
-        requestedScopes:
-          settings.googleIntegration.requestedScopes.length > 0
-            ? mergeGoogleDefaultScopes(settings.googleIntegration.requestedScopes)
-            : defaultLmsScope("google-classroom").split(/\s+/),
+        requestedScopes: Array.from(new Set(settings.googleIntegration.requestedScopes.map((scope) => scope.trim()).filter(Boolean))),
         connectionStatus: settings.googleIntegration.enabled
           ? settings.googleIntegration.connectionStatus
           : "disconnected",
@@ -3220,9 +3214,7 @@ const SettingsPage = () => {
     });
 
   const handleSaveConnection = async () => {
-    const googleScopes = settings.googleIntegration.requestedScopes.length > 0
-      ? settings.googleIntegration.requestedScopes.join(" ")
-      : defaultLmsScope("google-classroom");
+    const googleScopes = settings.googleIntegration.requestedScopes.join(" ");
     const nextConnection = {
       ...connectionDraft,
       label: connectionDraft.label.trim() || providerLabel(connectionDraft.provider),
@@ -4101,7 +4093,7 @@ const SettingsPage = () => {
                           : current.clientSecret,
                       scope:
                         provider === "google-classroom"
-                          ? settings.googleIntegration.requestedScopes.join(" ") || defaultLmsScope(provider)
+                          ? settings.googleIntegration.requestedScopes.join(" ")
                           : defaultLmsScope(provider),
                       tenantId: provider === "microsoft-365" ? current.tenantId || "common" : "",
                       authorizeUrl: provider === "generic-oauth-lms" ? current.authorizeUrl : "",
