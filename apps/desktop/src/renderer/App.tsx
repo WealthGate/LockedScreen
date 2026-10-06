@@ -322,15 +322,16 @@ const isSecureSessionReady = (snapshot: AppStateSnapshot): boolean => {
     snapshot.securityProfile.dedicatedExamAccount &&
     usesOfficialKiosk(snapshot.securityProfile);
   const nativeReady =
-    snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile) &&
+    (snapshot.installedRole === "student" || (snapshot.securityProfile.nativeCompanionVerified &&
+    usesNativeCompanion(snapshot.securityProfile))) &&
     snapshot.runtime?.nativeLockdown.lockdownCapable === true;
 
   return officialKioskReady || nativeReady;
 };
 
 const canUseTestingMode = (snapshot: AppStateSnapshot): boolean =>
-  snapshot.settings.allowNonKioskTestingMode || snapshot.runtime?.canOnlyUseTestingMode === true;
+  snapshot.installedRole !== "student" &&
+  (snapshot.settings.allowNonKioskTestingMode || snapshot.runtime?.canOnlyUseTestingMode === true);
 
 const testingModeCopy = (snapshot: AppStateSnapshot): string =>
   snapshot.runtime?.canOnlyUseTestingMode
@@ -356,8 +357,8 @@ const isNativeFullKioskExam = (snapshot: AppStateSnapshot, examId: string): bool
   const configPackage = getConfigPackageForExam(snapshot, examId);
   return (
     configPackage?.securityMode === "full-kiosk" &&
-    snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile)
+    (snapshot.installedRole === "student" ||
+      (snapshot.securityProfile.nativeCompanionVerified && usesNativeCompanion(snapshot.securityProfile)))
   );
 };
 
@@ -761,7 +762,7 @@ const AppFrame = () => {
     document.documentElement.className = themeClass(snapshot?.settings.defaultTheme ?? "system");
   }, [snapshot?.settings.defaultTheme]);
 
-  if (loading && !snapshot) {
+  if ((loading && !snapshot) || !launchContext) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-slate-800 dark:text-slate-100">
         Loading workspace...
@@ -792,12 +793,12 @@ const AppFrame = () => {
       {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
         <Routes>
-          <Route path="/" element={<StudentPortalPage />} />
-          <Route path="/student" element={<StudentPortalPage />} />
+          <Route path="/" element={<StudentPortalPage studentOnly />} />
+          <Route path="/student" element={<StudentPortalPage studentOnly />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
           <Route path="/link/:examId" element={<LinkExamPage />} />
           <Route path="/package-import" element={<PackageImportPage launchContext={launchContext} />} />
-          <Route path="*" element={<StudentPortalPage />} />
+          <Route path="*" element={<StudentPortalPage studentOnly />} />
         </Routes>
       ) : (
         <Routes>
@@ -980,10 +981,11 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
   );
 };
 
-const StudentPortalPage = () => {
+const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { snapshot, launchAlternateDesktopSession, hideExamForStudent } = useLockedscreenStore();
+  const { snapshot, launchAlternateDesktopSession, hideExamForStudent, importConfigPackage, error } = useLockedscreenStore();
+  const [openingPackage, setOpeningPackage] = useState(false);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [candidateName, setCandidateName] = useState("");
   const [candidateId, setCandidateId] = useState("");
@@ -1111,12 +1113,20 @@ const StudentPortalPage = () => {
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/")}>
+              {!studentOnly ? <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/")}>
                 <ArrowLeft className="size-4" />
                 Change profile
+              </Button> : null}
+              <Button className="bg-white text-slate-950 hover:bg-slate-100" disabled={openingPackage} onClick={async () => {
+                setOpeningPackage(true);
+                try { await importConfigPackage(); } finally { setOpeningPackage(false); }
+              }}>
+                {openingPackage ? <Loader2 className="size-4 animate-spin" /> : <FileInput className="size-4" />}
+                Open exam package
               </Button>
               <Badge className="bg-teal-100 text-teal-950">{snapshot.exams.length} exam(s) available</Badge>
             </div>
+            {error ? <p role="alert" className="text-sm text-rose-200">{error}</p> : null}
           </div>
         </Card>
 
@@ -6202,7 +6212,9 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
 const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
   const label = state?.currentVersion ? `Lockedscreen v${state.currentVersion}` : `Lockedscreen v${desktopPackage.version}`;
   const status =
-    state?.status === "available"
+    state?.channel === "microsoft-store"
+      ? "Microsoft Store updates"
+      : state?.status === "available"
       ? `Update ${state.availableVersion ?? ""} available`.trim()
       : state?.status === "downloaded"
         ? "Update ready"
@@ -6257,7 +6269,7 @@ const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
                   disabled: true
                 }
               : {
-                  label: state?.status === "error" ? "Check again" : "Check for updates",
+                  label: state?.channel === "microsoft-store" ? "Open Microsoft Store" : state?.status === "error" ? "Check again" : "Check for updates",
                   icon: null,
                   onClick: () => void window.lockedscreenApi.checkForUpdates(),
                   disabled: false
@@ -6400,14 +6412,16 @@ const StudentExamPage = () => {
   const sessionEndedRef = useRef(false);
 
   const endCurrentSession = useCallback(
-    async (reason: string): Promise<boolean> => {
+    async (reason: string, pin?: string): Promise<boolean> => {
       if (sessionEndedRef.current) {
         return true;
       }
 
       sessionEndedRef.current = true;
       try {
-        return await waitForSessionRelease(endSession(reason));
+        const released = await waitForSessionRelease(endSession(reason, pin));
+        if (!released) { sessionEndedRef.current = false; throw new Error("Session release failed. Check the invigilator PIN and try again."); }
+        return true;
       } catch (error) {
         sessionEndedRef.current = false;
         throw error;
@@ -6416,8 +6430,8 @@ const StudentExamPage = () => {
     [endSession]
   );
 
-  const releaseToStudentPortal = useCallback(async () => {
-    await endCurrentSession("Invigilator released native exam runtime");
+  const releaseToStudentPortal = useCallback(async (pin?: string) => {
+    await endCurrentSession("Invigilator released native exam runtime", pin);
     navigate("/student", { replace: true });
   }, [endCurrentSession, navigate]);
 
@@ -6479,7 +6493,7 @@ const StudentExamPage = () => {
       return;
     }
 
-    if (!requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
+    if (snapshot?.installedRole !== "student" && !requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
       navigate("/student");
     }
   };
@@ -6520,6 +6534,7 @@ const StudentExamPage = () => {
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
+      verifyPinInMain={snapshot?.installedRole === "student"}
       onUnlock={releaseToStudentPortal}
     >
       {submitted ? (
@@ -6707,14 +6722,16 @@ const LinkExamPage = () => {
       .join("|") ?? "";
 
   const endCurrentSession = useCallback(
-    async (reason: string): Promise<boolean> => {
+    async (reason: string, pin?: string): Promise<boolean> => {
       if (sessionEndedRef.current) {
         return true;
       }
 
       sessionEndedRef.current = true;
       try {
-        return await waitForSessionRelease(endSession(reason));
+        const released = await waitForSessionRelease(endSession(reason, pin));
+        if (!released) { sessionEndedRef.current = false; throw new Error("Session release failed. Check the invigilator PIN and try again."); }
+        return true;
       } catch (error) {
         sessionEndedRef.current = false;
         throw error;
@@ -6723,8 +6740,8 @@ const LinkExamPage = () => {
     [endSession]
   );
 
-  const releaseToStudentPortal = useCallback(async () => {
-    await endCurrentSession("Invigilator released hosted exam runtime");
+  const releaseToStudentPortal = useCallback(async (pin?: string) => {
+    await endCurrentSession("Invigilator released hosted exam runtime", pin);
     navigate("/student", { replace: true });
   }, [endCurrentSession, navigate]);
 
@@ -6848,7 +6865,7 @@ const LinkExamPage = () => {
       return;
     }
 
-    if (!requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
+    if (snapshot?.installedRole !== "student" && !requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
       navigate("/student");
     }
   };
@@ -6895,6 +6912,7 @@ const LinkExamPage = () => {
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
+      verifyPinInMain={snapshot?.installedRole === "student"}
       onUnlock={releaseToStudentPortal}
       onUnlockDialogChange={setShellUnlockOpen}
       onZoomChange={setHostedZoom}
@@ -7045,6 +7063,7 @@ const StudentShell = ({
   testingModeName,
   unlockPin,
   onUnlock,
+  verifyPinInMain = false,
   onUnlockDialogChange,
   onZoomChange,
   scaleContent = true,
@@ -7057,7 +7076,8 @@ const StudentShell = ({
   secureMode: boolean;
   testingModeName: string;
   unlockPin: string;
-  onUnlock: () => void | Promise<void>;
+  onUnlock: (pin?: string) => void | Promise<void>;
+  verifyPinInMain?: boolean;
   onUnlockDialogChange?: (open: boolean) => void;
   onZoomChange?: (zoom: number) => void;
   scaleContent?: boolean;
@@ -7077,7 +7097,7 @@ const StudentShell = ({
   const unlockInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedUnlockPin = unlockPin.trim();
   const normalizedPinAttempt = pinAttempt.trim();
-  const invigilatorPinRequired = closeAttemptBlocked || Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
+  const invigilatorPinRequired = verifyPinInMain || closeAttemptBlocked || Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
   const showSchoolBranding = configPackage?.teacherOptions.showSchoolBranding !== false;
   const showCandidateId = configPackage?.teacherOptions.showCandidateId !== false;
   const showTimer = configPackage?.teacherOptions.showTimer !== false;
@@ -7161,7 +7181,7 @@ const StudentShell = ({
   const releaseSession = async () => {
     setReleasePending(true);
     try {
-      await onUnlock();
+      await onUnlock(normalizedPinAttempt);
       setUnlockError(null);
       setUnlockOpen(false);
       setPinAttempt("");
@@ -7178,6 +7198,10 @@ const StudentShell = ({
       return;
     }
 
+    if (verifyPinInMain) {
+      void releaseSession();
+      return;
+    }
     if (!invigilatorPinRequired) {
       void releaseSession();
       return;
@@ -7192,6 +7216,10 @@ const StudentShell = ({
   };
 
   const captureScreenshot = async () => {
+    if (verifyPinInMain) {
+      setUnlockError("Screenshots are unavailable in the Student edition.");
+      return;
+    }
     if (normalizedUnlockPin.length > 0 && normalizedPinAttempt !== normalizedUnlockPin) {
       setUnlockError("Enter the invigilator PIN to save a screenshot.");
       return;

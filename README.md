@@ -10,14 +10,14 @@ LOCKEDSCREEN is a local-first, Windows-first exam application for schools. It su
 
 ## What To Install
 
-Windows packaging currently produces two main deliverables:
+Version 0.6.56 provides separate fixed-role downloads:
 
-- `Lockedscreen-<version>-x64.exe`
-  Standard Windows installer for most users.
-- `Lockedscreen-Portable-<version>.exe`
-  Portable build that can be run without a traditional install.
+- `LockedScreen-Student-Setup-0.6.56-x64.exe`: secure exam runtime and teacher-sent `.lscp` files, without teacher document extraction/OCR dependencies or administration access.
+- `LockedScreen-Teacher-Setup-0.6.56-x64.exe`: authoring, administration and exam delivery.
 
-For students and staff, prefer the standard installer unless you specifically need portable distribution.
+Choose the edition before downloading. Separate Microsoft Store listings are needed
+for separate download sizes. See [edition builds, Store updates and release checks](docs/role-editions.md).
+Teachers must re-export exam packages with this version for Student PIN-authorized exit.
 
 ## How To Use The App
 

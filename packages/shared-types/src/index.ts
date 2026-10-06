@@ -365,6 +365,7 @@ export interface StudentAccessPolicy {
 }
 
 export interface QuitUnlockPolicy {
+  pinVerifier?: { salt: string; digest: string };
   requireInvigilatorPin: boolean;
   allowRestartSession: boolean;
   askBeforeQuit: boolean;
@@ -429,6 +430,7 @@ export interface AppSettings {
 }
 
 export interface AppUpdateState {
+  channel?: "github" | "microsoft-store";
   status: AppUpdateStatus;
   currentVersion: string;
   availableVersion?: string;
@@ -453,6 +455,8 @@ export interface NativeLockdownEnvironment {
   helperPath?: string;
   servicePresent: boolean;
   serviceRunning: boolean;
+  agentResponding?: boolean;
+  coordinatorResponding?: boolean;
   lockdownCapable: boolean;
   featureLevel: NativeLockdownFeatureLevel;
   detail: string;
@@ -530,6 +534,7 @@ export interface SecurityOverview {
 }
 
 export interface AppStateSnapshot {
+  installedRole?: InstalledAppRole;
   exams: Exam[];
   configPackages: ExamConfigPackage[];
   submissions: SubmissionResult[];

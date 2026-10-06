@@ -67,7 +67,7 @@ export interface LockedscreenApi {
   captureScreenshot: () => Promise<string | null>;
   openGoogleAppsScript: () => Promise<void>;
   beginSession: (request: SessionStartRequest) => Promise<AppStateSnapshot>;
-  endSession: (reason?: string) => Promise<AppStateSnapshot>;
+  endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot>;
   submitExam: (payload: {
     exam: Exam;
@@ -139,7 +139,7 @@ const api: LockedscreenApi = {
   captureScreenshot: () => ipcRenderer.invoke("window:captureScreenshot"),
   openGoogleAppsScript: () => ipcRenderer.invoke("help:openGoogleAppsScript"),
   beginSession: (request) => ipcRenderer.invoke("session:begin", request),
-  endSession: (reason) => ipcRenderer.invoke("session:end", reason),
+  endSession: (reason, pin) => ipcRenderer.invoke("session:end", reason, pin),
   launchApprovedApplication: (payload) => ipcRenderer.invoke("applications:launch", payload),
   submitExam: (payload) => ipcRenderer.invoke("exam:submit", payload),
   turnInStudentLms: (payload) => ipcRenderer.invoke("studentLms:turnIn", payload),
