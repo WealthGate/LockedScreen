@@ -19,6 +19,7 @@ type SecurityEventRecorder = (category: string, severity: string, message: strin
 let activeSession: ActiveSessionState | null = null;
 let activePackage: ExamConfigPackage | null = null;
 let navigationGuard: NavigationGuard | null = null;
+let exitCleanupPending = false;
 
 const hostedAuthDomains = [
   "accounts.google.com",
@@ -258,6 +259,9 @@ export const beginManagedSession = async (
   configPackage: ExamConfigPackage,
   recordSecurityEvent: SecurityEventRecorder
 ): Promise<void> => {
+  if (exitCleanupPending) {
+    throw new Error("Previous exam browser cleanup is still running. Wait for it to finish or restart the app before starting another exam.");
+  }
   activeSession = {
     examId: request.examId,
     packageId: request.packageId,
@@ -284,15 +288,33 @@ export const endManagedSession = async (
   reason: string,
   recordSecurityEvent: SecurityEventRecorder
 ): Promise<void> => {
-  if (activePackage?.sessionPolicy.clearSessionOnEnd && activeSession?.mode === "link") {
-    await clearHostedPartitionData();
-  }
-
+  const clearHostedData = activePackage?.sessionPolicy.clearSessionOnEnd && activeSession?.mode === "link";
   activeSession = null;
   activePackage = null;
   navigationGuard = null;
   await applyWindowState(browserWindow, null);
-  await recordSecurityEvent("session", "info", "Ended managed session.", reason);
+
+  // Browser cleanup and audit storage must not prevent native lockdown release.
+  if (clearHostedData) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    exitCleanupPending = true;
+    try {
+      await Promise.race([
+        clearHostedPartitionData().finally(() => { exitCleanupPending = false; }),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Hosted session cleanup timed out.")), 3000);
+        })
+      ]);
+    } catch (error) {
+      console.warn("Hosted session cleanup did not complete during exit.", error);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  void recordSecurityEvent("session", "info", "Ended managed session.", reason).catch((error) => {
+    console.warn("Could not record managed session exit.", error);
+  });
 };
 
 export const launchApprovedApplication = async (

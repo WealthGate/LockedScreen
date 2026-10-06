@@ -1,6 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
 
 import { screen } from "electron";
 
@@ -17,22 +15,22 @@ import type {
   VerificationStatus
 } from "@lockedscreen/shared-types";
 import { calculateConfigPackageChecksum } from "@lockedscreen/storage";
+import { probeNativeReadiness } from "./native-security";
 
-export const detectWindowsEdition = (): RuntimeEnvironment["windowsEdition"] => {
+export const detectWindowsEdition = async (): Promise<RuntimeEnvironment["windowsEdition"]> => {
   if (process.platform !== "win32") {
     return undefined;
   }
 
   try {
-    const editionId = execFileSync(
+    const editionId = (await execFileAsync(
       "powershell.exe",
       [
         "-NoProfile",
         "-Command",
         "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion').EditionID"
-      ],
-      { encoding: "utf-8", windowsHide: true }
-    ).trim();
+      ]
+    )).trim();
 
     switch (editionId) {
       case "Core":
@@ -58,20 +56,7 @@ export const detectWindowsEdition = (): RuntimeEnvironment["windowsEdition"] => 
   }
 };
 
-const candidateNativeHelperPaths = (): string[] => {
-  const exeDir = dirname(process.execPath);
-  const developmentRoot = join(process.cwd(), "apps", "windows-lockdown", "Lockedscreen.Security.Client", "bin");
-  return [
-    join(process.resourcesPath, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
-    join(process.resourcesPath, "Lockedscreen.Security.Client.exe"),
-    join(exeDir, "Lockedscreen.Security.Client.exe"),
-    join(exeDir, "lockedscreen-security", "Lockedscreen.Security.Client.exe"),
-    join(developmentRoot, "Release", "net8.0-windows", "Lockedscreen.Security.Client.exe"),
-    join(developmentRoot, "Debug", "net8.0-windows", "Lockedscreen.Security.Client.exe")
-  ];
-};
-
-const detectNativeLockdownEnvironment = (): RuntimeEnvironment["nativeLockdown"] => {
+const detectNativeLockdownEnvironment = async (): Promise<RuntimeEnvironment["nativeLockdown"]> => {
   if (process.platform !== "win32") {
     return {
       supported: false,
@@ -84,19 +69,16 @@ const detectNativeLockdownEnvironment = (): RuntimeEnvironment["nativeLockdown"]
     };
   }
 
-  const helperPath = candidateNativeHelperPaths().find((candidate) => existsSync(candidate));
-
   let serviceState = "missing";
   try {
-    serviceState = execFileSync(
+    serviceState = (await execFileAsync(
       "powershell.exe",
       [
         "-NoProfile",
         "-Command",
         "$svc = Get-Service -Name 'LockedscreenSecurityService' -ErrorAction SilentlyContinue; if ($null -eq $svc) { 'missing' } else { $svc.Status }"
-      ],
-      { encoding: "utf-8", windowsHide: true }
-    )
+      ]
+    ))
       .trim()
       .toLowerCase();
   } catch {
@@ -105,7 +87,9 @@ const detectNativeLockdownEnvironment = (): RuntimeEnvironment["nativeLockdown"]
 
   const servicePresent = serviceState !== "" && serviceState !== "missing";
   const serviceRunning = serviceState === "running";
-  const lockdownCapable = Boolean(helperPath) && serviceRunning;
+  const readiness = await probeNativeReadiness();
+  const helperPath = readiness.helperPath;
+  const lockdownCapable = readiness.ready;
   const featureLevel =
     lockdownCapable ? "desktop-lockdown" : helperPath || servicePresent ? "partial" : "none";
 
@@ -117,16 +101,14 @@ const detectNativeLockdownEnvironment = (): RuntimeEnvironment["nativeLockdown"]
     serviceRunning,
     lockdownCapable,
     featureLevel,
-    detail: lockdownCapable
-      ? "Native Windows lockdown helper and service were detected."
-      : featureLevel === "partial"
-        ? "A native Windows lockdown component is partially present, but the full helper/service pair is not active."
-        : "No native Windows lockdown helper or service was detected."
+    detail: readiness.detail,
+    agentResponding: readiness.agentResponding,
+    coordinatorResponding: readiness.coordinatorResponding
   };
 };
 
-export const createRuntimeEnvironment = (): RuntimeEnvironment => {
-  const windowsEdition = detectWindowsEdition();
+export const createRuntimeEnvironment = async (): Promise<RuntimeEnvironment> => {
+  const windowsEdition = await detectWindowsEdition();
   const supportsAssignedAccess =
     windowsEdition === "pro" ||
     windowsEdition === "enterprise" ||
@@ -134,7 +116,7 @@ export const createRuntimeEnvironment = (): RuntimeEnvironment => {
     windowsEdition === "iot-enterprise";
   const supportsShellLauncher =
     windowsEdition === "enterprise" || windowsEdition === "education" || windowsEdition === "iot-enterprise";
-  const nativeLockdown = detectNativeLockdownEnvironment();
+  const nativeLockdown = await detectNativeLockdownEnvironment();
 
   return {
     platform:
@@ -158,7 +140,7 @@ export const createRuntimeEnvironment = (): RuntimeEnvironment => {
 
 const execFileAsync = (file: string, args: string[]): Promise<string> =>
   new Promise((resolve, reject) => {
-    execFile(file, args, { windowsHide: true, encoding: "utf-8" }, (error, stdout) => {
+    execFile(file, args, { windowsHide: true, encoding: "utf-8", timeout: 5000 }, (error, stdout) => {
       if (error) {
         reject(error);
         return;
@@ -391,7 +373,7 @@ const buildValidationItems = (
       detail: !runtime.supportsWindowsNativeLockdown
         ? "Native Windows lockdown is not available on this operating system."
         : nativeLockdownReady
-          ? "A verified native helper/service pair is available for desktop isolation, process supervision, and Windows-specific lockdown."
+          ? "Native helper status checks passed and an administrator has recorded deployment verification. Live enforcement depends on the active exam session."
           : runtime.nativeLockdown.detail
     },
     {

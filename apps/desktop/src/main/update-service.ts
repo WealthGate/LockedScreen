@@ -1,8 +1,9 @@
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { app, BrowserWindow, ipcMain, Notification } from "electron";
+import { app, BrowserWindow, ipcMain, Notification, shell } from "electron";
 import updater from "electron-updater";
+import { buildEdition, storeProductId } from "./edition";
 
 import type { AppUpdateState } from "@lockedscreen/shared-types";
 
@@ -150,10 +151,30 @@ export const configureAppUpdates = (
   getMainWindow: () => BrowserWindow | null,
   options: ConfigureAppUpdatesOptions = {}
 ): void => {
+  if (process.windowsStore) {
+    updateState = {
+      status: "idle",
+      currentVersion: app.getVersion(),
+      channel: "microsoft-store",
+      message: "Updates are managed by Microsoft Store."
+    };
+    ipcMain.handle("updates:getState", async () => updateState);
+    for (const action of ["check", "download", "install"]) {
+      ipcMain.handle(`updates:${action}`, async () => {
+        await shell.openExternal(`ms-windows-store://pdp/?productid=${storeProductId}`);
+        return updateState;
+      });
+    }
+    return;
+  }
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = false;
+  if (buildEdition !== "selectable") {
+    autoUpdater.channel = buildEdition;
+    autoUpdater.allowDowngrade = false;
+  }
 
   void restoreCompletedUpdate(getMainWindow);
   void cleanupOldUpdateFiles();
@@ -366,7 +387,7 @@ const checkForUpdatesQuietly = async (): Promise<void> => {
 };
 
 export const checkForAppUpdatesAfterStartup = (): void => {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || process.windowsStore) {
     return;
   }
 

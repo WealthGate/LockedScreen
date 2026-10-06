@@ -5,6 +5,11 @@ out/
 .nuget/
 
 apps/desktop/dist/
+apps/desktop/dist-store/
+apps/desktop/dist-editions/
+apps/desktop/build/edition-app/
+student-store-identity.json
+apps/desktop/build/store-native/
 apps/desktop/out/
 
 apps/windows-lockdown/**/bin/

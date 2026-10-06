@@ -53,7 +53,7 @@ interface LockedscreenStore {
   syncPendingResults: () => Promise<AppStateSnapshot | null>;
   beginSession: (payload: { examId: string; packageId: string; mode: Exam["mode"] }) => Promise<AppStateSnapshot | null>;
   launchAlternateDesktopSession: (payload: { examId: string; candidate: Candidate }) => Promise<boolean>;
-  endSession: (reason?: string) => Promise<AppStateSnapshot | null>;
+  endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot | null>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot | null>;
   submitExam: (exam: Exam, session: ExamSession) => Promise<SubmissionResult | null>;
   turnInStudentLms: (payload: { submissionId: string; packageId: string }) => Promise<SubmissionResult | null>;
@@ -286,8 +286,8 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
       throw error;
     }
   },
-  endSession: async (reason) => {
-    const snapshot = await withGuard(() => window.lockedscreenApi.endSession(reason), (error) => set({ error }));
+  endSession: async (reason, pin) => {
+    const snapshot = await withGuard(() => window.lockedscreenApi.endSession(reason, pin), (error) => set({ error }));
     if (snapshot) {
       set({ snapshot, error: null });
     }

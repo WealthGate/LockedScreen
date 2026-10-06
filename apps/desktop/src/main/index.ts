@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
+import { assertRoleAccess, buildEdition } from "./edition";
+import { createPinVerifier, verifyInvigilatorPin } from "./security/invigilator-pin";
 
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
@@ -123,9 +125,26 @@ import { turnInSubmissionToLms } from "./student-lms-turnin";
 import { checkForAppUpdatesAfterStartup, configureAppUpdates } from "./update-service";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+if (buildEdition === "student") {
+  app.setPath("userData", join(app.getPath("appData"), "@lockedscreen", "student"));
+}
 const storage = createStorageService(app.getPath("userData"));
 const oauthVault = new OAuthVault(join(app.getPath("userData"), "oauth-vault.json"));
-const runtimeEnvironment = createRuntimeEnvironment();
+let runtimeEnvironment: RuntimeEnvironment;
+let runtimeRefresh: Promise<void> | null = null;
+const refreshRuntimeEnvironment = (): Promise<void> => {
+  if (!runtimeRefresh) {
+    runtimeRefresh = createRuntimeEnvironment().then(async (runtime) => {
+      runtimeEnvironment = runtime;
+      // Contains helper health only; no exam content, account tokens or exit codes.
+      await writeFile(join(app.getPath("userData"), "native-runtime.json"), JSON.stringify({
+        checkedAt: new Date().toISOString(), version: app.getVersion(),
+        windowsStore: Boolean(process.windowsStore), runtime
+      }, null, 2)).catch((error) => console.warn("Could not write native diagnostic report.", error));
+    }).finally(() => { runtimeRefresh = null; });
+  }
+  return runtimeRefresh;
+};
 const getArgValue = (prefix: string): string | null =>
   process.argv.find((entry) => entry.startsWith(prefix))?.slice(prefix.length) ?? null;
 const launchRoute = getArgValue("--lockedscreen-route=");
@@ -148,7 +167,13 @@ const readInstalledRole = (): InstalledAppRole => {
     return "teacher";
   }
 };
-const installedRole = readInstalledRole();
+const installedRole = buildEdition === "selectable" ? readInstalledRole() : buildEdition;
+const handleIpc = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void => {
+  ipcMain.handle(channel, (...args) => {
+    assertRoleAccess(installedRole, channel);
+    return listener(...args);
+  });
+};
 const preloadPath = (() => {
   const cjsPath = join(__dirname, "../preload/index.cjs");
   if (existsSync(cjsPath)) {
@@ -331,6 +356,7 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
   const snapshot = await operation;
   return {
     ...snapshot,
+    installedRole,
     runtime: runtimeEnvironment,
     securityOverview: await buildSecurityOverview(snapshot, runtimeEnvironment, getActivePackage())
   };
@@ -453,6 +479,10 @@ const configPackageForExport = (
 ): ExamConfigPackage => {
   const basePackage: ExamConfigPackage = {
     ...configPackage,
+    quitUnlockPolicy: {
+      ...configPackage.quitUnlockPolicy,
+      pinVerifier: createPinVerifier(snapshot.settings.invigilatorUnlockPin)
+    },
     passwordHint: undefined
   };
 
@@ -619,6 +649,8 @@ app.whenReady().then(async () => {
     return;
   }
 
+  await refreshRuntimeEnvironment();
+
   if (initialPackageImportPath) {
     await queuePackageImportLaunch(initialPackageImportPath);
   }
@@ -626,11 +658,14 @@ app.whenReady().then(async () => {
   configureAppUpdates(() => mainWindow);
   await storage.getSnapshot();
 
-  ipcMain.handle("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
-  ipcMain.handle("app:getLaunchContext", async () => pendingLaunchContext);
-  ipcMain.handle("security:refreshOverview", async () => withRuntime(storage.getSnapshot()));
+  handleIpc("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
+  handleIpc("app:getLaunchContext", async () => pendingLaunchContext);
+  handleIpc("security:refreshOverview", async () => {
+    await refreshRuntimeEnvironment();
+    return withRuntime(storage.getSnapshot());
+  });
 
-  ipcMain.handle("exam:save", async (_event, exam: unknown) => {
+  handleIpc("exam:save", async (_event, exam: unknown) => {
     if (!isExam(exam)) {
       throw new Error("Invalid exam payload.");
     }
@@ -638,7 +673,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveExam(exam));
   });
 
-  ipcMain.handle("exam:delete", async (_event, examId: unknown) => {
+  handleIpc("exam:delete", async (_event, examId: unknown) => {
     if (typeof examId !== "string") {
       throw new Error("Invalid exam id.");
     }
@@ -646,7 +681,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.deleteExam(examId));
   });
 
-  ipcMain.handle("exam:hideForStudent", async (_event, payload: unknown) => {
+  handleIpc("exam:hideForStudent", async (_event, payload: unknown) => {
     if (
       !isRecord(payload) ||
       typeof payload.examId !== "string" ||
@@ -658,7 +693,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.hideExamForStudent(payload.examId, payload.candidateId));
   });
 
-  ipcMain.handle("settings:save", async (_event, settings: unknown) => {
+  handleIpc("settings:save", async (_event, settings: unknown) => {
     if (!isSettings(settings)) {
       throw new Error("Invalid settings payload.");
     }
@@ -666,7 +701,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveSettings(settings));
   });
 
-  ipcMain.handle("security:save", async (_event, profile: unknown) => {
+  handleIpc("security:save", async (_event, profile: unknown) => {
     if (!isSecurityProfile(profile)) {
       throw new Error("Invalid security profile payload.");
     }
@@ -674,7 +709,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveSecurityProfile(profile));
   });
 
-  ipcMain.handle("configPackage:save", async (_event, configPackage: unknown) => {
+  handleIpc("configPackage:save", async (_event, configPackage: unknown) => {
     if (!isConfigPackage(configPackage)) {
       throw new Error("Invalid configuration package payload.");
     }
@@ -682,7 +717,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveConfigPackage(configPackage));
   });
 
-  ipcMain.handle("resultsDestination:save", async (_event, destination: unknown) => {
+  handleIpc("resultsDestination:save", async (_event, destination: unknown) => {
     if (!isResultDestination(destination)) {
       throw new Error("Invalid result destination payload.");
     }
@@ -690,7 +725,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveResultDestination(destination));
   });
 
-  ipcMain.handle("lmsConnection:save", async (_event, connection: unknown) => {
+  handleIpc("lmsConnection:save", async (_event, connection: unknown) => {
     if (!isLmsConnection(connection)) {
       throw new Error("Invalid LMS connection payload.");
     }
@@ -698,7 +733,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveLmsConnection(connection));
   });
 
-  ipcMain.handle("lmsConnection:delete", async (_event, connectionId: unknown) => {
+  handleIpc("lmsConnection:delete", async (_event, connectionId: unknown) => {
     if (typeof connectionId !== "string") {
       throw new Error("Invalid LMS connection id.");
     }
@@ -707,7 +742,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.deleteLmsConnection(connectionId));
   });
 
-  ipcMain.handle("lmsConnection:connect", async (_event, connectionId: unknown) => {
+  handleIpc("lmsConnection:connect", async (_event, connectionId: unknown) => {
     if (typeof connectionId !== "string") {
       throw new Error("Invalid LMS connection id.");
     }
@@ -763,7 +798,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveLmsConnection(connected));
   });
 
-  ipcMain.handle("lmsConnection:signOut", async (_event, payload: unknown) => {
+  handleIpc("lmsConnection:signOut", async (_event, payload: unknown) => {
     if (!isRecord(payload) || typeof payload.connectionId !== "string") {
       throw new Error("Invalid LMS sign-out request.");
     }
@@ -793,7 +828,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveLmsConnection(signedOut));
   });
 
-  ipcMain.handle("lmsConnection:clearTokens", async (_event, connectionId: unknown) => {
+  handleIpc("lmsConnection:clearTokens", async (_event, connectionId: unknown) => {
     if (typeof connectionId !== "string") {
       throw new Error("Invalid LMS connection id.");
     }
@@ -832,7 +867,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.saveLmsConnection(resetConnection));
   });
 
-  ipcMain.handle("lmsConnection:listCourses", async (_event, connectionId: unknown): Promise<LmsCourse[]> => {
+  handleIpc("lmsConnection:listCourses", async (_event, connectionId: unknown): Promise<LmsCourse[]> => {
     if (typeof connectionId !== "string") {
       throw new Error("Invalid LMS connection id.");
     }
@@ -846,7 +881,7 @@ app.whenReady().then(async () => {
     return listConnectionCourses(connection, oauthVault, snapshot.settings.googleIntegration);
   });
 
-  ipcMain.handle(
+  handleIpc(
     "lmsConnection:listCourseWork",
     async (_event, payload: unknown): Promise<LmsCourseWork[]> => {
       if (!isRecord(payload) || typeof payload.connectionId !== "string" || typeof payload.courseId !== "string") {
@@ -863,7 +898,7 @@ app.whenReady().then(async () => {
     }
   );
 
-  ipcMain.handle("lmsConnection:listStudents", async (_event, payload: unknown): Promise<LmsStudent[]> => {
+  handleIpc("lmsConnection:listStudents", async (_event, payload: unknown): Promise<LmsStudent[]> => {
     if (!isRecord(payload) || typeof payload.connectionId !== "string" || typeof payload.courseId !== "string") {
       throw new Error("Invalid LMS student lookup payload.");
     }
@@ -877,7 +912,7 @@ app.whenReady().then(async () => {
     return listConnectionStudents(connection, payload.courseId, oauthVault, snapshot.settings.googleIntegration);
   });
 
-  ipcMain.handle("resultsDestination:delete", async (_event, destinationId: unknown) => {
+  handleIpc("resultsDestination:delete", async (_event, destinationId: unknown) => {
     if (typeof destinationId !== "string") {
       throw new Error("Invalid result destination id.");
     }
@@ -885,7 +920,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.deleteResultDestination(destinationId));
   });
 
-  ipcMain.handle("configPackage:delete", async (_event, packageId: unknown) => {
+  handleIpc("configPackage:delete", async (_event, packageId: unknown) => {
     if (typeof packageId !== "string") {
       throw new Error("Invalid configuration package id.");
     }
@@ -893,7 +928,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.deleteConfigPackage(packageId));
   });
 
-  ipcMain.handle("configPackage:duplicate", async (_event, packageId: unknown) => {
+  handleIpc("configPackage:duplicate", async (_event, packageId: unknown) => {
     if (typeof packageId !== "string") {
       throw new Error("Invalid configuration package id.");
     }
@@ -901,7 +936,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.duplicateConfigPackage(packageId));
   });
 
-  ipcMain.handle("configPackage:export", async (_event, payload: unknown) => {
+  handleIpc("configPackage:export", async (_event, payload: unknown) => {
     if (!isRecord(payload) || typeof payload.packageId !== "string") {
       throw new Error("Invalid export request.");
     }
@@ -933,7 +968,7 @@ app.whenReady().then(async () => {
     return output.filePath;
   });
 
-  ipcMain.handle("configPackage:publishToClassroom", async (_event, payload: unknown): Promise<{
+  handleIpc("configPackage:publishToClassroom", async (_event, payload: unknown): Promise<{
     snapshot: AppStateSnapshot;
     published: GoogleClassroomPublishResult;
   }> => {
@@ -1026,7 +1061,7 @@ app.whenReady().then(async () => {
     };
   });
 
-  ipcMain.handle("configPackage:import", async (_event, payload: unknown) => {
+  handleIpc("configPackage:import", async (_event, payload: unknown) => {
     const request = isRecord(payload) ? payload : {};
     if (
       (payload !== undefined && !isRecord(payload)) ||
@@ -1076,7 +1111,7 @@ app.whenReady().then(async () => {
     return snapshot;
   });
 
-  ipcMain.handle("import:questions", async () => {
+  handleIpc("import:questions", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters: [{ name: "Supported exam files", extensions: ["txt", "doc", "docx", "pdf", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"] }]
@@ -1100,7 +1135,7 @@ app.whenReady().then(async () => {
     };
   });
 
-  ipcMain.handle("import:exportQuestionTemplate", async () => {
+  handleIpc("import:exportQuestionTemplate", async () => {
     const output = await dialog.showSaveDialog({
       defaultPath: "lockedscreen-question-template.txt",
       filters: [{ name: "Text file", extensions: ["txt"] }]
@@ -1114,7 +1149,7 @@ app.whenReady().then(async () => {
     return output.filePath;
   });
 
-  ipcMain.handle("results:exportCsv", async (_event, examId?: string) => {
+  handleIpc("results:exportCsv", async (_event, examId?: string) => {
     const csv = await storage.exportCsv(examId);
     const output = await dialog.showSaveDialog({
       defaultPath: `lockedscreen-results-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -1129,7 +1164,7 @@ app.whenReady().then(async () => {
     return output.filePath;
   });
 
-  ipcMain.handle("results:syncSubmission", async (_event, submissionId: unknown) => {
+  handleIpc("results:syncSubmission", async (_event, submissionId: unknown) => {
     if (typeof submissionId !== "string") {
       throw new Error("Invalid submission id.");
     }
@@ -1137,9 +1172,9 @@ app.whenReady().then(async () => {
     return syncSubmissionResultsInternal(submissionId);
   });
 
-  ipcMain.handle("results:syncPending", async () => syncPendingResultsInternal());
+  handleIpc("results:syncPending", async () => syncPendingResultsInternal());
 
-  ipcMain.handle("window:captureScreenshot", async () => {
+  handleIpc("window:captureScreenshot", async () => {
     if (!mainWindow) {
       return null;
     }
@@ -1160,7 +1195,7 @@ app.whenReady().then(async () => {
     return output.filePath;
   });
 
-  ipcMain.handle("session:begin", async (_event, request: unknown) => {
+  handleIpc("session:begin", async (_event, request: unknown) => {
     if (!isSessionStartRequest(request)) {
       throw new Error("Invalid session start request.");
     }
@@ -1171,10 +1206,16 @@ app.whenReady().then(async () => {
       throw new Error("Configuration package not found.");
     }
 
+    if (installedRole === "student") {
+      await refreshRuntimeEnvironment();
+      if (!runtimeEnvironment.nativeLockdown.lockdownCapable) throw new Error("Native lockdown is unavailable on this device.");
+      if (!configPackage.quitUnlockPolicy.pinVerifier) throw new Error("Ask your teacher to re-export this exam package with the updated Teacher edition.");
+    }
+
     const needsNativeCompanion =
       !launchedByNativeHost &&
-      (configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
-      nativeCompanionRequired(snapshot.securityProfile);
+      (installedRole === "student" || configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
+      (installedRole === "student" || nativeCompanionRequired(snapshot.securityProfile));
 
     if (needsNativeCompanion) {
       await beginNativeLockdownSession(request, configPackage, recordSecurityEvent);
@@ -1193,7 +1234,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.getSnapshot());
   });
 
-  ipcMain.handle("session:launchAlternateDesktop", async (_event, payload: unknown) => {
+  handleIpc("session:launchAlternateDesktop", async (_event, payload: unknown) => {
     if (!isRecord(payload) || typeof payload.examId !== "string" || !isCandidate(payload.candidate)) {
       throw new Error("Invalid alternate desktop launch payload.");
     }
@@ -1212,7 +1253,10 @@ app.whenReady().then(async () => {
       throw new Error("Configuration package not found.");
     }
 
-    if (configPackage.securityMode !== "full-kiosk" || !nativeCompanionRequired(snapshot.securityProfile)) {
+    if (installedRole === "student" && !configPackage.quitUnlockPolicy.pinVerifier) {
+      throw new Error("Ask your teacher to re-export this exam package with the updated Teacher edition.");
+    }
+    if (configPackage.securityMode !== "full-kiosk" || (installedRole !== "student" && !nativeCompanionRequired(snapshot.securityProfile))) {
       return false;
     }
 
@@ -1243,17 +1287,27 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle("session:end", async (_event, reason: unknown) => {
-    await endManagedSession(mainWindow, typeof reason === "string" ? reason : "Session closed", recordSecurityEvent);
-    await endNativeLockdownSession(recordSecurityEvent);
-    if (processMonitorTimer) {
-      clearInterval(processMonitorTimer);
-      processMonitorTimer = null;
+  handleIpc("session:end", async (_event, reason: unknown, pin: unknown) => {
+    if (installedRole === "student" && getActivePackage() &&
+      !verifyInvigilatorPin(pin, getActivePackage()?.quitUnlockPolicy.pinVerifier)) {
+      throw new Error("Incorrect invigilator PIN.");
+    }
+    try {
+      await endManagedSession(mainWindow, typeof reason === "string" ? reason : "Session closed", recordSecurityEvent);
+    } finally {
+      try {
+        await endNativeLockdownSession(recordSecurityEvent);
+      } finally {
+        if (processMonitorTimer) {
+          clearInterval(processMonitorTimer);
+          processMonitorTimer = null;
+        }
+      }
     }
     return withRuntime(storage.getSnapshot());
   });
 
-  ipcMain.handle("applications:launch", async (_event, payload: unknown) => {
+  handleIpc("applications:launch", async (_event, payload: unknown) => {
     if (!isRecord(payload) || typeof payload.packageId !== "string" || typeof payload.appId !== "string") {
       throw new Error("Invalid application launch payload.");
     }
@@ -1268,7 +1322,7 @@ app.whenReady().then(async () => {
     return withRuntime(storage.getSnapshot());
   });
 
-  ipcMain.handle("exam:submit", async (_event, payload: unknown) => {
+  handleIpc("exam:submit", async (_event, payload: unknown) => {
     if (!isRecord(payload) || !isExam(payload.exam) || !isSession(payload.session)) {
       throw new Error("Invalid submission payload.");
     }
@@ -1324,7 +1378,7 @@ app.whenReady().then(async () => {
     };
   });
 
-  ipcMain.handle("studentLms:turnIn", async (_event, payload: unknown) => {
+  handleIpc("studentLms:turnIn", async (_event, payload: unknown) => {
     if (!isRecord(payload) || typeof payload.submissionId !== "string" || typeof payload.packageId !== "string") {
       throw new Error("Invalid student LMS turn-in payload.");
     }
@@ -1417,7 +1471,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle("window:setAssistKiosk", async (_event, enabled: unknown) => {
+  handleIpc("window:setAssistKiosk", async (_event, enabled: unknown) => {
     if (typeof enabled !== "boolean" || !mainWindow) {
       return;
     }
@@ -1426,7 +1480,7 @@ app.whenReady().then(async () => {
     mainWindow.setFullScreen(enabled);
   });
 
-  ipcMain.handle("window:setNavigationGuard", async (_event, guard: unknown) => {
+  handleIpc("window:setNavigationGuard", async (_event, guard: unknown) => {
     if (guard === null) {
       setNavigationGuard(null);
       return;
@@ -1439,13 +1493,13 @@ app.whenReady().then(async () => {
     setNavigationGuard(guard);
   });
 
-  ipcMain.handle("shell:openExternal", async (_event, url: unknown) => {
+  handleIpc("shell:openExternal", async (_event, url: unknown) => {
     if (typeof url === "string" && urlAllowedByGuard(url)) {
       await shell.openExternal(url);
     }
   });
 
-  ipcMain.handle("help:openGoogleAppsScript", async () => {
+  handleIpc("help:openGoogleAppsScript", async () => {
     await shell.openExternal("https://script.google.com/home/projects/create");
   });
 
