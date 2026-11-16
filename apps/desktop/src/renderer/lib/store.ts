@@ -234,12 +234,15 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
   exportConfigPackage: async (payload) =>
     withGuard(() => window.lockedscreenApi.exportConfigPackage(payload), (error) => set({ error })),
   publishConfigPackageToClassroom: async (payload) => {
-    const response = await withGuard(() => window.lockedscreenApi.publishConfigPackageToClassroom(payload), (error) => set({ error }));
-    if (response) {
+    set({ error: null });
+    try {
+      const response = await window.lockedscreenApi.publishConfigPackageToClassroom(payload);
       set({ snapshot: response.snapshot, error: null });
       return response.published;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Google Classroom post did not complete.";
+      throw new Error(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""));
     }
-    return null;
   },
   importConfigPackage: async (payload) => {
     const snapshot = await withGuard(() => window.lockedscreenApi.importConfigPackage(payload), (error) => set({ error }));
