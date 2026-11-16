@@ -31,7 +31,7 @@ module.exports = {
   extraResources: [{ from: path.join(__dirname, 'build/store-native'), to: 'lockedscreen-security' }],
   files: ['out/**/*', 'package.json'],
   publish: isStore ? null : [{ provider: 'github', owner: 'WealthGate', repo: 'LockedScreen', channel: edition, releaseType: 'draft' }],
-  win: { ...build.win, target: [{ target: isStore ? 'appx' : 'nsis', arch: ['x64'] }] },
+  win: { ...build.win, verifyUpdateCodeSignature: true, target: [{ target: isStore ? 'appx' : 'nsis', arch: ['x64'] }] },
   nsis: { ...build.nsis, include: undefined, shortcutName: edition === 'student' ? 'LockedScreen Student' : 'LockedScreen Teacher' },
   artifactName: `LockedScreen-${edition === 'student' ? 'Student' : 'Teacher'}-Setup-\${version}-\${arch}.\${ext}`,
   appx: {

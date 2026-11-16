@@ -1,4 +1,4 @@
-name: Build Windows editions
+name: Build LockedScreen Windows setup
 on:
   push:
     tags: ["v*"]
@@ -22,11 +22,16 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-edition.ps1 -Edition teacher -Target github
       - name: Build Student installer
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-edition.ps1 -Edition student -Target github -SkipNative
+      - name: Build role-selecting web setup
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-web-setup.ps1 -Test
       - name: Upload for supervised release validation
         uses: actions/upload-artifact@v4
         with:
-          name: LockedScreen-Windows-editions
+          name: LockedScreen-Windows-setup
           path: |
             apps/desktop/dist-editions/*/github/*.exe
             apps/desktop/dist-editions/*/github/*.blockmap
-            apps/desktop/dist-editions/*/github/*.yml
+            apps/desktop/dist-editions/student/github/student.yml
+            apps/desktop/dist-editions/teacher/github/teacher.yml
+            apps/desktop/dist-editions/web/LockedScreen-Setup-*.exe
+            apps/desktop/dist-editions/web/latest.yml

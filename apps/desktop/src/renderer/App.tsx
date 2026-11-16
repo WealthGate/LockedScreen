@@ -3223,9 +3223,9 @@ const SettingsPage = () => {
       }
     });
 
-  const handleSaveConnection = async () => {
+  const buildConnectionDraft = (): LmsConnection => {
     const googleScopes = settings.googleIntegration.requestedScopes.join(" ");
-    const nextConnection = {
+    return {
       ...connectionDraft,
       label: connectionDraft.label.trim() || providerLabel(connectionDraft.provider),
       clientId:
@@ -3244,7 +3244,10 @@ const SettingsPage = () => {
           ? googleScopes
           : connectionDraft.scope.trim() || defaultLmsScope(connectionDraft.provider)
     };
+  };
 
+  const handleSaveConnection = async () => {
+    const nextConnection = buildConnectionDraft();
     await runAdminAction("save-lms-connection", () => saveLmsConnection(nextConnection), {
       success: `Saved LMS connection "${nextConnection.label}".`,
       empty: "LMS connection was not saved.",
@@ -3278,6 +3281,14 @@ const SettingsPage = () => {
     });
 
     try {
+      if (connectionDraft.provider === "google-classroom" &&
+          !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)) {
+        const saved = await saveLmsConnection(buildConnectionDraft());
+        if (!saved) {
+          setActionFeedback({ tone: "error", text: "Could not create the Classroom connection. Check the school setup and try again." });
+          return;
+        }
+      }
       const nextSnapshot = await connectLmsConnection(connectionDraft.id);
       if (!nextSnapshot) {
         setActionFeedback({ tone: "error", text: "LMS connection did not complete." });
@@ -3860,6 +3871,18 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("google")} style={settingsTabStyle("google")}> 
+      <Card className="mb-4 space-y-3">
+        <CardTitle>Classroom quick start</CardTitle>
+        <ol className="list-decimal space-y-2 pl-5 text-sm">
+          <li>Under LMS connections below, select <strong>Connect Google Classroom</strong> and sign in with your school account.</li>
+          <li>Open <strong>Student turn-in</strong>, choose your class, and select an assignment or post a new one.</li>
+          <li>Save the exam package and verify a test submission with a practice student account.</li>
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setSettingsTab("turnin")}>Student turn-in</Button>
+          <Button variant="secondary" onClick={() => void window.lockedscreenApi.openClassroomSetupGuide()}>Open setup guide</Button>
+        </div>
+      </Card>
       <Card className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -4200,7 +4223,8 @@ const SettingsPage = () => {
               disabled={
                 adminBusy ||
                 !connectionHasAdminSetup ||
-                !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)
+                (connectionDraft.provider !== "google-classroom" &&
+                  !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id))
               }
             >
               {isPending("connect-lms")
@@ -4276,7 +4300,9 @@ const SettingsPage = () => {
                 : connectionDraft.status === "error"
                   ? connectionDraft.lastError || "Connection failed."
                   : connectionHasAdminSetup
-                    ? "Save the connection, then connect with the teacher's school account in the system browser."
+                    ? connectionDraft.provider === "google-classroom"
+                      ? "Connect with your school account in the system browser."
+                      : "Save the connection, then connect with the teacher's school account in the system browser."
                     : connectionDraft.provider === "google-classroom"
                       ? "School setup is required before teachers can connect Google Classroom."
                       : "Admin setup is optional. To use LMS turn-in, a school admin must first add the app registration in the admin/developer setup section."}

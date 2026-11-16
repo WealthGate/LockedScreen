@@ -50,6 +50,7 @@ import {
   beginNativeLockdownSession,
   endNativeLockdownSession,
   launchAlternateDesktopExamShell,
+  hasAlternateDesktopHost,
   nativeCompanionRequired
 } from "./security/native-security";
 
@@ -655,7 +656,9 @@ app.whenReady().then(async () => {
     await queuePackageImportLaunch(initialPackageImportPath);
   }
 
-  configureAppUpdates(() => mainWindow);
+  configureAppUpdates(() => mainWindow, {
+    canInstall: () => !launchedByNativeHost && !hasAlternateDesktopHost() && !getActivePackage()
+  });
   await storage.getSnapshot();
 
   handleIpc("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
@@ -1496,6 +1499,12 @@ app.whenReady().then(async () => {
   handleIpc("shell:openExternal", async (_event, url: unknown) => {
     if (typeof url === "string" && urlAllowedByGuard(url)) {
       await shell.openExternal(url);
+    }
+  });
+
+  handleIpc("classroom:openSetupGuide", async () => {
+    if (!getActivePackage()) {
+      await shell.openExternal("https://github.com/WealthGate/LockedScreen/blob/v0.6.57/docs/teacher-guide/classroom-quick-start.md");
     }
   });
 

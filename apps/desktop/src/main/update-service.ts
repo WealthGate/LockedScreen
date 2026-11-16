@@ -114,7 +114,7 @@ const friendlyUpdateError = (error: unknown): string => {
   }
 
   if (message.toLowerCase().includes("latest.yml") || message.toLowerCase().includes("404")) {
-    return "No update feed is published yet. Upload the new installer and latest.yml to the release location.";
+    return "No compatible update is available. Check the LockedScreen GitHub releases page for the Windows setup.";
   }
 
   return message || "Unable to check for updates right now.";
@@ -145,7 +145,10 @@ const cleanupOldUpdateFiles = async (): Promise<void> => {
 
 interface ConfigureAppUpdatesOptions {
   onBeforeInstall?: () => void;
+  canInstall?: () => boolean;
 }
+
+let canInstallUpdate = (): boolean => false;
 
 export const configureAppUpdates = (
   getMainWindow: () => BrowserWindow | null,
@@ -167,8 +170,13 @@ export const configureAppUpdates = (
     }
     return;
   }
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
+  canInstallUpdate = options.canInstall ?? (() => false);
+  const automatic = buildEdition !== "selectable";
+  autoUpdater.autoDownload = automatic;
+  autoUpdater.autoInstallOnAppQuit = automatic;
+  app.on("before-quit", () => {
+    autoUpdater.autoInstallOnAppQuit = automatic && canInstallUpdate();
+  });
   autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = false;
   if (buildEdition !== "selectable") {
@@ -195,7 +203,9 @@ export const configureAppUpdates = (
       releaseName: info.releaseName ?? undefined,
       releaseDate: info.releaseDate,
       percent: undefined,
-      message: `Lockedscreen ${info.version} is available. Download it when convenient; you choose when to install.`
+      message: automatic
+        ? `Lockedscreen ${info.version} is available and will download automatically.`
+        : `Lockedscreen ${info.version} is available. Download it when convenient; you choose when to install.`
     });
     showUpdateNotification(window, "Lockedscreen update available", `Version ${info.version} is ready to download.`);
   });
@@ -225,9 +235,13 @@ export const configureAppUpdates = (
       status: "downloaded",
       availableVersion: info.version,
       percent: 100,
-      message: "Update downloaded. Click Install now, approve the Windows prompt, and Lockedscreen will reopen when the update finishes."
+      message: automatic
+        ? "Update ready. It will install when you close LockedScreen outside an exam, or you can select Install now."
+        : "Update downloaded. Click Install now to finish the update."
     });
-    showUpdateNotification(window, "Lockedscreen update ready", "Click Install now in Lockedscreen to finish the update.");
+    showUpdateNotification(window, "Lockedscreen update ready", automatic
+      ? "The update will install on normal exit outside an exam."
+      : "Click Install now in Lockedscreen to finish the update.");
   });
 
   autoUpdater.on("error", (error) => {
@@ -308,6 +322,10 @@ export const configureAppUpdates = (
       return updateState;
     }
 
+    if (!canInstallUpdate()) {
+      return setUpdateState(window, { message: "Finish the exam and exit the session before installing updates." });
+    }
+
     if (updateState.status !== "downloaded") {
       return setUpdateState(window, {
         status: "error",
@@ -341,6 +359,12 @@ export const configureAppUpdates = (
       options.onBeforeInstall?.();
       setTimeout(() => {
         try {
+          if (!canInstallUpdate()) {
+            window?.setProgressBar(-1);
+            updateInstallRequested = false;
+            setUpdateState(window, { status: "downloaded", message: "Update held until the exam session ends." });
+            return;
+          }
           autoUpdater.quitAndInstall(false, true);
         } catch (error) {
           window?.setProgressBar(-1);
@@ -367,7 +391,7 @@ export const configureAppUpdates = (
 };
 
 const checkForUpdatesQuietly = async (): Promise<void> => {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || !canInstallUpdate()) {
     return;
   }
 

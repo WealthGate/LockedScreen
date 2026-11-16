@@ -66,6 +66,7 @@ export interface LockedscreenApi {
   syncPendingResults: () => Promise<AppStateSnapshot>;
   captureScreenshot: () => Promise<string | null>;
   openGoogleAppsScript: () => Promise<void>;
+  openClassroomSetupGuide: () => Promise<void>;
   beginSession: (request: SessionStartRequest) => Promise<AppStateSnapshot>;
   endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot>;
@@ -138,6 +139,7 @@ const api: LockedscreenApi = {
   syncPendingResults: () => ipcRenderer.invoke("results:syncPending"),
   captureScreenshot: () => ipcRenderer.invoke("window:captureScreenshot"),
   openGoogleAppsScript: () => ipcRenderer.invoke("help:openGoogleAppsScript"),
+  openClassroomSetupGuide: () => ipcRenderer.invoke("classroom:openSetupGuide"),
   beginSession: (request) => ipcRenderer.invoke("session:begin", request),
   endSession: (reason, pin) => ipcRenderer.invoke("session:end", reason, pin),
   launchApprovedApplication: (payload) => ipcRenderer.invoke("applications:launch", payload),

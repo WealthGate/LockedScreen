@@ -432,6 +432,9 @@ export const beginNativeLockdownSession = async (
   }
 };
 
+let alternateDesktopHostCount = 0;
+export const hasAlternateDesktopHost = (): boolean => alternateDesktopHostCount > 0;
+
 export const launchAlternateDesktopExamShell = async (
   request: AlternateDesktopLaunchRequest,
   configPackage: ExamConfigPackage,
@@ -452,6 +455,8 @@ export const launchAlternateDesktopExamShell = async (
     detached: true,
     stdio: "ignore"
   });
+  alternateDesktopHostCount++;
+  host.once("close", () => { alternateDesktopHostCount--; });
   let launchError: Error | null = null;
   host.on("error", (error) => { launchError = error; });
   host.unref();
