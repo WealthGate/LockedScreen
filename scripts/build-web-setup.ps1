@@ -33,11 +33,11 @@ if (!$ManifestOnly) {
   $common = @('/nologo', '/platform:x64', '/reference:System.Net.Http.dll',
     '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll',
     (Join-Path $desktop 'build/WebSetup.cs'), $source)
-  & $compiler @common /target:winexe /optimize+ "/win32icon:$(Join-Path $desktop 'build/icon.ico')" "/out:$setup"
+  & $compiler /target:winexe /optimize+ "/win32icon:$(Join-Path $desktop 'build/icon.ico')" "/out:$setup" @common
   if ($LASTEXITCODE -ne 0) { throw 'Web setup compilation failed.' }
   if ($Test) {
     $testExe = Join-Path $out 'WebSetupTests.exe'
-    & $compiler @common /target:exe /main:WebSetupTests "/out:$testExe" (Join-Path $desktop 'test/WebSetupTests.cs')
+    & $compiler /target:exe /main:WebSetupTests "/out:$testExe" @common (Join-Path $desktop 'test/WebSetupTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Web setup test compilation failed.' }
     & $testExe
     if ($LASTEXITCODE -ne 0) { throw 'Web setup tests failed.' }
