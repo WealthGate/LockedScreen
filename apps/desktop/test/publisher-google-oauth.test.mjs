@@ -10,7 +10,7 @@ const load = async (path) => {
   return import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
 };
 
-const client = { clientId: 'example.apps.googleusercontent.com', clientSecret: 'fixture-only' };
+const client = { clientId: '129421335486-example.apps.googleusercontent.com', clientSecret: 'fixture-only' };
 
 test('only explicit Google Desktop client exports are accepted', async () => {
   const { readPublisherGoogleOAuth } = await load('apps/desktop/google-oauth-build.ts');
@@ -20,7 +20,10 @@ test('only explicit Google Desktop client exports are accepted', async () => {
     assert.equal(readPublisherGoogleOAuth(), null);
     await writeFile(path, JSON.stringify({ web: { client_id: client.clientId, client_secret: client.clientSecret } }));
     assert.throws(() => readPublisherGoogleOAuth(path), /Desktop app OAuth/);
-    await writeFile(path, JSON.stringify({ installed: { client_id: client.clientId, client_secret: client.clientSecret, extra: true } }));
+    const installed = { client_id: client.clientId, client_secret: client.clientSecret, project_id: 'lockedscreen' };
+    await writeFile(path, JSON.stringify({ installed: { ...installed, project_id: 'unrelated-project' } }));
+    assert.throws(() => readPublisherGoogleOAuth(path), /project lockedscreen/);
+    await writeFile(path, JSON.stringify({ installed: { ...installed, extra: true } }));
     assert.deepEqual(readPublisherGoogleOAuth(path), client);
   } finally {
     await rm(dir, { recursive: true, force: true });
