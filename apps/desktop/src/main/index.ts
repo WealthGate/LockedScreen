@@ -33,6 +33,7 @@ import type {
   SessionStartRequest
 } from "@lockedscreen/shared-types";
 import { createStorageService } from "@lockedscreen/storage";
+import { getPublisherGoogleDefaults, publisherGoogleOAuth } from "./integrations/google/publisher-google-oauth";
 
 import {
   beginLmsOAuthConnection,
@@ -651,6 +652,14 @@ app.whenReady().then(async () => {
   }
 
   await refreshRuntimeEnvironment();
+
+  if (installedRole === "teacher" && !launchedByNativeHost && publisherGoogleOAuth) {
+    const snapshot = await storage.getSnapshot();
+    const defaults = getPublisherGoogleDefaults(snapshot, publisherGoogleOAuth);
+    if (defaults) {
+      await storage.saveSettings({ ...snapshot.settings, googleIntegration: defaults });
+    }
+  }
 
   if (initialPackageImportPath) {
     await queuePackageImportLaunch(initialPackageImportPath);

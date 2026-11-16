@@ -11,8 +11,10 @@ No Classroom account is needed for local exams. To use local exams only, select
    Classroom**. Sign in with the school account you use at
    [Google Classroom](https://classroom.google.com/) and review the permissions.
 3. Back in LockedScreen, check that **Classroom classes** shows your classes.
-   If sign-in is disabled or blocked, ask your school administrator to complete
-   the one-time setup below. Do not enter your Google password into LockedScreen.
+   Publisher-configured builds do not need a school OAuth client. If school
+   policy blocks sign-in, ask your Workspace administrator to approve
+   LockedScreen. On builds without a publisher client, follow the school
+   setup below. Do not enter your Google password into LockedScreen.
 
 ## Teachers: set up each exam
 
@@ -30,7 +32,7 @@ No Classroom account is needed for local exams. To use local exams only, select
 Always export a fresh exam file after changing exam settings. Do not send
 teacher credentials or the invigilator PIN to students.
 
-## School administrator: one-time setup
+## Optional school-managed OAuth client
 
 1. Create or select a school-owned [Google Cloud project](https://console.cloud.google.com/).
    Enable the [Classroom API](https://console.cloud.google.com/apis/library/classroom.googleapis.com)

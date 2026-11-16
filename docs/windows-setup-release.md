@@ -8,6 +8,20 @@ make a new release instead.
 
 ## GitHub release
 
+For a publisher-configured Classroom release, set
+`LOCKEDSCREEN_GOOGLE_OAUTH_FILE` to the absolute path of the publisher's Google
+**Desktop app** JSON export before building the Teacher and Store packages.
+Do not commit the export or include user tokens. A Desktop OAuth client is
+public: its client ID and desktop client secret can be extracted from the
+distributed app. Never use a web-client secret or service account key here.
+Builds without the file retain manual school setup. Existing configured
+connections are not migrated or overwritten.
+
+For public distribution across schools, confirm the project is **External**
+and **In production**, requested scopes are approved as applicable, and a
+teacher account outside the publisher organization can grant access. School
+Workspace policy can still require administrator approval.
+
 1. Run `npm ci`. Build Teacher then Student using
    `scripts/build-edition.ps1 -Edition teacher -Target github` and
    `scripts/build-edition.ps1 -Edition student -Target github -SkipNative`.

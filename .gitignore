@@ -9,6 +9,8 @@ apps/desktop/dist-store/
 apps/desktop/dist-editions/
 apps/desktop/build/edition-app/
 student-store-identity.json
+client_secret*.json
+publisher-google-oauth.json
 apps/desktop/build/store-native/
 apps/desktop/out/
 
