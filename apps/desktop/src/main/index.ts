@@ -963,7 +963,24 @@ app.whenReady().then(async () => {
       throw new Error("Linked exam not found for this configuration package.");
     }
 
-    const exportPackage = configPackageForExport(snapshot, configPackage);
+    const missingAssignment = configPackage.externalDeliveryMode === "integrated" &&
+      configPackage.studentLmsBinding.enabled && !configPackage.studentLmsBinding.assignmentId.trim();
+    if (missingAssignment) {
+      const { response } = await dialog.showMessageBox({
+        type: "warning",
+        title: "Export exam package",
+        message: "This package has no Classroom or LMS assignment yet.",
+        detail: "Export a local-only copy with no LMS turn-in or grade sync, or cancel and link an assignment first. Your saved package settings will not change.",
+        buttons: ["Cancel", "Export local-only copy"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      });
+      if (response !== 1) return null;
+    }
+
+    const exportPackage = configPackageForExport(snapshot,
+      missingAssignment ? { ...configPackage, externalDeliveryMode: "lockdown-only" } : configPackage);
     const protectedFile = protectConfigPackage(exportPackage, automaticPackagePassword, exam);
 
     const output = await dialog.showSaveDialog({
@@ -1038,7 +1055,7 @@ app.whenReady().then(async () => {
         title: exam.title || configPackage.label || "Lockedscreen exam",
         description: [
           "Download the attached Lockedscreen .lscp exam package on the school device to begin.",
-          "Use the Download Lockedscreen package link, then open the downloaded .lscp file with Lockedscreen.",
+          "Open the Drive attachment and download the .lscp file, then open it with Lockedscreen.",
           "Do not use Google Drive preview; the package must be opened by the Lockedscreen app.",
           configPackage.description.trim()
         ].filter(Boolean).join("\n\n"),

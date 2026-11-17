@@ -158,7 +158,9 @@ Recommended setup:
 20. Click `Save destination`.
 21. Click `Save package`, then export or post the package.
 
-The Classroom assignment ID is the Google Classroom `courseWork.id`. It is obtained automatically when the teacher selects an existing assignment from `Load assignments`, or when `Post package to class` creates a new Classroom assignment and Classroom returns the new ID. Posted packages are uploaded as downloadable `.lscp` files, not Google text/JSON documents. Students should use the Classroom download link or download the attachment, then open the downloaded `.lscp` file with Lockedscreen.
+The Classroom assignment ID is the Google Classroom `courseWork.id`. It is obtained automatically when the teacher selects an existing assignment from `Load assignments`, or when `Post package to class` creates a new Classroom assignment and Google returns its ID. After a successful post, LockedScreen shows the ID, saves it in the package settings, and includes it in the attached `.lscp` file. Students should download the Drive attachment and open it with LockedScreen.
+
+If an integrated package has student turn-in enabled but has no assignment ID, **Export** can create a **local-only copy** without LMS turn-in or grade sync. This does not change the saved package. Link the assignment and export again when you need Classroom turn-in. If Google reports an error while creating the draft, check **Classwork** and **Drive** for files or drafts from the first attempt before retrying.
 
 If a package is manually exported before the Classroom assignment exists, that exported file cannot contain the assignment ID. Student LMS turn-in will not work from that older exported file until the teacher selects or posts the assignment, saves the package, and exports an updated file. `Post package to class` performs this update automatically for the package it posts to Classroom.
 

@@ -59,10 +59,28 @@ test('network failures and missing draft IDs identify the correct stage', async 
 test('posting still returns the published assignment and updated Drive file', async (t) => {
   t.after(() => { globalThis.fetch = originalFetch; });
   let count = 0;
-  globalThis.fetch = async () => Response.json(successes[count++]);
-  const published = await invoke();
+  const contexts = [];
+  globalThis.fetch = async (_, options) => {
+    const step = count++;
+    if (step === 1) {
+      assert.deepEqual(JSON.parse(options.body).materials, [
+        { driveFile: { driveFile: { id: 'file' }, shareMode: 'VIEW' } }
+      ]);
+    }
+    if (step === 2) assert.match(options.body, /"assignmentId":"draft"/);
+    return Response.json(successes[step]);
+  };
+  const service = new GoogleClassroomService({ getAccessToken: async () => 'fake-token' });
+  const published = await service.publishPackageCourseWork('connection', settings, {
+    ...request,
+    packageJson: (draft) => {
+      contexts.push(draft?.id ?? null);
+      return JSON.stringify({ assignmentId: draft?.id });
+    }
+  });
   assert.equal(published.driveFileId, 'file');
   assert.equal(published.courseWork.id, 'draft');
   assert.equal(published.courseWork.state, 'PUBLISHED');
   assert.equal(count, 4);
+  assert.deepEqual(contexts, [null, 'draft']);
 });

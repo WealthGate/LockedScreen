@@ -3619,19 +3619,6 @@ const SettingsPage = () => {
 
   const handleExportPackage = async () => {
     const nextPackage = packageDirty ? buildPackageDraft() : null;
-    const exportCandidate = nextPackage ?? packageDraft;
-    if (
-      exportCandidate.externalDeliveryMode === "integrated" &&
-      exportCandidate.studentLmsBinding.enabled &&
-      !exportCandidate.studentLmsBinding.assignmentId.trim()
-    ) {
-      setActionFeedback({
-        tone: "error",
-        text:
-          "Choose an existing LMS assignment or post the package to the class before exporting with student LMS turn-in enabled. If the assignment will be created later, disable student LMS turn-in and use a server-side grade-sync mapping, then re-save/re-export after the assignment exists."
-      });
-      return;
-    }
 
     await runAdminAction(
       "export-package",
@@ -3664,16 +3651,19 @@ const SettingsPage = () => {
       return;
     }
 
-    if (packageDirty) {
-      await handleSavePackage();
-    }
-
     await runAdminAction(
       "publish-classroom-package",
-      () => publishConfigPackageToClassroom({ packageId: packageDraft.id }),
+      async () => {
+        if (packageDirty) {
+          const saved = await saveConfigPackage(buildPackageDraft());
+          if (!saved) throw new Error("The package could not be saved. No assignment was posted.");
+          setPackageDirty(false);
+        }
+        return publishConfigPackageToClassroom({ packageId: packageDraft.id });
+      },
       {
         success: (published) =>
-          `Posted "${published.courseWork.title}" to Google Classroom${published.driveFileName ? ` with ${published.driveFileName}` : ""}.`,
+          `Posted "${published.courseWork.title}" to Google Classroom. Assignment ID: ${published.courseWork.id}.`,
         empty: "Google Classroom post did not complete.",
         onSuccess: (published) => {
           setPackageDraft((current) => current ? ({
@@ -4614,6 +4604,12 @@ const SettingsPage = () => {
                 }}
               >
                 <option value="">Load assignments from the selected class</option>
+                {packageDraft.studentLmsBinding.assignmentId &&
+                 !bindingCourseWork.some((item) => item.id === packageDraft.studentLmsBinding.assignmentId) ? (
+                  <option value={packageDraft.studentLmsBinding.assignmentId}>
+                    {packageDraft.studentLmsBinding.assignmentLabel || packageDraft.studentLmsBinding.assignmentId}
+                  </option>
+                ) : null}
                 {bindingCourseWork.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.title}{item.dueAt ? ` - due ${formatDateTime(item.dueAt) ?? item.dueAt}` : ""}
@@ -4651,7 +4647,7 @@ const SettingsPage = () => {
             <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950">
               <div className="font-semibold">Post this test to Google Classroom</div>
               <p className="mt-1">
-                Lockedscreen will post a downloadable `.lscp` package and a direct download link as classwork in the
+                Lockedscreen will attach the downloadable `.lscp` package to the assignment in the
                 selected class: {packageDraft.studentLmsBinding.courseLabel || "choose a class above first"}.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">

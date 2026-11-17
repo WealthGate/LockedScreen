@@ -343,8 +343,6 @@ export class GoogleClassroomService implements GoogleClassroomApi {
     if (!driveFileId) {
       throw new Error("Drive upload did not return a file ID. Check Google Drive for the exam file before retrying.");
     }
-    const downloadLink = driveDownloadLink(driveFileId, driveFile);
-
     const courseWorkBody: Record<string, unknown> = {
       title: request.title,
       description: request.description,
@@ -354,16 +352,9 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         {
           driveFile: {
             driveFile: {
-              id: driveFileId,
-              title: request.fileName
+              id: driveFileId
             },
             shareMode: "VIEW"
-          }
-        },
-        {
-          link: {
-            url: downloadLink,
-            title: `Download ${request.fileName}`
           }
         }
       ]
