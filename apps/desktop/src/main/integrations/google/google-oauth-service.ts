@@ -8,6 +8,7 @@ import type { GoogleIntegrationSettings } from "@lockedscreen/shared-types";
 
 import { googleClassroomDesktopOAuth, googleScopesToString, normalizeGoogleIntegrationSettings, validateGoogleIntegrationSettings } from "./google-integration-settings";
 import type { OAuthTokenBundle, SecureTokenStore } from "./secure-token-store";
+import { beginHostedGoogleSignIn, disconnectHostedGoogle, refreshHostedGoogleToken } from "./hosted-google-oauth";
 
 export interface GoogleOAuthConnectionResult {
   tokens: OAuthTokenBundle;
@@ -262,6 +263,13 @@ export class GoogleDesktopOAuthService implements GoogleOAuthFlow {
     const normalized = normalizeGoogleIntegrationSettings(settings);
     validateGoogleIntegrationSettings(normalized);
 
+    if (normalized.authMode === "publisher-hosted") {
+      const result = await beginHostedGoogleSignIn("teacher", (url) => shell.openExternal(url));
+      const tokens = { accessToken: result.accessToken, expiresAt: result.expiresAt, hostedSessionToken: result.sessionToken };
+      await this.tokenStore.saveTokens(connectionId, tokens);
+      return { tokens, profile: result.profile ?? {} };
+    }
+
     const state = randomBytes(16).toString("hex");
     const pkce = createPkce();
     const authorization = await createAuthorizationListener(state);
@@ -301,6 +309,12 @@ export class GoogleDesktopOAuthService implements GoogleOAuthFlow {
       return tokens.accessToken;
     }
 
+    if (tokens.hostedSessionToken) {
+      const refreshed = await refreshHostedGoogleToken(tokens.hostedSessionToken);
+      await this.tokenStore.saveTokens(connectionId, refreshed);
+      return refreshed.accessToken;
+    }
+
     if (!tokens.refreshToken) {
       return tokens.accessToken;
     }
@@ -319,7 +333,13 @@ export class GoogleDesktopOAuthService implements GoogleOAuthFlow {
     const tokens = await this.tokenStore.getTokens(connectionId);
     let revokeError: Error | null = null;
 
-    if (options.revoke && (tokens?.refreshToken || tokens?.accessToken)) {
+    if (tokens?.hostedSessionToken) {
+      try {
+        await disconnectHostedGoogle(tokens.hostedSessionToken, options.revoke === true);
+      } catch (error) {
+        revokeError = error instanceof Error ? error : new Error("Hosted Google disconnect failed.");
+      }
+    } else if (options.revoke && (tokens?.refreshToken || tokens?.accessToken)) {
       try {
         await revokeGoogleToken(tokens.refreshToken ?? tokens.accessToken);
       } catch (error) {

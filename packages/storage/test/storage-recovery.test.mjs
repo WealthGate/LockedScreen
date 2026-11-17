@@ -52,6 +52,29 @@ test("Google permissions remain administrator-selected after saving and reopenin
   });
 });
 
+test("fresh installs use hosted Google without a local publisher secret and hosted packages strip secrets", async () => {
+  await withDataDirectory(async (dataDirectory) => {
+    const storage = createStorageService(dataDirectory);
+    const initial = await storage.getSnapshot();
+    assert.equal(initial.settings.googleIntegration.enabled, true);
+    assert.equal(initial.settings.googleIntegration.authMode, "publisher-hosted");
+    assert.equal(initial.settings.googleIntegration.clientSecret, "");
+    const config = initial.configPackages[0];
+    const saved = await storage.saveConfigPackage({
+      ...config, externalDeliveryMode: "integrated",
+      studentLmsBinding: {
+        ...config.studentLmsBinding, enabled: true, provider: "google-classroom",
+        googleAuthMode: "publisher-hosted", clientId: initial.settings.googleIntegration.clientId,
+        clientSecret: "must-not-be-exported", courseId: "course", assignmentId: "assignment"
+      }
+    });
+    const binding = saved.configPackages.find((candidate) => candidate.id === config.id).studentLmsBinding;
+    assert.equal(binding.googleAuthMode, "publisher-hosted");
+    assert.equal(binding.clientSecret, undefined);
+    assert.equal(binding.assignmentId, "assignment");
+  });
+});
+
 test("restores the last good backup when the live state is truncated", async () => {
   await withDataDirectory(async (dataDirectory) => {
     const storage = createStorageService(dataDirectory);

@@ -1,4 +1,11 @@
 export type ThemePreference = "light" | "dark" | "system";
+export type GoogleAuthMode = "publisher-hosted" | "school-desktop";
+export const publisherGoogleConnection = {
+  clientId: "129421335486-b53jphtc37g3583b6d7oid2i0jmlejr1.apps.googleusercontent.com",
+  origin: "https://auth.whsdominica.com"
+} as const;
+export const usesPublisherGoogleConnection = (mode: GoogleAuthMode | undefined, clientId: string): boolean =>
+  mode === "publisher-hosted" || (!mode && (!clientId.trim() || clientId === publisherGoogleConnection.clientId));
 export type ExamMode = "app" | "link";
 export type DensityMode = "comfortable" | "compact";
 export type SecurityMode = "restricted-app" | "full-kiosk";
@@ -180,6 +187,7 @@ export interface LmsConnection {
   status: LmsConnectionStatus;
   clientId: string;
   clientSecret?: string;
+  googleAuthMode?: GoogleAuthMode;
   tenantId?: string;
   authorizeUrl?: string;
   tokenUrl?: string;
@@ -228,6 +236,7 @@ export interface StudentLmsBinding {
   connectionId?: string;
   clientId: string;
   clientSecret?: string;
+  googleAuthMode?: GoogleAuthMode;
   tenantId?: string;
   scope: string;
   courseId: string;
@@ -250,6 +259,7 @@ export interface StudentLmsTurnInState {
 }
 
 export interface GoogleIntegrationSettings {
+  authMode?: GoogleAuthMode;
   enabled: boolean;
   clientId: string;
   clientSecret?: string;

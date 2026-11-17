@@ -11,10 +11,10 @@ No Classroom account is needed for local exams. To use local exams only, select
    Classroom**. Sign in with the school account you use at
    [Google Classroom](https://classroom.google.com/) and review the permissions.
 3. Back in LockedScreen, check that **Classroom classes** shows your classes.
-   Publisher-configured builds do not need a school OAuth client. If school
-   policy blocks sign-in, ask your Workspace administrator to approve
-   LockedScreen. On builds without a publisher client, follow the school
-   setup below. Do not enter your Google password into LockedScreen.
+   New installations use the publisher-managed hosted Google connection; no school
+   OAuth project or client secret is required. School-managed setup below is optional.
+   If school policy blocks sign-in, ask your Workspace administrator to
+   approve LockedScreen. Do not enter your Google password into LockedScreen.
 
 ## Teachers: set up each exam
 
@@ -24,7 +24,9 @@ No Classroom account is needed for local exams. To use local exams only, select
    class** to create a new assignment and attach the exam file. Verify the
    assignment and its attachment in Classroom before sharing it.
 3. Have a practice student download and open the `.lscp` file in LockedScreen,
-   submit an answer, and check the turn-in in Classroom. LockedScreen saves
+   submit an answer, and check the turn-in in Classroom. For publisher-managed Google
+   turn-in, the invigilator first enters the release PIN on the saved-submission screen.
+   Only after that release does Google sign-in open in the system browser. LockedScreen saves
    scores locally; posting the exam does not configure automatic grade sync.
    For grades from separate student PCs, see the
    [school-managed grade-sync setup](lms-setup.md#app-based-google-classroom-grade-sync).
@@ -43,7 +45,7 @@ teacher credentials or the invigilator PIN to students.
    Have your Workspace administrator approve access if the school's policy
    blocks the app; do not bypass Google verification or school restrictions.
 3. In LockedScreen open **Admin Console > Google Classroom > Advanced admin Google setup**.
-   Enable Google Classroom, enter the approved desktop client details, and
+   Select **School-managed Desktop OAuth**, enable Google Classroom, enter the approved desktop client details, and
    select **Save settings**. Leave permissions at the app defaults unless your
    school has approved a different set. Complete setup on each teacher PC
    that needs Classroom; do not copy a signed-in teacher profile to student PCs.

@@ -303,6 +303,7 @@ const googleSettingsFromConnection = (
   normalizeGoogleIntegrationSettings({
     ...(settings ?? {}),
     enabled: settings?.enabled ?? true,
+    authMode: connection.googleAuthMode ?? settings?.authMode,
     clientId: settings?.clientId?.trim() || connection.clientId,
     requestedScopes:
       Array.isArray(settings?.requestedScopes)
@@ -330,6 +331,7 @@ export const beginLmsOAuthConnection = async (
       status: "connected",
       clientId: settings.clientId,
       clientSecret: settings.clientSecret,
+      googleAuthMode: settings.authMode,
       accountEmail: result.profile.email,
       accountName: result.profile.name,
       lastConnectedAt: new Date().toISOString(),

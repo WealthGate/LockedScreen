@@ -2,7 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { URL, URLSearchParams } from "node:url";
 
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
+import { usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
+import { beginHostedGoogleSignIn } from "./integrations/google/hosted-google-oauth";
 
 import type {
   Exam,
@@ -309,6 +311,9 @@ const exchangeAuthorizationCode = async (
 };
 
 const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWindow | null): Promise<StudentOAuthTokens> => {
+  if (binding.provider === "google-classroom" && usesPublisherGoogleConnection(binding.googleAuthMode, binding.clientId)) {
+    return beginHostedGoogleSignIn("student", (url) => shell.openExternal(url));
+  }
   if (!binding.clientId.trim()) {
     throw new Error("This package is missing the LMS OAuth client ID.");
   }

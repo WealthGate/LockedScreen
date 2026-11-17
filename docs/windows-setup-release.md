@@ -8,19 +8,15 @@ make a new release instead.
 
 ## GitHub release
 
-For a publisher-configured Classroom release, set
-`LOCKEDSCREEN_GOOGLE_OAUTH_FILE` to the absolute path of the publisher's Google
-**Desktop app** JSON export before building the Teacher and Store packages.
-Do not commit the export or include user tokens. A Desktop OAuth client is
-public: its client ID and desktop client secret can be extracted from the
-distributed app. Never use a web-client secret or service account key here.
-Builds without the file retain manual school setup. Existing configured
-connections are not migrated or overwritten.
-
-For public distribution across schools, confirm the project is **External**
-and **In production**, requested scopes are approved as applicable, and a
-teacher account outside the publisher organization can grant access. School
-Workspace policy can still require administrator approval.
+Starting with 0.6.61, new installations default to the publisher-managed
+[hosted Google connection](hosted-google-oauth.md); teachers connect their account
+without creating a Google OAuth project. Optional school-managed Desktop OAuth
+remains available. No publisher Web client secret is built into the app.
+Leave `LOCKEDSCREEN_GOOGLE_OAUTH_FILE` unset. Existing school-managed connections
+are preserved; select the publisher-managed provider and reconnect to migrate.
+Earlier installers and exam files containing
+the old client cannot be made private by rebuilding. Plan credential
+rotation only after dependent installations and packages are migrated.
 
 1. Run `npm ci`. Build Teacher then Student using
    `scripts/build-edition.ps1 -Edition teacher -Target github` and
@@ -56,7 +52,7 @@ an exam is not active. Do not publish a role payload as the other role's feed.
 
 The GitHub web setup is not an update for the existing Store product. Keep the
 existing Store identity and submit an APPX via Partner Center. To build the
-full Store app, use `scripts/build-edition.ps1 -Edition teacher -Target store`,
+full selectable-role Store app, use `scripts/build-store.ps1`,
 then validate and test that APPX before uploading it to the existing listing.
 It includes teacher and exam delivery features, but all Store users receive
 the full APPX. Microsoft requires

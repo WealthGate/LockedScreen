@@ -23,6 +23,7 @@ import {
 import { MemoryRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { calculateCompletion, createSession, getRemainingSeconds, updateResponse } from "@lockedscreen/exam-engine";
+import { publisherGoogleConnection, usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
 import type {
   Candidate,
   AppSettings,
@@ -2865,6 +2866,7 @@ const SettingsPage = () => {
               provider: "google-classroom",
               clientId: teacherConnection.clientId,
               clientSecret: teacherConnection.clientSecret,
+              googleAuthMode: teacherConnection.googleAuthMode,
               tenantId: "",
               scope: defaultStudentLmsScope("google-classroom")
             }
@@ -3026,6 +3028,7 @@ const SettingsPage = () => {
             connectionId: packageDraft.studentLmsBinding.connectionId?.trim() || undefined,
             clientId: packageDraft.studentLmsBinding.clientId.trim(),
             clientSecret: packageDraft.studentLmsBinding.clientSecret?.trim() || undefined,
+            googleAuthMode: packageDraft.studentLmsBinding.googleAuthMode,
             tenantId: packageDraft.studentLmsBinding.provider === "microsoft-365"
               ? packageDraft.studentLmsBinding.tenantId?.trim() || "common"
               : undefined,
@@ -3227,6 +3230,7 @@ const SettingsPage = () => {
     const googleScopes = settings.googleIntegration.requestedScopes.join(" ");
     return {
       ...connectionDraft,
+      googleAuthMode: connectionDraft.provider === "google-classroom" ? settings.googleIntegration.authMode : undefined,
       label: connectionDraft.label.trim() || providerLabel(connectionDraft.provider),
       clientId:
         connectionDraft.provider === "google-classroom"
@@ -3281,8 +3285,7 @@ const SettingsPage = () => {
     });
 
     try {
-      if (connectionDraft.provider === "google-classroom" &&
-          !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)) {
+      if (connectionDraft.provider === "google-classroom") {
         const saved = await saveLmsConnection(buildConnectionDraft());
         if (!saved) {
           setActionFeedback({ tone: "error", text: "Could not create the Classroom connection. Check the school setup and try again." });
@@ -3842,7 +3845,10 @@ const SettingsPage = () => {
             </div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-            Exported package files do not require a PIN or password. Double-clicking a package on a student install imports it and opens the exam environment.
+            Opening the file imports the package; it does not start the exam.{" "}
+            {hasExamStartCode(packageDraft.studentAccessPolicy)
+              ? "Students must enter the teacher's exam start code to begin."
+              : "No exam start code is set for this package."}
           </div>
         </Card>
 
@@ -3878,7 +3884,7 @@ const SettingsPage = () => {
           <div>
             <CardTitle>Google Classroom integration</CardTitle>
             <CardDescription className="mt-2">
-              Teachers sign in with their school Google account after an admin completes the one-time school setup.
+              Teachers connect their Google account using the publisher-managed connection. School-managed OAuth is optional.
             </CardDescription>
           </div>
           <Badge>{settings.googleIntegration.enabled ? "Enabled" : "Disabled"}</Badge>
@@ -3928,6 +3934,26 @@ const SettingsPage = () => {
           </div>
 
           <div className="mt-4 grid gap-4">
+            <LabelledField label="Google connection provider">
+              <select
+                className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                value={settings.googleIntegration.authMode ?? "school-desktop"}
+                onChange={(event) => updateSettings((current) => ({
+                  ...current,
+                  googleIntegration: {
+                    ...current.googleIntegration,
+                    authMode: event.target.value === "publisher-hosted" ? "publisher-hosted" : "school-desktop",
+                    clientId: event.target.value === "publisher-hosted" ? publisherGoogleConnection.clientId : "",
+                    clientSecret: "", connectionStatus: "disconnected"
+                  }
+                }))}
+              >
+                <option value="publisher-hosted">LockedScreen publisher-managed</option>
+                <option value="school-desktop">School-managed Desktop OAuth</option>
+              </select>
+            </LabelledField>
+
+            {settings.googleIntegration.authMode !== "publisher-hosted" ? <>
             <LabelledField label="Google desktop app client ID">
               <Input
                 value={settings.googleIntegration.clientId}
@@ -3985,6 +4011,7 @@ const SettingsPage = () => {
               />
             </LabelledField>
 
+            </> : null}
             <LabelledField label="Default Google Sheets sync URL">
               <Input
                 placeholder="https://script.google.com/macros/s/.../exec"
@@ -4443,6 +4470,7 @@ const SettingsPage = () => {
                       provider: selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom",
                       clientId: selectedConnection?.clientId ?? current.studentLmsBinding.clientId,
                       clientSecret: selectedConnection?.clientSecret ?? current.studentLmsBinding.clientSecret,
+                      googleAuthMode: selectedConnection?.googleAuthMode ?? current.studentLmsBinding.googleAuthMode,
                       tenantId:
                         selectedConnection?.provider === "microsoft-365"
                           ? (selectedConnection.tenantId ?? "common")
@@ -6328,14 +6356,16 @@ const StudentLmsTurnInPanel = ({
   configPackage: ExamConfigPackage | null;
   submission: SubmissionResult | null;
   turningIn: boolean;
-  onTurnIn: () => void;
+  onTurnIn: (pin?: string) => void;
 }) => {
+  const [releasePin, setReleasePin] = useState("");
   const binding = configPackage?.studentLmsBinding;
   if (!binding?.enabled || !submission) {
     return null;
   }
 
   const state = submission.studentLmsTurnIn;
+  const hostedGoogle = binding.provider === "google-classroom" && usesPublisherGoogleConnection(binding.googleAuthMode, binding.clientId);
   const status = state?.status ?? "pending";
   const actionLabel = status === "success" ? "Turned in" : turningIn ? "Connecting..." : "Turn in to LMS";
   const providerName = providerLabel(binding.provider);
@@ -6363,10 +6393,15 @@ const StudentLmsTurnInPanel = ({
               : "Sign in with the student LMS account to attach the Lockedscreen performance report and complete the turn-in."}
           </CardDescription>
         </div>
-        <Button className="px-3 py-2" onClick={onTurnIn} disabled={turningIn || status === "success"}>
+        <Button className="px-3 py-2" onClick={() => onTurnIn(hostedGoogle ? releasePin : undefined)} disabled={turningIn || status === "success" || (hostedGoogle && !releasePin.trim())}>
           {actionLabel}
         </Button>
       </div>
+      {hostedGoogle && status !== "success" ? (
+        <LabelledField label="Invigilator PIN for release and Google turn-in">
+          <Input type="password" autoComplete="off" value={releasePin} onChange={(event) => setReleasePin(event.target.value)} />
+        </LabelledField>
+      ) : null}
       {binding.courseLabel || binding.courseId ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
           Class: {binding.courseLabel || binding.courseId}
@@ -6482,13 +6517,13 @@ const StudentExamPage = () => {
     setSubmissionResult(null);
   }, [sessionExamId, location.search]);
 
-  const handleStudentTurnIn = async (submissionId: string) => {
+  const handleStudentTurnIn = async (submissionId: string, pin?: string) => {
     if (!configPackage) {
       return;
     }
 
     setTurningIn(true);
-    const updatedSubmission = await turnInStudentLms({ submissionId, packageId: configPackage.id });
+    const updatedSubmission = await turnInStudentLms({ submissionId, packageId: configPackage.id, pin });
     if (updatedSubmission) {
       setSubmissionResult(updatedSubmission);
     }
@@ -6511,6 +6546,7 @@ const StudentExamPage = () => {
     setSubmitted(true);
     setSubmitting(false);
     if (configPackage?.studentLmsBinding.enabled) {
+      if (configPackage.studentLmsBinding.provider === "google-classroom" && usesPublisherGoogleConnection(configPackage.studentLmsBinding.googleAuthMode, configPackage.studentLmsBinding.clientId)) return;
       void handleStudentTurnIn(result.id);
       return;
     }
@@ -6582,9 +6618,9 @@ const StudentExamPage = () => {
             configPackage={configPackage}
             submission={submissionResult}
             turningIn={turningIn}
-            onTurnIn={() => {
+            onTurnIn={(pin) => {
               if (submissionResult) {
-                void handleStudentTurnIn(submissionResult.id);
+                void handleStudentTurnIn(submissionResult.id, pin);
               }
             }}
           />
@@ -6878,6 +6914,7 @@ const LinkExamPage = () => {
     setSubmitted(true);
     setSubmitting(false);
     if (configPackage?.studentLmsBinding.enabled && configPackage) {
+      if (configPackage.studentLmsBinding.provider === "google-classroom" && usesPublisherGoogleConnection(configPackage.studentLmsBinding.googleAuthMode, configPackage.studentLmsBinding.clientId)) return;
       setTurningIn(true);
       const updatedSubmission = await turnInStudentLms({ submissionId: result.id, packageId: configPackage.id });
       if (updatedSubmission) {
@@ -6955,13 +6992,13 @@ const LinkExamPage = () => {
                 configPackage={configPackage}
                 submission={submissionResult}
                 turningIn={turningIn}
-                onTurnIn={() => {
+                onTurnIn={(pin) => {
                   if (!submissionResult || !configPackage) {
                     return;
                   }
 
                   setTurningIn(true);
-                  void turnInStudentLms({ submissionId: submissionResult.id, packageId: configPackage.id }).then(
+                  void turnInStudentLms({ submissionId: submissionResult.id, packageId: configPackage.id, pin }).then(
                     (updatedSubmission) => {
                       if (updatedSubmission) {
                         setSubmissionResult(updatedSubmission);

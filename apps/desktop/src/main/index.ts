@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 import { assertRoleAccess, buildEdition } from "./edition";
 import { createPinVerifier, verifyInvigilatorPin } from "./security/invigilator-pin";
+import { assertGoogleRelease } from "./security/google-release";
+import { usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
 
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
@@ -33,7 +35,6 @@ import type {
   SessionStartRequest
 } from "@lockedscreen/shared-types";
 import { createStorageService } from "@lockedscreen/storage";
-import { getPublisherGoogleDefaults, publisherGoogleOAuth } from "./integrations/google/publisher-google-oauth";
 
 import {
   beginLmsOAuthConnection,
@@ -119,6 +120,7 @@ import {
   configureWebContents,
   endManagedSession,
   getActivePackage,
+  getActiveSession,
   launchApprovedApplication,
   setNavigationGuard,
   urlAllowedByGuard
@@ -653,14 +655,6 @@ app.whenReady().then(async () => {
 
   await refreshRuntimeEnvironment();
 
-  if (installedRole === "teacher" && !launchedByNativeHost && publisherGoogleOAuth) {
-    const snapshot = await storage.getSnapshot();
-    const defaults = getPublisherGoogleDefaults(snapshot, publisherGoogleOAuth);
-    if (defaults) {
-      await storage.saveSettings({ ...snapshot.settings, googleIntegration: defaults });
-    }
-  }
-
   if (initialPackageImportPath) {
     await queuePackageImportLaunch(initialPackageImportPath);
   }
@@ -755,6 +749,7 @@ app.whenReady().then(async () => {
   });
 
   handleIpc("lmsConnection:connect", async (_event, connectionId: unknown) => {
+    if (getActiveSession()) throw new Error("An exam is active. Release it with the invigilator PIN before connecting a teacher account.");
     if (typeof connectionId !== "string") {
       throw new Error("Invalid LMS connection id.");
     }
@@ -798,6 +793,8 @@ app.whenReady().then(async () => {
           ...currentSnapshot.settings.googleIntegration,
           enabled: true,
           clientId: connected.clientId,
+          authMode: connected.googleAuthMode,
+          clientSecret: connected.googleAuthMode === "publisher-hosted" ? "" : currentSnapshot.settings.googleIntegration.clientSecret,
           requestedScopes: connected.scope.split(/\s+/).filter(Boolean),
           connectionStatus: connected.status,
           accountEmail: connected.accountEmail,
@@ -1430,6 +1427,19 @@ app.whenReady().then(async () => {
     const exam = snapshot.exams.find((candidate) => candidate.id === configPackage.examId);
     if (!exam) {
       throw new Error("Exam not found for this package.");
+    }
+
+    if (submission.examId !== configPackage.examId) throw new Error("Submission does not belong to this exam package.");
+    const activePackage = getActivePackage();
+    const studentBinding = configPackage.studentLmsBinding;
+    if (activePackage && studentBinding.provider === "google-classroom" && usesPublisherGoogleConnection(studentBinding.googleAuthMode, studentBinding.clientId)) {
+      assertGoogleRelease(installedRole, activePackage, submission, configPackage.id, payload.pin, snapshot.settings.invigilatorUnlockPin);
+      try {
+        await endManagedSession(mainWindow, "Invigilator approved release for Google turn-in", recordSecurityEvent);
+      } finally {
+        await endNativeLockdownSession(recordSecurityEvent);
+        if (processMonitorTimer) { clearInterval(processMonitorTimer); processMonitorTimer = null; }
+      }
     }
 
     try {

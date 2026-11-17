@@ -31,6 +31,8 @@ import type {
   TeacherOptions
 } from "@lockedscreen/shared-types";
 
+import { publisherGoogleConnection, usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
+
 const defaultGoogleClassroomScopes = [
   "openid",
   "email",
@@ -44,8 +46,9 @@ const defaultGoogleClassroomScopes = [
 ];
 
 const defaultGoogleIntegration = (): GoogleIntegrationSettings => ({
-  enabled: false,
-  clientId: "",
+  enabled: true,
+  authMode: "publisher-hosted",
+  clientId: publisherGoogleConnection.clientId,
   clientSecret: "",
   requestedScopes: [...defaultGoogleClassroomScopes],
   connectionStatus: "disconnected",
@@ -192,7 +195,8 @@ const normalizeStudentLmsBinding = (binding: StudentLmsBinding | null | undefine
   ...defaultStudentLmsBinding(),
   ...(binding ?? {}),
   clientId: binding?.clientId?.trim() ?? "",
-  clientSecret: binding?.clientSecret?.trim() || undefined,
+  clientSecret: (binding?.provider ?? "google-classroom") === "google-classroom" && usesPublisherGoogleConnection(binding?.googleAuthMode, binding?.clientId ?? "")
+    ? undefined : binding?.clientSecret?.trim() || undefined,
   scope: defaultStudentLmsScopes(binding?.provider ?? "google-classroom"),
   courseId: binding?.courseId ?? "",
   assignmentId: binding?.assignmentId ?? ""
@@ -271,9 +275,10 @@ const normalizeGoogleIntegration = (
   return {
     ...defaultGoogleIntegration(),
     ...(settings ?? {}),
-    enabled: settings?.enabled === true,
-    clientId: settings?.clientId?.trim() ?? "",
-    clientSecret: settings?.clientSecret?.trim() ?? "",
+    authMode: usesPublisherGoogleConnection(settings?.authMode, settings?.clientId ?? "") ? "publisher-hosted" : "school-desktop",
+    enabled: settings?.enabled ?? true,
+    clientId: usesPublisherGoogleConnection(settings?.authMode, settings?.clientId ?? "") ? publisherGoogleConnection.clientId : settings?.clientId?.trim() ?? "",
+    clientSecret: usesPublisherGoogleConnection(settings?.authMode, settings?.clientId ?? "") ? "" : settings?.clientSecret?.trim() ?? "",
     requestedScopes: Array.from(new Set(requestedScopes)),
     connectionStatus:
       settings?.connectionStatus === "connected" || settings?.connectionStatus === "error"

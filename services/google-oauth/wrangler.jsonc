@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lockedscreen-oauth",
+  "account_id": "3a9041afa058574af458d56bb17a6479",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-17",
+  "workers_dev": true,
+  "preview_urls": false,
+  "keep_vars": true,
+  "observability": { "enabled": false },
+  "vars": {
+    "GOOGLE_CLIENT_ID": "129421335486-b53jphtc37g3583b6d7oid2i0jmlejr1.apps.googleusercontent.com",
+    "GOOGLE_REDIRECT_URI": "https://auth.whsdominica.com/oauth/google/callback"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "lockedscreen-oauth",
+    "database_id": "3873719c-03e0-47ae-9b79-7a6d3ec3ab57",
+    "migrations_dir": "migrations"
+  }],
+  "routes": [{ "pattern": "auth.whsdominica.com", "custom_domain": true }],
+  "triggers": { "crons": ["17 * * * *"] }
+}

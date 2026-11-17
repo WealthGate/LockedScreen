@@ -56,7 +56,7 @@ interface LockedscreenStore {
   endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot | null>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot | null>;
   submitExam: (exam: Exam, session: ExamSession) => Promise<SubmissionResult | null>;
-  turnInStudentLms: (payload: { submissionId: string; packageId: string }) => Promise<SubmissionResult | null>;
+  turnInStudentLms: (payload: { submissionId: string; packageId: string; pin?: string }) => Promise<SubmissionResult | null>;
 }
 
 const withGuard = async <T>(operation: () => Promise<T>, onError: (message: string) => void): Promise<T | null> => {

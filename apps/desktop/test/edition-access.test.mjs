@@ -53,10 +53,15 @@ test('Teacher exam packages remain readable without document import modules', as
   const { protectConfigPackage, unprotectConfigPackage, automaticPackagePassword } =
     await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
   const exam = { id: 'test-exam', title: 'Fictional test', mode: 'app', questions: [] };
+  const studentAccessPolicy = { startCodeHash: 'fixture-start-code-hash', startCodeSalt: 'fixture-start-code-salt' };
+  const studentLmsBinding = { enabled: true, provider: 'google-classroom', courseId: 'class', assignmentId: 'assignment' };
   const config = { id: 'test-package', examId: exam.id, label: 'Fictional package',
-    browserPolicy: {}, sessionPolicy: {}, integrity: { algorithm: 'sha256', checksum: '' } };
+    browserPolicy: {}, sessionPolicy: {}, studentAccessPolicy, studentLmsBinding,
+    integrity: { algorithm: 'sha256', checksum: '' } };
   const file = JSON.parse(JSON.stringify(protectConfigPackage(config, automaticPackagePassword, exam)));
   const opened = unprotectConfigPackage(file, automaticPackagePassword);
   assert.deepEqual(opened.exam, exam);
   assert.equal(opened.configPackage.examId, exam.id);
+  assert.deepEqual(opened.configPackage.studentAccessPolicy, studentAccessPolicy);
+  assert.deepEqual(opened.configPackage.studentLmsBinding, studentLmsBinding);
 });

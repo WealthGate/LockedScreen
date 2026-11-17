@@ -12,6 +12,7 @@ student-store-identity.json
 client_secret*.json
 publisher-google-oauth.json
 apps/desktop/build/store-native/
+apps/desktop/build/appx/
 apps/desktop/out/
 
 apps/windows-lockdown/**/bin/
@@ -19,3 +20,8 @@ apps/windows-lockdown/**/obj/
 
 *.tmp
 *.log
+.dev.vars*
+.env*
+.wrangler/
+services/google-oauth/dist/
+tmp/oauth-*.txt

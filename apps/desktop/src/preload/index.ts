@@ -77,6 +77,7 @@ export interface LockedscreenApi {
   turnInStudentLms: (payload: {
     submissionId: string;
     packageId: string;
+    pin?: string;
   }) => Promise<{ state: StudentLmsTurnInState; submission: SubmissionResult; snapshot: AppStateSnapshot }>;
   setAssistKiosk: (enabled: boolean) => Promise<void>;
   setNavigationGuard: (guard: NavigationGuard | null) => Promise<void>;

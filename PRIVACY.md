@@ -1,6 +1,6 @@
 # Lockedscreen Privacy Policy
 
-Effective date: May 7, 2026
+Effective date: November 17, 2026
 
 Lockedscreen is a Windows desktop application for secure exam delivery, classroom assignment setup, and optional learning-management-system integrations such as Google Classroom.
 
@@ -42,6 +42,31 @@ Exam start codes are stored as salted hashes in exported packages, not as plain 
 
 Schools are responsible for managing access to the Windows devices where Lockedscreen is installed and for configuring appropriate administrative, invigilator, and kiosk controls.
 
+## Publisher-managed Google connection service
+
+When publisher-managed Google connection is selected, the app connects to
+`https://auth.whsdominica.com`, operated for LockedScreen using Cloudflare Workers
+and Cloudflare D1. Google passwords are entered on Google's pages in the system
+browser, not into LockedScreen or the connection service.
+
+The service processes the Google account name and verified email address, temporary
+authorization codes, and OAuth access and refresh tokens needed for the connection.
+Teacher connection records are encrypted in D1. The publisher OAuth client secret
+and token encryption key are held separately as Cloudflare Secrets. The desktop keeps
+an opaque per-device service credential and short-lived Google access tokens in its
+OS-encrypted vault. Exam files do not contain the publisher Web client secret or the
+teacher's service credential or refresh token.
+
+The connection service does not receive exam answers, scores, uploaded exam files,
+or Classroom rosters through its OAuth endpoints. The desktop accesses Google APIs
+separately for the teacher's configured classroom workflows. Other configured result
+sync destinations may receive exam information as described below.
+
+Cloudflare processes network information needed to provide and protect the hosted
+service. The application uses temporary hashed rate-limit identifiers rather than
+storing raw IP addresses in its D1 rate-limit table. Application invocation logging
+is disabled to avoid retaining OAuth callback codes in application logs.
+
 ## Sharing of information
 
 Lockedscreen may send exam or grade information only to destinations configured by the teacher or school administrator, such as:
@@ -53,9 +78,27 @@ Lockedscreen may send exam or grade information only to destinations configured 
 
 Lockedscreen does not intentionally share student or teacher information with unrelated third parties.
 
+Cloudflare is used as a hosting and storage provider for the optional publisher-managed
+Google connection service described above. Google receives the authorization and API
+requests required for the selected Google features.
+
 ## Data retention
 
 Data retention depends on the school configuration and the local Windows installation. Schools can delete local app data, remove exam packages, clear Google tokens, disconnect integrations, or uninstall the application according to their own policies.
+
+Publisher-managed teacher service sessions expire after 30 days and require reconnection.
+Temporary sign-in records expire after at most 10 minutes, with successfully approved
+handoffs available for one-time collection for 60 seconds. Expired service records are
+removed by an hourly cleanup job. Students do not receive a persistent hosted service
+session or Google refresh token from this service.
+
+Disconnecting a hosted connection deletes its active service session when the service
+is reachable. Revoking Google access also asks Google to invalidate the authorization;
+it may affect other devices connected with the same Google account and client. Users
+can remove LockedScreen access from their Google account permissions page. Uninstalling
+the desktop app does not itself contact the service to delete a hosted session; the
+session expires as described above. Infrastructure backups may remain subject to the
+hosting provider's retention policies.
 
 ## Children's and student data
 
