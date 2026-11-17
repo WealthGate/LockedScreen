@@ -25,3 +25,6 @@ apps/windows-lockdown/**/obj/
 .wrangler/
 services/google-oauth/dist/
 tmp/oauth-*.txt
+tmp/oauth-profile-probe/
+tmp/acceptance-*/
+tmp/*.lnk

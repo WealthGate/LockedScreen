@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "marked": "18.2.1",
     "oauth4webapi": "3.8.8"
   },
   "devDependencies": {

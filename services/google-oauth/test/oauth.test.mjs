@@ -11,7 +11,7 @@ import initSqlJs from "sql.js";
 globalThis.crypto ??= webcrypto;
 const directory = await mkdtemp(join(tmpdir(), "lockedscreen-hosted-oauth-"));
 const outfile = join(directory, "worker.mjs");
-await build({ entryPoints: [new URL("../src/index.ts", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")], outfile, bundle: true, platform: "node", format: "esm", logLevel: "silent" });
+await build({ entryPoints: [new URL("../src/index.ts", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")], outfile, bundle: true, platform: "node", format: "esm", logLevel: "silent", loader: { ".md": "text" } });
 const { createOAuthWorker, cleanup } = await import(pathToFileURL(outfile).href);
 const googleFile = join(directory, "google.mjs");
 await build({ entryPoints: [new URL("../src/google.ts", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")], outfile: googleFile, bundle: true, platform: "node", format: "esm", logLevel: "silent" });
@@ -67,6 +67,27 @@ test("health fails closed without the encryption key", async () => {
   const response = await f.fetch("/health");
   assert.equal(response.status, 503);
   assert.doesNotMatch(await response.text(), /publisher-private|google-refresh-private/);
+});
+test("privacy disclosure is public, uses the current source and does not change OAuth cookies", async () => {
+  const f = fixture();
+  delete f.env.TOKEN_ENCRYPTION_KEY;
+  f.env.DB.prepare = () => { throw new Error("Public pages must not query account records."); };
+  const response = await f.fetch("/privacy", { headers: { cookie: "__Host-lockedscreen-oauth=existing-browser-cookie", origin: "https://accounts.google.com" } });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  assert.equal(response.headers.get("set-cookie"), null);
+  const html = await response.text();
+  assert.match(html, /November 17, 2026/);
+  assert.match(html, /Publisher-managed Google connection service/);
+  assert.match(html, /Cloudflare D1/);
+  assert.match(html, /expire after 30 days/);
+  assert.match(html, /Limited Use/);
+  assert.doesNotMatch(html, /<script\b|publisher-private|google-refresh-private/);
+  assert.equal((await f.fetch("/privacy", { method: "HEAD" })).status, 200);
+  assert.equal(await (await f.fetch("/privacy", { method: "HEAD" })).text(), "");
+  assert.equal((await f.fetch("/privacy/")).status, 308);
+  assert.equal((await f.post("/privacy", {})).status, 405);
+  assert.match(await (await f.fetch("/")).text(), /href="\/privacy"/);
 });
 test("teacher flow binds browser state and desktop proof, encrypts secrets and redeems once", async () => {
   const f = fixture(); const flow = await f.start();

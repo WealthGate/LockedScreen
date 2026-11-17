@@ -7,6 +7,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "keep_vars": true,
+  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
   "observability": { "enabled": false },
   "vars": {
     "GOOGLE_CLIENT_ID": "129421335486-b53jphtc37g3583b6d7oid2i0jmlejr1.apps.googleusercontent.com",

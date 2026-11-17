@@ -1,5 +1,6 @@
 import { hash, randomToken, seal, unseal } from "./crypto";
 import { googleProvider, type AuthorizationData, type GoogleConfig, type GoogleProvider, type GoogleTokens, type Role } from "./google";
+import { publicPage } from "./public-pages";
 
 interface Statement {
   bind(...values: unknown[]): Statement;
@@ -92,8 +93,9 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
     const url = new URL(request.url);
     try {
       if (url.origin !== ORIGIN && url.pathname !== "/health") return json({ error: "not_found" }, 404);
+      const publicResponse = publicPage(url.pathname, request.method);
+      if (publicResponse) return publicResponse;
       if (request.headers.has("origin") && request.headers.get("origin") !== ORIGIN) fail(403, "invalid_origin", "Request origin is not allowed.");
-      if (url.pathname === "/") return page("Publisher-managed Google connection service.");
       requireConfig(env);
       if (url.pathname === "/health" && request.method === "GET") {
         await env.DB.prepare("SELECT id FROM oauth_flows LIMIT 1").first();

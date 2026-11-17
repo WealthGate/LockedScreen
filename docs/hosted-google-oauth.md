@@ -80,6 +80,20 @@ Verify project `lockedscreen` remains External/In production, required APIs are 
 and Google has approved the requested sensitive scopes before broad distribution.
 Production publishing status alone is not sensitive-scope verification.
 
+## Public Privacy Disclosure
+
+The current repository `PRIVACY.md` is published as readable HTML at
+https://auth.whsdominica.com/privacy. The service root provides brief product information
+and a link to that policy. These pages do not require an account, a working D1 database,
+or an OAuth grant, and do not set or clear the application's OAuth browser cookie.
+Use that policy URL in Google Branding and the Microsoft Store privacy field; publishing
+the Worker does not edit either external dashboard setting.
+
+The complete hands-on test sequence is in
+[0.6.61 Acceptance Test](releases/v0.6.61-acceptance-guide.md). Run
+`scripts/prepare-store-test-shortcut.ps1` to prepare a separate-data local test shortcut.
+This does not install or certify the APPX and is not a substitute for a Store package flight.
+
 ## Store Candidate 0.6.61
 
 Build `scripts/build-store.ps1` for the existing `WealthGate.LockedScreen` listing. This is
