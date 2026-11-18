@@ -41,18 +41,18 @@ function fixture() {
     async exchange(config, callback, state, auth, role) {
       assert.equal(callback.searchParams.get("code"), "approved");
       assert.ok(auth.nonce); assert.ok(auth.verifier);
-      return { accessToken: "google-access-private", refreshToken: role === "teacher" ? "google-refresh-private" : undefined,
+      return { accessToken: "google-access-private", refreshToken: role === "teacher" || auth.examSession ? "google-refresh-private" : undefined,
         expiresAt: new Date(Date.now() + 3600000).toISOString(), profile: { email: "test@example.com", name: "Test" } };
     },
-    async refresh() { return { accessToken: "refreshed-private", refreshToken: "google-refresh-private", expiresAt: new Date(Date.now() + 3600000).toISOString() }; },
+    async refresh() { calls.push("refresh"); return { accessToken: "refreshed-private", refreshToken: "google-refresh-private", expiresAt: new Date(Date.now() + 3600000).toISOString() }; },
     async revoke() { calls.push("revoked"); }
   };
   const env = { DB, GOOGLE_CLIENT_ID: "public-client", GOOGLE_CLIENT_SECRET: "publisher-private", GOOGLE_REDIRECT_URI: `${origin}/oauth/google/callback`, TOKEN_ENCRYPTION_KEY: secret };
   const worker = createOAuthWorker(provider);
   const fetch = (path, init = {}) => worker.fetch(new Request(`${origin}${path}`, init), env);
   const post = (path, value, headers = {}) => fetch(path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
-  const start = async (role = "teacher") => {
-    const result = await post("/v1/google/sign-in", { role, codeChallenge: await sha(verifier) });
+  const start = async (role = "teacher", examSession = false) => {
+    const result = await post("/v1/google/sign-in", { role, codeChallenge: await sha(verifier), examSession });
     assert.equal(result.status, 200);
     const body = await result.json();
     const redirect = await fetch(`/oauth/google/start?flow=${body.flowId}`);
@@ -77,7 +77,7 @@ test("privacy disclosure is public, uses the current source and does not change 
   assert.match(response.headers.get("content-type"), /text\/html/);
   assert.equal(response.headers.get("set-cookie"), null);
   const html = await response.text();
-  assert.match(html, /November 17, 2026/);
+  assert.match(html, /November 18, 2026/);
   assert.match(html, /Publisher-managed Google connection service/);
   assert.match(html, /Cloudflare D1/);
   assert.match(html, /expire after 30 days/);
@@ -123,6 +123,36 @@ test("student flow cannot receive a teacher session or persistent Google refresh
   assert.equal(result.sessionToken, undefined); assert.equal(result.refreshToken, undefined);
   assert.equal(f.sqlite.exec("SELECT COUNT(*) FROM oauth_sessions")[0].values[0][0], 0);
 });
+
+test("pre-exam student authorization refreshes without browser interaction, expires within twelve hours and deletes on exit", async () => {
+  const f = fixture(); const before = Date.now(); const flow = await f.start("student", true);
+  assert.equal(f.calls[0].role, 'student');
+  assert.equal(f.calls[0].auth.examSession, true);
+  await f.fetch(`/oauth/google/callback?state=${flow.flowId}&code=approved`, { headers: { cookie: flow.cookie } });
+  const result = await (await f.post('/v1/google/claim', { flowId: flow.flowId, codeVerifier: verifier })).json();
+  assert.match(result.sessionToken, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(result.refreshToken, undefined);
+  const expiry = f.sqlite.exec('SELECT expires_at FROM oauth_sessions')[0].values[0][0];
+  assert(expiry >= before + 12 * 3600000 && expiry <= Date.now() + 12 * 3600000);
+  assert.doesNotMatch(Buffer.from(f.sqlite.export()).toString('latin1'), /google-refresh-private|google-access-private|test@example.com/);
+  const realNow = Date.now;
+  try {
+    Date.now = () => before + 2 * 3600000;
+    const token = await f.post('/v1/google/access-token', {}, { Authorization: `Bearer ${result.sessionToken}` });
+    assert.equal((await token.json()).accessToken, 'refreshed-private');
+    assert.ok(f.calls.includes('refresh'));
+    await f.post('/v1/google/disconnect', { revoke: false }, { Authorization: `Bearer ${result.sessionToken}` });
+    assert.equal((await f.post('/v1/google/access-token', {}, { Authorization: `Bearer ${result.sessionToken}` })).status, 401);
+    assert.equal(f.calls.includes('revoked'), false);
+  } finally { Date.now = realNow; }
+  const config = f.env;
+  const authUrl = new URL(await googleProvider.authorize(config, 'student', 'state', { verifier, nonce: 'nonce', examSession: true }));
+  assert.equal(authUrl.searchParams.get('access_type'), 'offline');
+  assert(authUrl.searchParams.get('scope').includes('classroom.coursework.me'));
+  assert.equal(authUrl.searchParams.get('scope').includes('classroom.coursework.students'), false);
+  const legacy = new URL(await googleProvider.authorize(config, 'student', 'state', { verifier, nonce: 'nonce' }));
+  assert.equal(legacy.searchParams.get('access_type'), 'online');
+});
 test("rejects cross-origin requests, oversized bodies and arbitrary roles/scopes", async () => {
   const f = fixture();
   assert.equal((await f.post("/v1/google/sign-in", {}, { Origin: "https://attacker.example" })).status, 403);
@@ -140,6 +170,14 @@ test("rate limits repeated sign-in starts", async () => {
   const f = fixture();
   for (let count = 0; count < 10; count++) assert.equal((await f.post("/v1/google/sign-in", { role: "teacher", codeChallenge: await sha(verifier) })).status, 200);
   assert.equal((await f.post("/v1/google/sign-in", { role: "teacher", codeChallenge: await sha(verifier) })).status, 429);
+});
+
+test("a shared school network can start a class of student sign-ins while teacher starts remain limited", async () => {
+  const f = fixture();
+  for (let count = 0; count < 35; count++) {
+    assert.equal((await f.post('/v1/google/sign-in', { role: 'student', examSession: true, codeChallenge: await sha(verifier) }, { 'CF-Connecting-IP': '192.0.2.1' })).status, 200);
+  }
+  assert.equal(f.sqlite.exec('SELECT COUNT(*) FROM oauth_flows')[0].values[0][0], 35);
 });
 test("OAuth library verifies Google signature, nonce, audience and required permissions", async () => {
   const keys = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);

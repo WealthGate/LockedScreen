@@ -25,6 +25,12 @@ jobs:
           node --test @tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project apps/windows-lockdown/KeyboardPolicy.Tests/KeyboardPolicy.Tests.csproj -c Release
+      - name: Test hosted OAuth isolation
+        shell: pwsh
+        run: |
+          npm ci --prefix services/google-oauth
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test services/google-oauth/test/oauth.test.mjs
       - name: Build Teacher installer
         shell: pwsh
         run: ./scripts/build-edition.ps1 -Edition teacher -Target github

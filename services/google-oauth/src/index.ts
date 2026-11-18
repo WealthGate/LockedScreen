@@ -13,10 +13,11 @@ interface Flow {
   id: string; challenge: string; role: Role; status: string; browser_hash: string | null;
   encrypted_payload: string; expires_at: number;
 }
-interface FlowPayload { auth?: AuthorizationData; result?: unknown; error?: string }
+interface FlowPayload { auth?: AuthorizationData; result?: unknown; error?: string; examSession?: boolean }
 interface Session { encrypted_payload: string; expires_at: number }
 const FLOW_TTL = 10 * 60_000;
 const SESSION_TTL = 30 * 24 * 60 * 60_000;
+const STUDENT_SESSION_TTL = 12 * 60 * 60_000;
 const COOKIE = "__Host-lockedscreen-oauth";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const CALLBACK = "https://auth.whsdominica.com/oauth/google/callback";
@@ -99,28 +100,33 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
       requireConfig(env);
       if (url.pathname === "/health" && request.method === "GET") {
         await env.DB.prepare("SELECT id FROM oauth_flows LIMIT 1").first();
-        return json({ status: "ready", version: "0.6.61" });
+        return json({ status: "ready", version: "0.6.64", studentExamSessions: true });
       }
       const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
       const ipKey = await hash(`${env.TOKEN_ENCRYPTION_KEY}:${ip}`);
-      await rateLimit(env, `request:${ipKey}`, 120);
+      // A school class can share one public IP and poll concurrent sign-ins.
+      await rateLimit(env, `request:${ipKey}`, 2000);
 
       if (url.pathname === "/v1/google/sign-in" && request.method === "POST") {
-        await rateLimit(env, `start:${ipKey}`, 10);
         const body = await readJson(request);
         if ((body.role !== "teacher" && body.role !== "student") || typeof body.codeChallenge !== "string" || !TOKEN.test(body.codeChallenge)) {
           fail(400, "invalid_request", "A role and S256 code challenge are required.");
         }
+        await rateLimit(env, `start:${body.role}:${ipKey}`, body.role === "student" ? 120 : 10);
         const id = randomToken();
         await env.DB.prepare("INSERT INTO oauth_flows(id, challenge, role, status, encrypted_payload, expires_at) VALUES (?, ?, ?, 'created', ?, ?)")
-          .bind(id, body.codeChallenge, body.role, await seal(env.TOKEN_ENCRYPTION_KEY, `flow:${id}`, {}), Date.now() + FLOW_TTL).run();
+          .bind(id, body.codeChallenge, body.role, await seal(env.TOKEN_ENCRYPTION_KEY, `flow:${id}`, { examSession: body.role === "student" && body.examSession === true }), Date.now() + FLOW_TTL).run();
         return json({ flowId: id, authorizeUrl: `${ORIGIN}/oauth/google/start?flow=${id}`, pollIntervalSeconds: 5 });
       }
 
       if (url.pathname === "/oauth/google/start" && request.method === "GET") {
         const id = url.searchParams.get("flow") ?? "";
         if (!TOKEN.test(id)) fail(400, "invalid_flow", "Invalid Google sign-in request.");
-        const auth = { verifier: randomToken(), nonce: randomToken() };
+        const existing = await env.DB.prepare("SELECT * FROM oauth_flows WHERE id = ? AND status = 'created' AND expires_at > ?")
+          .bind(id, Date.now()).first<Flow>();
+        if (!existing) fail(400, "expired_flow", "This sign-in link has expired or was already opened. Connect again from LockedScreen.");
+        const initial = await unseal<FlowPayload>(env.TOKEN_ENCRYPTION_KEY, `flow:${id}`, existing.encrypted_payload);
+        const auth = { verifier: randomToken(), nonce: randomToken(), examSession: existing.role === "student" && initial.examSession === true };
         const browser = randomToken();
         const row = await env.DB.prepare(
           "UPDATE oauth_flows SET status = 'started', browser_hash = ?, encrypted_payload = ? WHERE id = ? AND status = 'created' AND expires_at > ? RETURNING *"
@@ -149,12 +155,12 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
           const tokens = await google.exchange(env, url, id, payload.auth, flow.role);
           if (!tokens.profile?.email || !tokens.accessToken) throw new Error();
           let sessionToken: string | undefined;
-          if (flow.role === "teacher") {
+          if (flow.role === "teacher" || payload.auth.examSession) {
             if (!tokens.refreshToken) throw new Error("Google did not provide offline access.");
             sessionToken = randomToken();
             const key = await hash(sessionToken);
             await env.DB.prepare("INSERT INTO oauth_sessions(token_hash, encrypted_payload, expires_at) VALUES (?, ?, ?)")
-              .bind(key, await seal(env.TOKEN_ENCRYPTION_KEY, `session:${key}`, tokens), Date.now() + SESSION_TTL).run();
+              .bind(key, await seal(env.TOKEN_ENCRYPTION_KEY, `session:${key}`, { ...tokens, role: flow.role }), Date.now() + (flow.role === "student" ? STUDENT_SESSION_TTL : SESSION_TTL)).run();
           }
           const result = { accessToken: tokens.accessToken, expiresAt: tokens.expiresAt, profile: tokens.profile, sessionToken };
           await env.DB.prepare("UPDATE oauth_flows SET status = 'ready', encrypted_payload = ?, expires_at = ? WHERE id = ?")
@@ -172,6 +178,7 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
         const id = typeof body.flowId === "string" ? body.flowId : "";
         const verifier = typeof body.codeVerifier === "string" ? body.codeVerifier : "";
         if (!TOKEN.test(id) || !TOKEN.test(verifier)) fail(400, "invalid_request", "Invalid sign-in proof.");
+        await rateLimit(env, `claim:${id}`, 30);
         const challenge = await hash(verifier);
         const flow = await env.DB.prepare("SELECT * FROM oauth_flows WHERE id = ? AND challenge = ? AND expires_at > ?")
           .bind(id, challenge, Date.now()).first<Flow>();

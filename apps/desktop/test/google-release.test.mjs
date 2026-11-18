@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { build } from "esbuild";
 
-test("hosted Google turn-in requires a saved active-exam submission and correct invigilator PIN", async () => {
+test("legacy external Google release guard enforces PIN; the current locked flow uses prepared authorization without release", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lockedscreen-google-release-"));
   try {
     const guardFile = join(directory, "release.mjs");
@@ -29,8 +29,17 @@ test("hosted Google turn-in requires a saved active-exam submission and correct 
     const main = await readFile(new URL("../src/main/index.ts", import.meta.url), "utf8");
     const start = main.indexOf('handleIpc("studentLms:turnIn"');
     const turnIn = main.slice(start, main.indexOf('handleIpc(', start + 10));
-    assert.ok(turnIn.indexOf("assertGoogleRelease(") < turnIn.indexOf("await endManagedSession("));
-    assert.ok(turnIn.indexOf("await endNativeLockdownSession(") < turnIn.indexOf("await turnInSubmissionToLms("));
+    assert.doesNotMatch(turnIn, /endManagedSession|endNativeLockdownSession|assertGoogleRelease/);
+    assert.match(turnIn, /activeSubmissionId !== submission.id/);
+    assert.match(turnIn, /studentExamAuth.accessToken\(activePackage\)/);
+    assert.match(turnIn, /allowInteractiveSignIn: !activePackage/);
+    const begin = main.slice(main.indexOf('handleIpc("session:begin"'), main.indexOf('handleIpc("session:launchAlternateDesktop"'));
+    assert(begin.indexOf('studentExamAuth.prepare(') < begin.indexOf('await beginNativeLockdownSession('));
+    assert(begin.indexOf('studentExamAuth.takeHandoff(') < begin.indexOf('await beginManagedSession('));
+    const alternate = main.slice(main.indexOf('handleIpc("session:launchAlternateDesktop"'), main.indexOf('handleIpc("session:end"'));
+    assert(alternate.indexOf('studentExamAuth.prepare(') < alternate.indexOf('await launchAlternateDesktopExamShell('));
+    assert.match(alternate, /--lockedscreen-student-auth=\$\{studentAuthHandoff\}/);
+    assert.match(main, /if \(!getActiveSession\(\)\) void studentExamAuth.clear\(\)/);
     assert.match(main, /handleIpc\("lmsConnection:connect"[\s\S]*?if \(getActiveSession\(\)\) throw/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

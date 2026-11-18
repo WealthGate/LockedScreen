@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 import { assertRoleAccess, buildEdition } from "./edition";
 import { createPinVerifier } from "./security/invigilator-pin";
-import { assertGoogleRelease } from "./security/google-release";
+import { StudentExamAuth, needsStudentSignIn } from "./student-exam-auth";
 import { assertSessionExitPin, assertSessionOperation, assertSessionPinConfigured, createSessionStartBarrier, isSameSession, unsafeProductionSwitch } from "./security/session-policy";
 
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
@@ -142,6 +142,7 @@ if (buildEdition === "student") {
 }
 const storage = createStorageService(app.getPath("userData"));
 const oauthVault = new OAuthVault(join(app.getPath("userData"), "oauth-vault.json"));
+const studentExamAuth = new StudentExamAuth(join(app.getPath("userData"), "student-exam-handoff"));
 let runtimeEnvironment: RuntimeEnvironment;
 let runtimeRefresh: Promise<void> | null = null;
 const refreshRuntimeEnvironment = (): Promise<void> => {
@@ -1287,6 +1288,7 @@ app.whenReady().then(async () => {
     if (sessionStarting || hasAlternateDesktopHost()) throw new Error("An exam session is already starting or running.");
     if (!mainWindow || mainWindow.isDestroyed()) throw new Error("The exam window is not available.");
     sessionStarting = true;
+    let started = false;
     try {
       const snapshot = await storage.getSnapshot();
       const configPackage = snapshot.configPackages.find((candidate) => candidate.id === request.packageId);
@@ -1302,6 +1304,11 @@ app.whenReady().then(async () => {
       await refreshRuntimeEnvironment();
       if (!runtimeEnvironment.nativeLockdown.lockdownCapable) throw new Error("Native lockdown is unavailable. The exam has not started. Refresh diagnostics or repair the installation.");
 
+      if (launchedByNativeHost) {
+        await studentExamAuth.takeHandoff(getArgValue("--lockedscreen-student-auth="), configPackage);
+      } else {
+        await studentExamAuth.prepare(configPackage, mainWindow);
+      }
       const needsNativeCompanion = !launchedByNativeHost;
 
       if (needsNativeCompanion) {
@@ -1322,8 +1329,12 @@ app.whenReady().then(async () => {
       await refreshProcessPolicyMonitor();
       monitorNativeSession();
       activeSubmissionId = null;
+      started = true;
       return withRuntime(storage.getSnapshot());
-    } finally { sessionStarting = false; }
+    } finally {
+      if (!started) await studentExamAuth.clear();
+      sessionStarting = false;
+    }
   });
 
   handleIpc("session:launchAlternateDesktop", async (_event, payload: unknown) => {
@@ -1333,6 +1344,7 @@ app.whenReady().then(async () => {
     sessionStartBarrier.assertIdle();
     if (sessionStarting || getActiveSession() || hasAlternateDesktopHost()) throw new Error("An exam session is already starting or running.");
     sessionStarting = true;
+    let studentAuthHandoff: string | undefined;
     try {
       const snapshot = await storage.getSnapshot();
       const exam = snapshot.exams.find((candidate) => candidate.id === payload.examId);
@@ -1359,6 +1371,8 @@ app.whenReady().then(async () => {
         return false;
       }
 
+      await studentExamAuth.prepare(configPackage, mainWindow);
+      studentAuthHandoff = await studentExamAuth.createHandoff();
       await launchAlternateDesktopExamShell(
         {
           examId: exam.id,
@@ -1373,14 +1387,20 @@ app.whenReady().then(async () => {
             "--lockedscreen-route=" +
             (exam.mode === "link" ? `/link/${exam.id}` : `/session/${exam.id}`) +
             `?candidateName=${encodeURIComponent(payload.candidate.name)}&candidateId=${encodeURIComponent(payload.candidate.id)}`,
-            "--lockedscreen-native-hosted=1"
+            "--lockedscreen-native-hosted=1",
+            ...(studentAuthHandoff ? [`--lockedscreen-student-auth=${studentAuthHandoff}`] : [])
           ]
         },
         configPackage,
         recordSecurityEvent
       );
 
+      studentExamAuth.forget();
       return true;
+    } catch (error) {
+      await studentExamAuth.removeHandoff(studentAuthHandoff);
+      await studentExamAuth.clear();
+      throw error;
     } finally { sessionStarting = false; }
   });
 
@@ -1409,7 +1429,11 @@ app.whenReady().then(async () => {
         }
       }
       return withRuntime(storage.getSnapshot());
-    } finally { sessionStarting = false; }
+    } finally {
+      // Do not clear a student's authorization when a wrong PIN was rejected.
+      if (!getActiveSession()) void studentExamAuth.clear();
+      sessionStarting = false;
+    }
   });
 
   handleIpc("applications:launch", async (_event, payload: unknown) => {
@@ -1522,21 +1546,13 @@ app.whenReady().then(async () => {
     if (activePackage && activeSubmissionId !== submission.id) throw new Error("Submit this exam session before requesting turn-in.");
     if (activePackage) {
       if (sessionStarting) throw new Error("Wait for the current exam transition to finish.");
-      sessionStarting = true;
-      try {
-        assertGoogleRelease(installedRole, activePackage, submission, configPackage.id, payload.pin, snapshot.settings.invigilatorUnlockPin);
-        try {
-          await endManagedSession(mainWindow, "Invigilator approved release for Google turn-in", recordSecurityEvent);
-        } finally {
-          await endNativeLockdownSession(recordSecurityEvent);
-          activeSubmissionId = null;
-          if (nativeMonitorTimer) { clearInterval(nativeMonitorTimer); nativeMonitorTimer = null; }
-          if (processMonitorTimer) { clearInterval(processMonitorTimer); processMonitorTimer = null; }
-        }
-      } finally { sessionStarting = false; }
+      if (activePackage.id !== configPackage.id || activePackage.examId !== submission.examId) throw new Error("Only the saved submission for the active exam can be turned in.");
+      if (getActiveSession()?.securityHold) throw new Error("Ask the invigilator to release the paused exam before retrying delivery.");
     }
 
     try {
+      const studentAccessToken = activePackage && needsStudentSignIn(activePackage)
+        ? await studentExamAuth.accessToken(activePackage) : undefined;
       let teacherAccessToken: string | undefined;
       let teacherAccessTokenError: string | undefined;
       const binding = configPackage.studentLmsBinding;
@@ -1554,7 +1570,9 @@ app.whenReady().then(async () => {
         }
       }
 
-      const state = await turnInSubmissionToLms(mainWindow, configPackage, exam, submission, { teacherAccessToken, teacherAccessTokenError });
+      const state = await turnInSubmissionToLms(mainWindow, configPackage, exam, submission, {
+        teacherAccessToken, teacherAccessTokenError, studentAccessToken, allowInteractiveSignIn: !activePackage
+      });
       const nextSnapshot = await storage.updateSubmissionStudentLmsTurnIn(submission.id, state);
       const updatedSubmission = nextSnapshot.submissions.find((candidate) => candidate.id === submission.id);
       if (!updatedSubmission) {

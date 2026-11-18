@@ -4,7 +4,7 @@ import { URL, URLSearchParams } from "node:url";
 
 import { BrowserWindow, shell } from "electron";
 import { usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
-import { beginHostedGoogleSignIn } from "./integrations/google/hosted-google-oauth";
+import { beginHostedGoogleSignIn, refreshHostedGoogleToken, disconnectHostedGoogle } from "./integrations/google/hosted-google-oauth";
 
 import type {
   Exam,
@@ -17,10 +17,11 @@ import type {
 
 import { buildStudentPerformanceReport } from "./student-performance-report";
 
-interface StudentOAuthTokens {
+export interface StudentOAuthTokens {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string;
+  sessionToken?: string;
 }
 
 interface SubmissionArtifact {
@@ -44,6 +45,8 @@ interface MicrosoftUploadedFile {
 interface TurnInOptions {
   teacherAccessToken?: string;
   teacherAccessTokenError?: string;
+  studentAccessToken?: string;
+  allowInteractiveSignIn?: boolean;
 }
 
 const toBase64Url = (input: Buffer): string =>
@@ -170,7 +173,7 @@ const buildSubmissionArtifact = async (
 const createAuthorizationListener = async (
   provider: StudentLmsProviderType,
   expectedState: string
-): Promise<{ redirectUri: string; waitForCode: () => Promise<string> }> =>
+): Promise<{ redirectUri: string; waitForCode: () => Promise<string>; cancel: () => void }> =>
   new Promise((resolve, reject) => {
     const server = createServer((request, response) => {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -224,6 +227,11 @@ const createAuthorizationListener = async (
 
       resolve({
         redirectUri: `http://127.0.0.1:${address.port}/callback`,
+        cancel: () => {
+          if (timeout) clearTimeout(timeout);
+          server.close();
+          pendingReject?.(new Error("Student sign-in was cancelled."));
+        },
         waitForCode: () =>
           new Promise<string>((resolveCode, rejectCode) => {
             pendingResolve = resolveCode;
@@ -311,9 +319,9 @@ const exchangeAuthorizationCode = async (
   };
 };
 
-const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWindow | null): Promise<StudentOAuthTokens> => {
+export const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWindow | null, examSession = false): Promise<StudentOAuthTokens> => {
   if (binding.provider === "google-classroom" && usesPublisherGoogleConnection(binding.googleAuthMode, binding.clientId)) {
-    return beginHostedGoogleSignIn("student", (url) => shell.openExternal(url));
+    return beginHostedGoogleSignIn("student", (url) => shell.openExternal(url), examSession);
   }
   if (!binding.clientId.trim()) {
     throw new Error("This package is missing the LMS OAuth client ID.");
@@ -339,6 +347,14 @@ const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWi
 
   const authUrl = new URL(providerAuthorizeUrl(binding));
   params.forEach((value, key) => authUrl.searchParams.set(key, value));
+  if (binding.provider === "google-classroom") {
+    const code = authorization.waitForCode();
+    void code.catch(() => {});
+    try {
+      await shell.openExternal(authUrl.toString());
+      return await exchangeAuthorizationCode(binding, await code, authorization.redirectUri, pkce.verifier);
+    } finally { authorization.cancel(); }
+  }
   const authWindow = await openOAuthWindow(parentWindow, authUrl.toString());
 
   try {
@@ -349,10 +365,30 @@ const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWi
     const code = await Promise.race([codePromise, closedPromise]);
     return exchangeAuthorizationCode(binding, code, authorization.redirectUri, pkce.verifier);
   } finally {
+    authorization.cancel();
     if (!authWindow.isDestroyed()) {
       authWindow.close();
     }
   }
+};
+
+export const refreshStudentSignIn = async (binding: StudentLmsBinding, tokens: StudentOAuthTokens): Promise<StudentOAuthTokens> => {
+  if (tokens.expiresAt && Date.parse(tokens.expiresAt) > Date.now() + 60_000) return tokens;
+  if (tokens.sessionToken) {
+    const refreshed = await refreshHostedGoogleToken(tokens.sessionToken);
+    return { ...tokens, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt };
+  }
+  if (!tokens.refreshToken) throw new Error("Student Google authorization expired. The result is saved; ask the invigilator to release the exam before reconnecting. Lockdown has not been released.");
+  const body = new URLSearchParams({ client_id: binding.clientId, grant_type: "refresh_token", refresh_token: tokens.refreshToken });
+  if (binding.clientSecret?.trim()) body.set("client_secret", binding.clientSecret.trim());
+  const response = await fetch(providerTokenUrl(binding), { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(20_000) });
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok || typeof payload.access_token !== "string") throw new Error("Student LMS authorization could not be refreshed. The result is saved. Ask the invigilator to release the exam before reconnecting.");
+  return { ...tokens, accessToken: payload.access_token, expiresAt: new Date(Date.now() + Number(payload.expires_in ?? 300) * 1000).toISOString() };
+};
+
+export const disconnectStudentSignIn = async (tokens: StudentOAuthTokens): Promise<void> => {
+  if (tokens.sessionToken) await disconnectHostedGoogle(tokens.sessionToken, false);
 };
 
 const fetchJson = async <T>(url: string, init: RequestInit, fallbackMessage: string): Promise<T> => {
@@ -702,12 +738,14 @@ export const turnInSubmissionToLms = async (
     throw new Error("This package is missing the LMS course or assignment reference.");
   }
 
-  const tokens = await signInStudent(binding, parentWindow);
+  const accessToken = options.studentAccessToken ?? (options.allowInteractiveSignIn === false
+    ? null : (await signInStudent(binding, parentWindow)).accessToken);
+  if (!accessToken) throw new Error("Student sign-in must finish before the exam starts. The result is saved; lockdown has not been released.");
   const artifact = await buildSubmissionArtifact(parentWindow, exam, submission);
 
   if (binding.provider === "google-classroom") {
-    return turnInGoogleClassroom(binding, tokens.accessToken, artifact, submission, options);
+    return turnInGoogleClassroom(binding, accessToken, artifact, submission, options);
   }
 
-  return turnInMicrosoft365(binding, tokens.accessToken, artifact);
+  return turnInMicrosoft365(binding, accessToken, artifact);
 };

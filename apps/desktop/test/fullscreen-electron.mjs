@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -79,7 +79,8 @@ try {
   `;
   await writeFile(join(directory, 'fixture.cjs'), fixture);
   const { mkdir } = await import('node:fs/promises');
-  const screenshots = resolve('tmp/acceptance-fullscreen-0.6.63');
+  const version = JSON.parse(await readFile('apps/desktop/package.json', 'utf8')).version;
+  const screenshots = resolve(`tmp/acceptance-fullscreen-${version}`);
   await mkdir(screenshots, { recursive: true });
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;

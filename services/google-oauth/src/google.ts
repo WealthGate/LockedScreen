@@ -8,7 +8,7 @@ export interface GoogleTokens {
   expiresAt: string;
   profile?: { email: string; name?: string };
 }
-export interface AuthorizationData { verifier: string; nonce: string }
+export interface AuthorizationData { verifier: string; nonce: string; examSession?: boolean }
 export interface GoogleProvider {
   authorize(config: GoogleConfig, role: Role, state: string, auth: AuthorizationData): Promise<string>;
   exchange(config: GoogleConfig, callback: URL, state: string, auth: AuthorizationData, role: Role): Promise<GoogleTokens>;
@@ -40,8 +40,8 @@ export const googleProvider: GoogleProvider = {
       client_id: config.GOOGLE_CLIENT_ID, redirect_uri: config.GOOGLE_REDIRECT_URI,
       response_type: "code", scope: scopesFor(role).join(" "), state, nonce: auth.nonce,
       code_challenge: await oauth.calculatePKCECodeChallenge(auth.verifier), code_challenge_method: "S256",
-      access_type: role === "teacher" ? "offline" : "online",
-      prompt: role === "teacher" ? "consent select_account" : "select_account"
+      access_type: role === "teacher" || auth.examSession ? "offline" : "online",
+      prompt: role === "teacher" || auth.examSession ? "consent select_account" : "select_account"
     }).toString();
     return url.href;
   },
@@ -62,7 +62,7 @@ export const googleProvider: GoogleProvider = {
       throw new Error("Required Google permissions were not granted.");
     }
     return {
-      accessToken: tokens.access_token, refreshToken: role === "teacher" ? tokens.refresh_token : undefined,
+      accessToken: tokens.access_token, refreshToken: role === "teacher" || auth.examSession ? tokens.refresh_token : undefined,
       expiresAt: expiresAt(tokens.expires_in),
       profile: { email: claims.email, name: typeof claims.name === "string" ? claims.name : undefined }
     };

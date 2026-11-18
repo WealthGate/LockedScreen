@@ -1,6 +1,6 @@
 # Lockedscreen Privacy Policy
 
-Effective date: November 17, 2026
+Effective date: November 18, 2026
 
 Lockedscreen is a Windows desktop application for secure exam delivery, classroom assignment setup, and optional learning-management-system integrations such as Google Classroom.
 
@@ -8,7 +8,7 @@ Lockedscreen is a Windows desktop application for secure exam delivery, classroo
 
 Depending on how a school configures the app, Lockedscreen may process:
 
-- Teacher account information returned by Google sign-in, such as name and email address.
+- Teacher or student account information returned by Google sign-in, such as name and email address.
 - Google Classroom class, coursework, roster, and assignment information needed to connect exams to a selected class or assignment.
 - Student exam information entered into the app, such as student name, candidate ID, class, answers, scores, submission time, and result sync status.
 - Local app configuration, such as school settings, exam packages, allowed apps, exam start codes, and invigilator/admin settings.
@@ -51,11 +51,17 @@ browser, not into LockedScreen or the connection service.
 
 The service processes the Google account name and verified email address, temporary
 authorization codes, and OAuth access and refresh tokens needed for the connection.
-Teacher connection records are encrypted in D1. The publisher OAuth client secret
+Teacher connection records and temporary student exam authorizations are encrypted in D1. The publisher OAuth client secret
 and token encryption key are held separately as Cloudflare Secrets. The desktop keeps
 an opaque per-device service credential and short-lived Google access tokens in its
 OS-encrypted vault. Exam files do not contain the publisher Web client secret or the
-teacher's service credential or refresh token.
+teacher's service credential or refresh token. Student Google sign-in completes before
+exam lockdown starts. Its temporary service credential is held in the desktop main
+process, not exposed to the exam page or exported packages. For a separate secure
+Windows desktop, a one-use handoff is encrypted with Windows protection and expires
+after two minutes. The handoff file is removed when collected; abandoned expired
+handoffs are cleaned on a later handoff attempt. A crash can leave an encrypted,
+unusable expired file until that cleanup or local app-data deletion.
 
 The connection service does not receive exam answers, scores, uploaded exam files,
 or Classroom rosters through its OAuth endpoints. The desktop accesses Google APIs
@@ -89,8 +95,13 @@ Data retention depends on the school configuration and the local Windows install
 Publisher-managed teacher service sessions expire after 30 days and require reconnection.
 Temporary sign-in records expire after at most 10 minutes, with successfully approved
 handoffs available for one-time collection for 60 seconds. Expired service records are
-removed by an hourly cleanup job. Students do not receive a persistent hosted service
-session or Google refresh token from this service.
+removed by an hourly cleanup job. Students signing in before an exam receive a
+temporary student-only service credential lasting at most 12 hours, so Google access
+can be refreshed without opening a browser during an exam. Google refresh tokens
+remain encrypted on the service and are not returned to the student desktop. Normal
+invigilator exit requests deletion of the temporary service session; if the device
+crashes or is offline, server expiry still applies. Older post-exam student sign-in
+flows receive only a short-lived access token and no service session.
 
 Disconnecting a hosted connection deletes its active service session when the service
 is reachable. Revoking Google access also asks Google to invalidate the authorization;

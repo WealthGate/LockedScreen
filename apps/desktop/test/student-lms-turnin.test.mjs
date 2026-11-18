@@ -24,6 +24,8 @@ const compiled = await build({ entryPoints: ['apps/desktop/src/main/student-lms-
         await open('https://auth.example/fictional-flow');
         return { accessToken: 'fictional-student-token' };
       };
+      export const refreshHostedGoogleToken = async () => ({ accessToken: 'fictional-refreshed-token' });
+      export const disconnectHostedGoogle = async () => {};
     ` }));
   } }] });
 const { turnInSubmissionToLms } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
@@ -80,6 +82,17 @@ test('student-only devices turn in without acquiring or using teacher grading cr
   assert.equal(result.gradeSyncStatus, 'skipped');
   assert.match(result.gradeSyncError, /teacher.*connection/);
   assert.equal(state.requests.some(request => request.method === 'PATCH'), false);
+});
+
+test('prepared student authorization sends while locked without opening Google, and missing credentials never fall back to a browser', async () => {
+  const state = scenario();
+  const result = await turnInSubmissionToLms(null, config, exam, saved, { studentAccessToken: 'prepared-student', allowInteractiveSignIn: false });
+  assert.equal(result.status, 'success');
+  assert.deepEqual(state.events, []);
+  assert.equal(state.requests[0].headers.Authorization, 'Bearer prepared-student');
+  scenario();
+  await assert.rejects(turnInSubmissionToLms(null, config, exam, saved, { allowInteractiveSignIn: false }), /before the exam starts/);
+  assert.deepEqual(globalThis.studentTurnInTest.events, []);
 });
 
 test('expired teacher authorization is a retryable grade failure, not a student submission failure', async () => {
