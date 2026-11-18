@@ -251,6 +251,7 @@ export interface StudentLmsTurnInState {
   lastAttemptAt?: string;
   submittedAt?: string;
   externalReference?: string;
+  studentSubmissionId?: string;
   lastError?: string;
   gradeSyncStatus?: StudentLmsGradeSyncStatus;
   gradeSyncedAt?: string;

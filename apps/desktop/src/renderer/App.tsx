@@ -67,6 +67,7 @@ import { RichContent } from "./components/rich-content";
 import { RichContentEditor } from "./components/rich-content-editor";
 import { useLockedscreenStore } from "./lib/store";
 import { waitForSessionRelease } from "./lib/session-release";
+import { needsStudentLmsTurnIn } from "./lib/lms-turn-in";
 
 const teacherNavItems = [
   { to: "/teacher", label: "Dashboard", icon: LayoutDashboard },
@@ -6347,7 +6348,9 @@ const StudentLmsTurnInPanel = ({
   const state = submission.studentLmsTurnIn;
   const hostedGoogle = binding.provider === "google-classroom" && usesPublisherGoogleConnection(binding.googleAuthMode, binding.clientId);
   const status = state?.status ?? "pending";
-  const actionLabel = status === "success" ? "Turned in" : turningIn ? "Connecting..." : "Turn in to LMS";
+  const followUpRequired = needsStudentLmsTurnIn(binding, state);
+  const actionLabel = turningIn ? "Connecting..." : status === "success"
+    ? followUpRequired ? "Retry grade sync" : "Turned in" : "Turn in to LMS";
   const providerName = providerLabel(binding.provider);
   const gradeValue = typeof state?.gradeValue === "number" ? `${state.gradeValue} points` : null;
   const completionMessage =
@@ -6373,11 +6376,11 @@ const StudentLmsTurnInPanel = ({
               : "Sign in with the student LMS account to attach the Lockedscreen performance report and complete the turn-in."}
           </CardDescription>
         </div>
-        <Button className="px-3 py-2" onClick={() => onTurnIn(releasePin)} disabled={turningIn || status === "success" || (releaseRequired && !releasePin.trim())}>
+        <Button className="px-3 py-2" onClick={() => onTurnIn(releasePin)} disabled={turningIn || !followUpRequired || (releaseRequired && !releasePin.trim())}>
           {actionLabel}
         </Button>
       </div>
-      {releaseRequired && status !== "success" ? (
+      {releaseRequired && followUpRequired ? (
         <LabelledField label="Invigilator PIN for release and LMS turn-in">
           <Input type="password" autoComplete="off" value={releasePin} onChange={(event) => setReleasePin(event.target.value)} />
         </LabelledField>
@@ -6468,10 +6471,28 @@ const StudentExamPage = () => {
     [endSession]
   );
 
+  const handleStudentTurnIn = useCallback(async (submissionId: string, pin?: string) => {
+    if (!configPackage) return null;
+    setTurningIn(true);
+    try {
+      const updated = await turnInStudentLms({ submissionId, packageId: configPackage.id, pin });
+      if (updated) {
+        setSubmissionResult(updated);
+        if (!useLockedscreenStore.getState().snapshot?.activeSession) sessionEndedRef.current = true;
+      }
+      return updated;
+    } finally { setTurningIn(false); }
+  }, [configPackage, turnInStudentLms]);
+
   const releaseToStudentPortal = useCallback(async (pin?: string) => {
+    if (submitted && submissionResult && locked && needsStudentLmsTurnIn(configPackage?.studentLmsBinding, submissionResult.studentLmsTurnIn)) {
+      const updated = await handleStudentTurnIn(submissionResult.id, pin);
+      if (!updated) throw new Error(useLockedscreenStore.getState().error ?? "LMS turn-in did not complete. Check the saved result and retry.");
+      return;
+    }
     await endCurrentSession("Invigilator released native exam runtime", pin);
     navigate("/student", { replace: true });
-  }, [endCurrentSession, navigate]);
+  }, [submitted, submissionResult, locked, configPackage, handleStudentTurnIn, endCurrentSession, navigate]);
 
   useEffect(() => {
     if (!sessionExamId || !sessionPackageId) {
@@ -6496,19 +6517,6 @@ const StudentExamPage = () => {
     setTurningIn(false);
     setSubmissionResult(null);
   }, [sessionExamId, location.search]);
-
-  const handleStudentTurnIn = async (submissionId: string, pin?: string) => {
-    if (!configPackage) {
-      return;
-    }
-
-    setTurningIn(true);
-    const updatedSubmission = await turnInStudentLms({ submissionId, packageId: configPackage.id, pin });
-    if (updatedSubmission) {
-      setSubmissionResult(updatedSubmission);
-    }
-    setTurningIn(false);
-  };
 
   const finalize = async () => {
     if (submitted || submitting || !session || !exam) {
@@ -6567,6 +6575,7 @@ const StudentExamPage = () => {
       configPackage={configPackage}
       session={session}
       sessionSubmitted={submitted}
+      turnInOnRelease={submitted && locked && needsStudentLmsTurnIn(configPackage?.studentLmsBinding, submissionResult?.studentLmsTurnIn)}
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
@@ -6777,10 +6786,28 @@ const LinkExamPage = () => {
     [endSession]
   );
 
+  const handleStudentTurnIn = useCallback(async (submissionId: string, pin?: string) => {
+    if (!configPackage) return null;
+    setTurningIn(true);
+    try {
+      const updated = await turnInStudentLms({ submissionId, packageId: configPackage.id, pin });
+      if (updated) {
+        setSubmissionResult(updated);
+        if (!useLockedscreenStore.getState().snapshot?.activeSession) sessionEndedRef.current = true;
+      }
+      return updated;
+    } finally { setTurningIn(false); }
+  }, [configPackage, turnInStudentLms]);
+
   const releaseToStudentPortal = useCallback(async (pin?: string) => {
+    if (submitted && submissionResult && locked && needsStudentLmsTurnIn(configPackage?.studentLmsBinding, submissionResult.studentLmsTurnIn)) {
+      const updated = await handleStudentTurnIn(submissionResult.id, pin);
+      if (!updated) throw new Error(useLockedscreenStore.getState().error ?? "LMS turn-in did not complete. Check the saved result and retry.");
+      return;
+    }
     await endCurrentSession("Invigilator released hosted exam runtime", pin);
     navigate("/student", { replace: true });
-  }, [endCurrentSession, navigate]);
+  }, [submitted, submissionResult, locked, configPackage, handleStudentTurnIn, endCurrentSession, navigate]);
 
   useEffect(() => {
     if (!sessionExamId || !sessionPackageId) {
@@ -6921,6 +6948,7 @@ const LinkExamPage = () => {
       configPackage={configPackage}
       session={session}
       sessionSubmitted={submitted}
+      turnInOnRelease={submitted && locked && needsStudentLmsTurnIn(configPackage?.studentLmsBinding, submissionResult?.studentLmsTurnIn)}
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
@@ -6946,19 +6974,10 @@ const LinkExamPage = () => {
                 submission={submissionResult}
                 turningIn={turningIn}
                 onTurnIn={(pin) => {
-                  if (!submissionResult || !configPackage) {
+                  if (!submissionResult) {
                     return;
                   }
-
-                  setTurningIn(true);
-                  void turnInStudentLms({ submissionId: submissionResult.id, packageId: configPackage.id, pin }).then(
-                    (updatedSubmission) => {
-                      if (updatedSubmission) {
-                        setSubmissionResult(updatedSubmission);
-                      }
-                      setTurningIn(false);
-                    }
-                  );
+                  void handleStudentTurnIn(submissionResult.id, pin);
                 }}
               />
             </div>
@@ -7078,6 +7097,7 @@ const StudentShell = ({
   configPackage,
   session,
   sessionSubmitted,
+  turnInOnRelease = false,
   secureMode,
   testingModeName,
   unlockPin,
@@ -7092,6 +7112,7 @@ const StudentShell = ({
   configPackage: ExamConfigPackage | null;
   session: ExamSession;
   sessionSubmitted: boolean;
+  turnInOnRelease?: boolean;
   secureMode: boolean;
   testingModeName: string;
   unlockPin: string;
@@ -7372,14 +7393,11 @@ const StudentShell = ({
                 <CardTitle>{sessionSubmitted ? "Invigilator release required" : "Invigilator unlock required"}</CardTitle>
               </div>
               <CardDescription className="max-w-2xl">
-                {invigilatorPinRequired
-                  ? sessionSubmitted
-                    ? "This exam has already been submitted. The session remains locked until the invigilator enters the PIN and releases the student."
-                    : "Exit from the active exam session requires the invigilator PIN. The same PIN can be used to save an in-app screenshot without relying on blocked OS shortcuts."
-                  : sessionSubmitted
-                    ? "This exam has already been submitted. Use the release action below to leave the controlled session."
-                    : "Use the release action below to leave the controlled session."}{" "}
-                Complete suppression of the Windows key and task switching must still be enforced by a verified native Windows companion or official kiosk deployment.
+                {!sessionSubmitted
+                  ? "This exam has not been submitted. Releasing now will not send a result or grade to Classroom."
+                  : turnInOnRelease
+                    ? "Your result is saved. A valid invigilator PIN releases lockdown, then starts LMS turn-in."
+                    : "Your result is saved. Invigilator release is required before leaving the controlled session."}
               </CardDescription>
               {invigilatorPinRequired ? (
                 <div className="mt-4 max-w-sm space-y-3">
@@ -7421,7 +7439,7 @@ const StudentShell = ({
                 {capturePending ? "Saving..." : "Save screenshot"}
               </Button> : null}
               <Button className="px-3 py-2" onClick={attemptUnlock} disabled={capturePending || releasePending}>
-                {releasePending ? "Releasing..." : sessionSubmitted ? "Release student" : "Unlock session"}
+                {releasePending ? "Releasing..." : turnInOnRelease ? "Release and turn in" : sessionSubmitted ? "Release student" : "Unlock session"}
               </Button>
             </div>
           </div>

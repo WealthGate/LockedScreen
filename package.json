@@ -1,6 +1,6 @@
 {
   "name": "lockedscreen",
-  "version": "0.6.62",
+  "version": "0.6.63",
   "private": true,
   "packageManager": "npm@10.8.2",
   "engines": { "node": ">=24.0.0" },

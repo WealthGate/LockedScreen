@@ -24,15 +24,17 @@ const server = createServer(async (req, res) => {
   } catch { res.writeHead(404); res.end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const out = resolve('tmp/acceptance-0.6.62-ui');
+const version = JSON.parse(await readFile('apps/desktop/package.json', 'utf8')).version;
+const out = resolve(`tmp/acceptance-${version}-ui`);
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, executablePath: process.env.LOCKEDSCREEN_CHROME || undefined });
 try {
   for (const width of [1360, 390]) {
+   for (const scenario of ['hold', 'lms']) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.addInitScript(({ fixture, exam }) => {
+    await page.addInitScript(({ fixture, exam, scenario }) => {
       let state = structuredClone(fixture);
       state.installedRole = 'teacher';
       state.runtime = { platform: 'win32', nativeLockdown: { lockdownCapable: true }, canOnlyUseTestingMode: false };
@@ -40,7 +42,18 @@ try {
       const context = { installedRole: 'teacher', nativeHosted: false, packageImport: null,
         route: `/session/${exam.id}?candidateName=Practice%20Student&candidateId=test-candidate` };
       const snapshot = () => structuredClone(state);
+      const events = [];
+      let turnInAttempts = 0;
+      if (scenario === 'lms') {
+        const practice = state.exams.find(item => item.id === exam.id);
+        practice.questions = [practice.questions[0]];
+        const config = state.configPackages.find(item => item.examId === exam.id);
+        config.externalDeliveryMode = 'integrations';
+        config.studentLmsBinding = { ...config.studentLmsBinding, enabled: true, provider: 'google-classroom',
+          googleAuthMode: 'publisher-hosted', courseId: 'practice-course', assignmentId: 'practice-assignment' };
+      }
       window.testExam = {
+        events,
         switchView(route) { callbacks.launch?.({ ...context, route }); },
         pause() { state.activeSession.securityHold = 'Simulated protection failure'; callbacks.hold?.(); }
       };
@@ -55,16 +68,62 @@ try {
         },
         endSession: async (_reason, pin) => {
           if (pin !== '987654') throw new Error('Incorrect invigilator PIN. The exam remains locked.');
+          events.push('end-session');
           delete state.activeSession;
           return snapshot();
+        },
+        submitExam: async ({ exam, session }) => {
+          events.push('submit');
+          const result = { id: 'practice-submission', examId: exam.id, examTitle: exam.title,
+            candidateName: 'Practice Student', candidateId: 'test-candidate', score: 1, totalPoints: 1, percentage: 100,
+            submittedAt: new Date().toISOString(), responses: session.responses, syncStates: [],
+            studentLmsTurnIn: { provider: 'google-classroom', status: 'pending' } };
+          state.submissions.push(result);
+          return { result: structuredClone(result), snapshot: snapshot() };
+        },
+        turnInStudentLms: async ({ submissionId, pin }) => {
+          if (state.activeSession && pin !== '987654') throw new Error('Incorrect invigilator PIN. The exam remains locked.');
+          if (state.activeSession) { delete state.activeSession; events.push('release'); }
+          events.push('google-sign-in');
+          turnInAttempts++;
+          const result = state.submissions.find(item => item.id === submissionId);
+          result.studentLmsTurnIn = { provider: 'google-classroom', status: 'success',
+            gradeSyncStatus: turnInAttempts === 1 ? 'failed' : 'success',
+            gradeSyncError: turnInAttempts === 1 ? 'Simulated temporary grade failure' : undefined,
+            gradeValue: turnInAttempts === 1 ? undefined : 100 };
+          return { state: structuredClone(result.studentLmsTurnIn), submission: structuredClone(result), snapshot: snapshot() };
         }
       }, { get: (target, key) => target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null) });
-    }, { fixture, exam });
+    }, { fixture, exam, scenario });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const unlock = page.getByRole('button', { name: 'Invigilator unlock', exact: true });
     await unlock.waitFor();
     await page.getByText('What is the chemical symbol for sodium?', { exact: true }).waitFor();
     await page.getByText('Na', { exact: true }).click();
+    if (scenario === 'lms') {
+      await page.getByRole('button', { name: 'Submit exam', exact: true }).click();
+      await page.getByText('Your grade', { exact: true }).waitFor();
+      await unlock.click();
+      const pin = page.getByPlaceholder('Enter invigilator PIN');
+      await pin.fill('wrong');
+      await page.getByRole('button', { name: 'Release and turn in', exact: true }).click();
+      await page.getByText(/Incorrect invigilator PIN\. The exam remains locked\./).waitFor();
+      assert.deepEqual(await page.evaluate(() => window.testExam.events), ['submit']);
+      await pin.fill('987654');
+      await page.getByRole('button', { name: 'Release and turn in', exact: true }).click();
+      await page.getByRole('button', { name: 'Retry grade sync', exact: true }).waitFor();
+      assert.deepEqual(await page.evaluate(() => window.testExam.events), ['submit', 'release', 'google-sign-in']);
+      await page.getByText('Your grade', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Retry grade sync', exact: true }).click();
+      await page.getByText('Grade synced to Google Classroom', { exact: true }).waitFor();
+      assert.deepEqual(await page.evaluate(() => window.testExam.events), ['submit', 'release', 'google-sign-in', 'google-sign-in']);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+      assert.deepEqual(errors, []);
+      await page.screenshot({ path: join(out, `lms-release-${width}.png`), fullPage: true });
+      await page.close();
+      console.log(`PASS: ${width}px submitted result + global PIN release starts LMS, rejects wrong PIN, retains result and retries failed grade (mock IPC).`);
+      continue;
+    }
     await page.evaluate(() => window.testExam.switchView('/teacher'));
     await page.waitForTimeout(250);
     assert.equal(await unlock.count(), 1, 'Teacher launch must not replace the active exam');
@@ -91,6 +150,7 @@ try {
     assert.deepEqual(errors, []);
     await page.close();
     console.log(`PASS: ${width}px active routing, wrong PIN, masked PIN, protection hold and correct release (mock IPC; no OS hooks).`);
+  }
   }
 } finally {
   await browser.close();

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
 import { makePdf } from './fixtures/practice-pdf.mjs';
 
 const require = createRequire(import.meta.url);
 const { _electron } = require(process.env.LOCKEDSCREEN_PLAYWRIGHT_MODULE || 'playwright');
-const archive = resolve(process.argv[2] || 'apps/desktop/dist-store/0.6.62/win-unpacked/resources/app.asar');
+const version = JSON.parse(await readFile('apps/desktop/package.json', 'utf8')).version;
+const archive = resolve(process.argv[2] || `apps/desktop/dist-store/${version}/win-unpacked/resources/app.asar`);
 const root = resolve('tmp'); await mkdir(root, { recursive: true });
 const directory = await mkdtemp(join(root, 'acceptance-electron-'));
 const canvas = createCanvas(1200, 480), ctx = canvas.getContext('2d');

@@ -316,7 +316,7 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
   turnInStudentLms: async (payload) => {
     const response = await withGuard(() => window.lockedscreenApi.turnInStudentLms(payload), (error) => set({ error }));
     if (response) {
-      set({ snapshot: response.snapshot });
+      set({ snapshot: response.snapshot, error: null });
       return response.submission;
     }
     return null;

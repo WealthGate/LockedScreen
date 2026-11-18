@@ -1538,6 +1538,7 @@ app.whenReady().then(async () => {
 
     try {
       let teacherAccessToken: string | undefined;
+      let teacherAccessTokenError: string | undefined;
       const binding = configPackage.studentLmsBinding;
       if (binding.provider === "google-classroom" && binding.connectionId) {
         const teacherConnection = snapshot.lmsConnections.find((candidate) => candidate.id === binding.connectionId);
@@ -1546,11 +1547,14 @@ app.whenReady().then(async () => {
             teacherAccessToken = await getConnectionAccessToken(teacherConnection, oauthVault, snapshot.settings.googleIntegration);
           } catch {
             teacherAccessToken = undefined;
+            teacherAccessTokenError = "The teacher Google connection could not be refreshed. Reconnect the teacher account on this device, then retry grade sync.";
           }
+        } else if (teacherConnection) {
+          teacherAccessTokenError = "The teacher Google connection is not connected. Reconnect it on this device, then retry grade sync.";
         }
       }
 
-      const state = await turnInSubmissionToLms(mainWindow, configPackage, exam, submission, { teacherAccessToken });
+      const state = await turnInSubmissionToLms(mainWindow, configPackage, exam, submission, { teacherAccessToken, teacherAccessTokenError });
       const nextSnapshot = await storage.updateSubmissionStudentLmsTurnIn(submission.id, state);
       const updatedSubmission = nextSnapshot.submissions.find((candidate) => candidate.id === submission.id);
       if (!updatedSubmission) {

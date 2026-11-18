@@ -12,6 +12,7 @@ test('hosted navigation filters redirects, programmatic loads, popups and webvie
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: `
         export const BrowserWindow = { getAllWindows: () => [] };
         export const clipboard = { clear() {} };
+        export const screen = { getDisplayMatching: () => ({ bounds: { x: 0, y: 0, width: 1920, height: 1080 } }) };
         const state = globalThis.examNavigationTest;
         export const session = { fromPartition: () => ({
           webRequest: { onBeforeRequest: callback => { state.request = callback; } },

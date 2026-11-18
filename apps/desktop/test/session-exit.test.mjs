@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { createExamWindow } from './fixtures/exam-window.mjs';
 
 test('managed exit releases window and session despite cleanup or audit failures', async (t) => {
-  const state = { clearStorageData: async () => {}, clearCache: async () => {} };
+  const display = { bounds: { x: 0, y: 0, width: 1920, height: 1080 } };
+  const state = { clearStorageData: async () => {}, clearCache: async () => {}, display };
   globalThis.sessionExitTest = state;
   const result = await build({
     entryPoints: ['apps/desktop/src/main/security/session-controller.ts'],
@@ -13,6 +15,7 @@ test('managed exit releases window and session despite cleanup or audit failures
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: `
         export const BrowserWindow = { getAllWindows: () => [] };
         export const clipboard = { clear() {} };
+        export const screen = { getDisplayMatching: () => globalThis.sessionExitTest.display };
         export const session = { fromPartition: () => globalThis.sessionExitTest };
       ` }));
     } }]
@@ -24,17 +27,8 @@ test('managed exit releases window and session despite cleanup or audit failures
     clipboardPolicy: { mode: 'allow' },
     browserPolicy: { startUrl: 'https://example.org/exam', allowedDomains: ['example.org'], urlRules: [] }
   };
-  const windowState = {};
-  const window = {
-    isDestroyed: () => false, isKiosk: () => windowState.kiosk ?? false,
-    isFullScreen: () => windowState.fullscreen ?? false, isAlwaysOnTop: () => windowState.top ?? false,
-    isResizable: () => true, isMinimizable: () => true, isMovable: () => true, isMaximizable: () => true,
-    isFocused: () => true, isMinimized: () => false,
-    setKiosk: value => { windowState.kiosk = value; }, setResizable() {}, setMinimizable() {},
-    setMaximizable() {}, setMovable() {}, setContentProtection() {}, on() {}, removeListener() {}, show() {}, focus() {},
-    setAlwaysOnTop: value => { windowState.top = value; },
-    setFullScreen: value => { windowState.fullscreen = value; }
-  };
+  const window = createExamWindow(display);
+  const windowState = window.state;
   const audit = async () => {};
   t.mock.method(console, 'warn', () => {});
   try {

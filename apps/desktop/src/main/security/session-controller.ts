@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
-import { BrowserWindow, clipboard, session as electronSession, type Input, type WebContents } from "electron";
+import { BrowserWindow, clipboard, screen, session as electronSession, type Input, type WebContents } from "electron";
 
 import type { ExamConfigPackage, NavigationGuard, SessionStartRequest } from "@lockedscreen/shared-types";
 import { isSameSession } from "./session-policy";
@@ -274,15 +274,44 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
   }
 };
 
-let restoreWindow: (() => void) | null = null;
+let restoreWindow: (() => Promise<void>) | null = null;
+let reinforcingWindow = false;
 
-export const reinforceExamWindow = (browserWindow: BrowserWindow | null): void => {
-  if (!activeSession || !browserWindow || browserWindow.isDestroyed()) return;
-  if (browserWindow.isMinimized()) browserWindow.restore();
-  if (!browserWindow.isKiosk()) browserWindow.setKiosk(true);
-  browserWindow.setAlwaysOnTop(true, "screen-saver");
-  browserWindow.show();
-  browserWindow.focus();
+export const isExamWindowFullscreen = (browserWindow: BrowserWindow): boolean => {
+  if (browserWindow.isDestroyed() || browserWindow.isMinimized() || !browserWindow.isKiosk() || !browserWindow.isFullScreen()) return false;
+  const display = screen.getDisplayMatching(browserWindow.getBounds()).bounds;
+  const coversDisplay = (bounds: Electron.Rectangle): boolean =>
+    (["x", "y", "width", "height"] as const).every(key => Math.abs(bounds[key] - display[key]) <= 1);
+  return coversDisplay(browserWindow.getBounds()) && coversDisplay(browserWindow.getContentBounds());
+};
+
+export const reinforceExamWindow = (browserWindow: BrowserWindow | null): boolean => {
+  if (!activeSession || !browserWindow || browserWindow.isDestroyed()) return false;
+  if (reinforcingWindow) return isExamWindowFullscreen(browserWindow);
+  reinforcingWindow = true;
+  try {
+    if (browserWindow.isMinimized()) browserWindow.restore();
+    if (!isExamWindowFullscreen(browserWindow)) {
+      // On Windows, disabling resize pins min/max to the current size. Unpin
+      // before entering or repairing fullscreen, then restrict the full-size window.
+      browserWindow.setResizable(true);
+      browserWindow.setMaximizable(true);
+      browserWindow.setFullScreenable(true);
+      browserWindow.setMinimumSize(0, 0);
+      browserWindow.setMaximumSize(0, 0);
+      browserWindow.setBounds(screen.getDisplayMatching(browserWindow.getBounds()).bounds, false);
+      browserWindow.setKiosk(true);
+      if (!browserWindow.isFullScreen()) browserWindow.setFullScreen(true);
+    }
+    if (isExamWindowFullscreen(browserWindow)) {
+      browserWindow.setResizable(false);
+      browserWindow.setMaximizable(false);
+    }
+    browserWindow.setAlwaysOnTop(true, "screen-saver");
+    browserWindow.show();
+    browserWindow.focus();
+    return isExamWindowFullscreen(browserWindow);
+  } finally { reinforcingWindow = false; }
 };
 
 const applyWindowState = async (browserWindow: BrowserWindow | null, configPackage: ExamConfigPackage | null): Promise<void> => {
@@ -296,44 +325,85 @@ const applyWindowState = async (browserWindow: BrowserWindow | null, configPacka
       kiosk: browserWindow.isKiosk(), fullscreen: browserWindow.isFullScreen(),
       top: browserWindow.isAlwaysOnTop(), resizable: browserWindow.isResizable(),
       minimizable: browserWindow.isMinimizable(), movable: browserWindow.isMovable(),
-      maximizable: browserWindow.isMaximizable()
+      maximizable: browserWindow.isMaximizable(), fullscreenable: browserWindow.isFullScreenable(),
+      bounds: browserWindow.getBounds(), minimum: browserWindow.getMinimumSize(),
+      maximum: browserWindow.getMaximumSize(), maximized: browserWindow.isMaximized()
     };
-    browserWindow.setResizable(false);
     browserWindow.setMinimizable(false);
-    browserWindow.setMaximizable(false);
     browserWindow.setMovable(false);
     browserWindow.setContentProtection(true);
-    const recover = () => reinforceExamWindow(browserWindow);
-    browserWindow.on("blur", recover);
-    browserWindow.on("minimize", recover);
-    browserWindow.on("leave-full-screen", recover);
-    const timer = setInterval(() => {
-      if (!browserWindow.isDestroyed() && (!browserWindow.isFocused() || !browserWindow.isKiosk() || browserWindow.isMinimized())) recover();
-    }, 500);
-    restoreWindow = () => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const recover = () => {
+      if (!activeSession || reinforcingWindow || browserWindow.isDestroyed()) return;
+      try {
+        if (reinforceExamWindow(browserWindow)) return;
+      } catch { /* The exam is held below if full display coverage cannot be recovered. */ }
+      const reason = "Fullscreen protection could not be restored. Ask the invigilator to release this exam.";
+      holdManagedSession(reason);
+      browserWindow.webContents.send("session:securityHold", { reason });
+    };
+    restoreWindow = async () => {
       clearInterval(timer);
       browserWindow.removeListener("blur", recover);
       browserWindow.removeListener("minimize", recover);
       browserWindow.removeListener("leave-full-screen", recover);
+      browserWindow.removeListener("resize", recover);
+      browserWindow.removeListener("move", recover);
       if (browserWindow.isDestroyed()) return;
+      // Release fullscreen-size constraints before restoring the normal window.
+      browserWindow.setResizable(true);
+      browserWindow.setFullScreenable(true);
+      browserWindow.setMinimumSize(0, 0);
+      browserWindow.setMaximumSize(0, 0);
       browserWindow.setKiosk(previous.kiosk);
-      browserWindow.setFullScreen(previous.fullscreen);
+      if (browserWindow.isFullScreen() !== previous.fullscreen) browserWindow.setFullScreen(previous.fullscreen);
+      browserWindow.setMovable(true);
+      browserWindow.setMaximizable(true);
+      if (!previous.kiosk && !previous.fullscreen) {
+        browserWindow.restore();
+        if (previous.maximized) {
+          browserWindow.setMaximizable(true);
+          browserWindow.maximize();
+        } else {
+          // Chromium can finish the Windows fullscreen transition on a later turn.
+          const deadline = Date.now() + 500;
+          do {
+            browserWindow.setBounds(previous.bounds, false);
+            if ((["x", "y", "width", "height"] as const).every(key => Math.abs(browserWindow.getBounds()[key] - previous.bounds[key]) <= 1)) break;
+            await new Promise(resolve => setTimeout(resolve, 25));
+          } while (!browserWindow.isDestroyed() && Date.now() < deadline);
+          if (browserWindow.isDestroyed()) return;
+        }
+      }
       browserWindow.setAlwaysOnTop(previous.top, "screen-saver");
       browserWindow.setResizable(previous.resizable);
+      browserWindow.setMinimumSize(previous.minimum[0] ?? 0, previous.minimum[1] ?? 0);
+      browserWindow.setMaximumSize(previous.maximum[0] ?? 0, previous.maximum[1] ?? 0);
       browserWindow.setMinimizable(previous.minimizable);
       browserWindow.setMaximizable(previous.maximizable);
       browserWindow.setMovable(previous.movable);
+      browserWindow.setFullScreenable(previous.fullscreenable);
       browserWindow.setContentProtection(false);
     };
+    const deadline = Date.now() + 2000;
+    while (!reinforceExamWindow(browserWindow)) {
+      if (Date.now() >= deadline) throw new Error("Fullscreen could not be confirmed. The exam has not started.");
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    browserWindow.on("blur", recover);
+    browserWindow.on("minimize", recover);
+    browserWindow.on("leave-full-screen", recover);
+    browserWindow.on("resize", recover);
+    browserWindow.on("move", recover);
+    timer = setInterval(() => {
+      if (!browserWindow.isDestroyed() && (!browserWindow.isFocused() || !isExamWindowFullscreen(browserWindow))) recover();
+    }, 500);
   }
   if (!enabled) {
-    restoreWindow?.();
+    await restoreWindow?.();
     restoreWindow = null;
     return;
   }
-  browserWindow.setKiosk(true);
-  browserWindow.setAlwaysOnTop(enabled, "screen-saver");
-  browserWindow.setFullScreen(enabled);
   if (configPackage?.clipboardPolicy.mode !== "allow") {
     clipboard.clear();
   }
@@ -390,7 +460,9 @@ export const endManagedSession = async (
   activeSession = null;
   activePackage = null;
   navigationGuard = null;
-  await applyWindowState(browserWindow, null);
+  exitCleanupPending = true;
+  try { await applyWindowState(browserWindow, null); }
+  finally { exitCleanupPending = false; }
 
   // Browser cleanup and audit storage must not prevent native lockdown release.
   if (clearHostedData) {
