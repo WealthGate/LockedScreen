@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $version = (Get-Content -LiteralPath (Join-Path $root 'apps/desktop/package.json') -Raw | ConvertFrom-Json).version
-$exe = Join-Path $root 'apps/desktop/dist-store/win-unpacked/Lockedscreen.exe'
+$exe = Join-Path $root "apps/desktop/dist-store/$version/win-unpacked/Lockedscreen.exe"
+if (!(Test-Path -LiteralPath $exe)) { $exe = Join-Path $root 'apps/desktop/dist-store/win-unpacked/Lockedscreen.exe' }
 if (!(Test-Path -LiteralPath $exe)) { throw 'Build the Store candidate before creating its test shortcut.' }
 $builtVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).ProductVersion
 if ($builtVersion -notlike "$version*") { throw "The unpacked build is $builtVersion, not $version. Rebuild the candidate first." }

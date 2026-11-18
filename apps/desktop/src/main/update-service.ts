@@ -41,7 +41,7 @@ const setUpdateState = (window: BrowserWindow | null, next: Partial<AppUpdateSta
 };
 
 const showUpdateNotification = (window: BrowserWindow | null, title: string, body: string): void => {
-  if (!app.isPackaged || !Notification.isSupported()) {
+  if (!canInstallUpdate() || !app.isPackaged || !Notification.isSupported()) {
     return;
   }
 
@@ -145,15 +145,18 @@ const cleanupOldUpdateFiles = async (): Promise<void> => {
 
 interface ConfigureAppUpdatesOptions {
   onBeforeInstall?: () => void;
-  canInstall?: () => boolean;
+  canInstall: () => boolean;
+  registerIpc: (channel: string, listener: Parameters<typeof ipcMain.handle>[1]) => void;
 }
 
 let canInstallUpdate = (): boolean => false;
 
 export const configureAppUpdates = (
   getMainWindow: () => BrowserWindow | null,
-  options: ConfigureAppUpdatesOptions = {}
+  options: ConfigureAppUpdatesOptions
 ): void => {
+  const registerIpc = options.registerIpc;
+  canInstallUpdate = options.canInstall;
   if (process.windowsStore) {
     updateState = {
       status: "idle",
@@ -161,16 +164,16 @@ export const configureAppUpdates = (
       channel: "microsoft-store",
       message: "Updates are managed by Microsoft Store."
     };
-    ipcMain.handle("updates:getState", async () => updateState);
+    registerIpc("updates:getState", async () => updateState);
     for (const action of ["check", "download", "install"]) {
-      ipcMain.handle(`updates:${action}`, async () => {
+      registerIpc(`updates:${action}`, async () => {
+        if (!canInstallUpdate()) return setUpdateState(getMainWindow(), { message: "Finish the exam and exit the session before opening Microsoft Store." });
         await shell.openExternal(`ms-windows-store://pdp/?productid=${storeProductId}`);
         return updateState;
       });
     }
     return;
   }
-  canInstallUpdate = options.canInstall ?? (() => false);
   const automatic = buildEdition !== "selectable";
   autoUpdater.autoDownload = automatic;
   autoUpdater.autoInstallOnAppQuit = automatic;
@@ -254,9 +257,9 @@ export const configureAppUpdates = (
     });
   });
 
-  ipcMain.handle("updates:getState", async () => updateState);
+  registerIpc("updates:getState", async () => updateState);
 
-  ipcMain.handle("updates:check", async () => {
+  registerIpc("updates:check", async () => {
     const window = getMainWindow();
     if (!app.isPackaged) {
       return setUpdateState(window, {
@@ -282,7 +285,7 @@ export const configureAppUpdates = (
     return updateState;
   });
 
-  ipcMain.handle("updates:download", async () => {
+  registerIpc("updates:download", async () => {
     const window = getMainWindow();
     if (!app.isPackaged) {
       return setUpdateState(window, {
@@ -309,7 +312,7 @@ export const configureAppUpdates = (
     return updateState;
   });
 
-  ipcMain.handle("updates:install", async () => {
+  registerIpc("updates:install", async () => {
     const window = getMainWindow();
     if (!app.isPackaged) {
       return setUpdateState(window, {

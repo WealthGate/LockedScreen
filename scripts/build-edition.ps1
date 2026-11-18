@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory)][ValidateSet('student','teacher')][string]$Edition,
   [ValidateSet('github','store')][string]$Target = 'github',
   [string]$StudentIdentity,
-  [switch]$SkipNative
+  [switch]$SkipNative,
+  [string]$NodeExecutable
 )
 $ErrorActionPreference = 'Stop'
 $releaseRoot = Split-Path $PSScriptRoot -Parent
@@ -12,6 +13,9 @@ foreach ($key in @('LOCKEDSCREEN_EDITION','LOCKEDSCREEN_TARGET','LOCKEDSCREEN_ST
 }
 Push-Location $releaseRoot
 try {
+  if (!$NodeExecutable) { $NodeExecutable = (Get-Command node.exe).Source }
+  if ([int](& $NodeExecutable -p 'process.versions.node.split(".")[0]') -lt 24) { throw 'Builds require Node 24 or newer. Provide -NodeExecutable for a non-default runtime.' }
+  $npmCli = if ($env:npm_execpath) { $env:npm_execpath } else { Join-Path (Split-Path (Get-Command npm.cmd).Source -Parent) 'node_modules/npm/bin/npm-cli.js' }
   $env:LOCKEDSCREEN_EDITION = $Edition
   $env:LOCKEDSCREEN_TARGET = $Target
   $env:LOCKEDSCREEN_STAGE = Join-Path $releaseRoot ("apps/desktop/build/edition-app/" + $Edition + '-' + [guid]::NewGuid().ToString('N'))
@@ -30,20 +34,23 @@ try {
     & (Join-Path $PSScriptRoot 'build-store.ps1') -PrepareOnly
   }
   if (!(Test-Path 'apps/desktop/build/store-native/Lockedscreen.Security.Agent.exe')) { throw 'Native helper build is missing.' }
-  npm.cmd run typecheck
+  & $NodeExecutable (Join-Path $releaseRoot 'node_modules/typescript/bin/tsc') --noEmit --project apps/desktop/tsconfig.json
   if ($LASTEXITCODE -ne 0) { throw 'Typecheck failed.' }
-  npm.cmd run build:desktop
-  if ($LASTEXITCODE -ne 0) { throw 'Edition desktop build failed.' }
-  node scripts/stage-edition.mjs
+  Push-Location apps/desktop
+  try {
+    & $NodeExecutable (Join-Path $releaseRoot 'node_modules/electron-vite/bin/electron-vite.js') build
+    if ($LASTEXITCODE -ne 0) { throw 'Edition desktop build failed.' }
+  } finally { Pop-Location }
+  & $NodeExecutable scripts/stage-edition.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Edition staging failed.' }
   Push-Location $env:LOCKEDSCREEN_STAGE
   try {
-    npm.cmd install --omit=dev --ignore-scripts --no-audit --no-fund
+    & $NodeExecutable $npmCli install --omit=dev --ignore-scripts --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) { throw 'Edition runtime dependency installation failed.' }
   } finally { Pop-Location }
   Push-Location apps/desktop
   try {
-    npx.cmd electron-builder --config electron-builder.edition.cjs --win --x64 --publish never
+    & $NodeExecutable (Join-Path $releaseRoot 'node_modules/electron-builder/cli.js') --config electron-builder.edition.cjs --win --x64 --publish never
     if ($LASTEXITCODE -ne 0) { throw 'Edition packaging failed.' }
   } finally { Pop-Location }
 } finally {

@@ -23,7 +23,7 @@ test('role updates keep their channel and defer installation during exams', asyn
       });
       const module = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
       let inExam = true;
-      module.configureAppUpdates(() => null, { canInstall: () => !inExam });
+      module.configureAppUpdates(() => null, { canInstall: () => !inExam, registerIpc: (channel, handler) => handlers.set(channel, handler) });
       const fixed = role !== 'selectable';
       assert.equal(updater.channel, fixed ? role : undefined);
       assert.equal(updater.autoDownload, fixed);

@@ -4,7 +4,7 @@ param(
 )
 
 $root = Split-Path -Parent $PSScriptRoot
-$serviceExe = Join-Path $root "apps\windows-lockdown\Lockedscreen.Security.Service\bin\Release\net8.0-windows\Lockedscreen.Security.Service.exe"
+$serviceExe = Join-Path $root "apps\windows-lockdown\Lockedscreen.Security.Service\bin\Release\net10.0-windows\Lockedscreen.Security.Service.exe"
 
 if ($Build) {
     Push-Location $root

@@ -66,6 +66,7 @@ import desktopPackage from "../../package.json";
 import { RichContent } from "./components/rich-content";
 import { RichContentEditor } from "./components/rich-content-editor";
 import { useLockedscreenStore } from "./lib/store";
+import { waitForSessionRelease } from "./lib/session-release";
 
 const teacherNavItems = [
   { to: "/teacher", label: "Dashboard", icon: LayoutDashboard },
@@ -88,7 +89,6 @@ const hostedExamUserAgent =
 const minExamZoom = 0.75;
 const maxExamZoom = 1.75;
 const examZoomStep = 0.1;
-const sessionReleaseTimeoutMs = 5000;
 const initialUpdateState: AppUpdateState = {
   status: "idle",
   currentVersion: desktopPackage.version
@@ -96,33 +96,6 @@ const initialUpdateState: AppUpdateState = {
 
 const clampExamZoom = (value: number) =>
   Math.min(maxExamZoom, Math.max(minExamZoom, Math.round(value * 100) / 100));
-
-const wait = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-
-const waitForSessionRelease = async (operation: Promise<unknown>): Promise<boolean> => {
-  let finished = false;
-  let failure: unknown;
-
-  const guardedOperation = operation
-    .then(() => {
-      finished = true;
-    })
-    .catch((error) => {
-      finished = true;
-      failure = error;
-    });
-
-  await Promise.race([guardedOperation, wait(sessionReleaseTimeoutMs)]);
-
-  if (failure) {
-    throw failure;
-  }
-
-  return finished;
-};
 
 const isHostedFormCompletionUrl = (candidateUrl: string) => {
   try {
@@ -318,14 +291,12 @@ const usesNativeCompanion = (profile: SecurityProfile): boolean =>
   profile.kioskMode === "windows-native-companion" || profile.kioskMode === "hybrid";
 
 const isSecureSessionReady = (snapshot: AppStateSnapshot): boolean => {
+  if (snapshot.activeSession) return !snapshot.activeSession.securityHold;
   const officialKioskReady =
     snapshot.securityProfile.kioskConfigured &&
     snapshot.securityProfile.dedicatedExamAccount &&
     usesOfficialKiosk(snapshot.securityProfile);
-  const nativeReady =
-    (snapshot.installedRole === "student" || (snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile))) &&
-    snapshot.runtime?.nativeLockdown.lockdownCapable === true;
+  const nativeReady = snapshot.runtime?.nativeLockdown.lockdownCapable === true;
 
   return officialKioskReady || nativeReady;
 };
@@ -358,8 +329,7 @@ const isNativeFullKioskExam = (snapshot: AppStateSnapshot, examId: string): bool
   const configPackage = getConfigPackageForExam(snapshot, examId);
   return (
     configPackage?.securityMode === "full-kiosk" &&
-    (snapshot.installedRole === "student" ||
-      (snapshot.securityProfile.nativeCompanionVerified && usesNativeCompanion(snapshot.securityProfile)))
+    snapshot.runtime?.nativeLockdown.lockdownCapable === true
   );
 };
 
@@ -735,6 +705,14 @@ const lmsAccountOptionLabel = (connection: LmsConnection): string => {
 const AppFrame = () => {
   const location = useLocation();
   const { snapshot, loading, error, load } = useLockedscreenStore();
+  const examLocationRef = useRef<{ startedAt: string; route: string } | null>(null);
+  const activeSession = snapshot?.activeSession;
+  if (activeSession && examLocationRef.current?.startedAt !== activeSession.startedAt) {
+    const path = `${activeSession.mode === "link" ? "/link/" : "/session/"}${activeSession.examId}`;
+    examLocationRef.current = { startedAt: activeSession.startedAt, route: path + (location.pathname === path ? location.search : "") };
+  }
+  if (!activeSession) examLocationRef.current = null;
+  const examRoute = examLocationRef.current?.route;
   const [launchContext, setLaunchContext] = useState<LaunchContext | null>(null);
   const [updateState, setUpdateState] = useState<AppUpdateState | null>(initialUpdateState);
   const installedRole: InstalledAppRole = launchContext?.installedRole ?? "teacher";
@@ -744,7 +722,7 @@ const AppFrame = () => {
     location.pathname.startsWith("/session/") ||
     location.pathname.startsWith("/link/") ||
     location.pathname.startsWith("/package-import");
-  const canShowUpdates = !location.pathname.startsWith("/session/") && !location.pathname.startsWith("/link/");
+  const canShowUpdates = !activeSession && !location.pathname.startsWith("/session/") && !location.pathname.startsWith("/link/");
 
   useEffect(() => {
     void load();
@@ -752,6 +730,7 @@ const AppFrame = () => {
     const unsubscribe = window.lockedscreenApi.onLaunchContextChanged(setLaunchContext);
     return unsubscribe;
   }, [load]);
+  useEffect(() => window.lockedscreenApi.onSessionSecurityHold(() => { void load(); }), [load]);
 
   useEffect(() => {
     void window.lockedscreenApi.getUpdateState().then(setUpdateState);
@@ -793,7 +772,7 @@ const AppFrame = () => {
     <div className={`min-h-screen min-w-0 max-w-full overflow-x-hidden text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-3 sm:p-6"}`}>
       {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
-        <Routes>
+        <Routes location={examRoute ?? location}>
           <Route path="/" element={<StudentPortalPage studentOnly />} />
           <Route path="/student" element={<StudentPortalPage studentOnly />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
@@ -802,7 +781,7 @@ const AppFrame = () => {
           <Route path="*" element={<StudentPortalPage studentOnly />} />
         </Routes>
       ) : (
-        <Routes>
+        <Routes location={examRoute ?? location}>
           <Route path="/" element={<ProfileSelectPage launchContext={launchContext} />} />
           <Route path="/student" element={<StudentPortalPage />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
@@ -812,7 +791,7 @@ const AppFrame = () => {
           <Route path="*" element={<ProfileSelectPage launchContext={launchContext} />} />
         </Routes>
       )}
-      {launchContext?.route ? (
+      {!activeSession && launchContext?.route ? (
         <LaunchContextNavigator
           route={launchContext.route}
           navigationKey={`${launchContext.route}|${launchContext.packageImport?.filePath ?? ""}`}
@@ -6359,6 +6338,7 @@ const StudentLmsTurnInPanel = ({
   onTurnIn: (pin?: string) => void;
 }) => {
   const [releasePin, setReleasePin] = useState("");
+  const releaseRequired = Boolean(useLockedscreenStore(state => state.snapshot?.activeSession));
   const binding = configPackage?.studentLmsBinding;
   if (!binding?.enabled || !submission) {
     return null;
@@ -6393,12 +6373,12 @@ const StudentLmsTurnInPanel = ({
               : "Sign in with the student LMS account to attach the Lockedscreen performance report and complete the turn-in."}
           </CardDescription>
         </div>
-        <Button className="px-3 py-2" onClick={() => onTurnIn(hostedGoogle ? releasePin : undefined)} disabled={turningIn || status === "success" || (hostedGoogle && !releasePin.trim())}>
+        <Button className="px-3 py-2" onClick={() => onTurnIn(releasePin)} disabled={turningIn || status === "success" || (releaseRequired && !releasePin.trim())}>
           {actionLabel}
         </Button>
       </div>
-      {hostedGoogle && status !== "success" ? (
-        <LabelledField label="Invigilator PIN for release and Google turn-in">
+      {releaseRequired && status !== "success" ? (
+        <LabelledField label="Invigilator PIN for release and LMS turn-in">
           <Input type="password" autoComplete="off" value={releasePin} onChange={(event) => setReleasePin(event.target.value)} />
         </LabelledField>
       ) : null}
@@ -6448,7 +6428,7 @@ const StudentExamPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { examId } = useParams();
-  const { snapshot, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
+  const { snapshot, error, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
   const exam = snapshot?.exams.find((candidate) => candidate.id === examId);
   const configPackage = examId ? getConfigPackageForExam(snapshot ?? null, examId) : null;
   const sessionExamId = exam?.id ?? null;
@@ -6467,6 +6447,7 @@ const StudentExamPage = () => {
   const [turningIn, setTurningIn] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
   const sessionEndedRef = useRef(false);
+  const locked = snapshot?.activeSession?.examId === examId;
 
   const endCurrentSession = useCallback(
     async (reason: string, pin?: string): Promise<boolean> => {
@@ -6477,7 +6458,7 @@ const StudentExamPage = () => {
       sessionEndedRef.current = true;
       try {
         const released = await waitForSessionRelease(endSession(reason, pin));
-        if (!released) { sessionEndedRef.current = false; throw new Error("Session release failed. Check the invigilator PIN and try again."); }
+        if (!released) { sessionEndedRef.current = false; throw new Error(useLockedscreenStore.getState().error ?? "Session release failed. Check the invigilator PIN and try again."); }
         return true;
       } catch (error) {
         sessionEndedRef.current = false;
@@ -6498,10 +6479,9 @@ const StudentExamPage = () => {
     }
 
     sessionEndedRef.current = false;
-    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" });
-    return () => {
-      void endCurrentSession("Closed native exam runtime");
-    };
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" }).then(started => {
+      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate));
+    });
   }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
 
   useEffect(() => {
@@ -6546,18 +6526,13 @@ const StudentExamPage = () => {
     setSubmitted(true);
     setSubmitting(false);
     if (configPackage?.studentLmsBinding.enabled) {
-      if (configPackage.studentLmsBinding.provider === "google-classroom" && usesPublisherGoogleConnection(configPackage.studentLmsBinding.googleAuthMode, configPackage.studentLmsBinding.clientId)) return;
-      void handleStudentTurnIn(result.id);
       return;
     }
 
-    if (snapshot?.installedRole !== "student" && !requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
-      navigate("/student");
-    }
   };
 
   useEffect(() => {
-    if (!session || submitted) {
+    if (!session || submitted || !locked) {
       return;
     }
 
@@ -6574,13 +6549,16 @@ const StudentExamPage = () => {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted]);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
 
   if (!exam || !session) {
     return null;
   }
 
   const question = exam.questions[currentIndex];
+  if (!locked && !submitted && !sessionEndedRef.current) {
+    return <ExamStartupStatus error={error} onBack={() => navigate("/student", { replace: true })} />;
+  }
   const response = session.responses.find((entry) => entry.questionId === question?.id);
 
   return (
@@ -6592,7 +6570,7 @@ const StudentExamPage = () => {
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
-      verifyPinInMain={snapshot?.installedRole === "student"}
+      verifyPinInMain
       onUnlock={releaseToStudentPortal}
     >
       {submitted ? (
@@ -6748,7 +6726,7 @@ const LinkExamPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { examId } = useParams();
-  const { snapshot, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
+  const { snapshot, error, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
   const exam = snapshot?.exams.find((candidate) => candidate.id === examId);
   const configPackage = examId ? getConfigPackageForExam(snapshot ?? null, examId) : null;
   const sessionExamId = exam?.id ?? null;
@@ -6772,6 +6750,7 @@ const LinkExamPage = () => {
   const [embeddedGoogleSignInBlocked, setEmbeddedGoogleSignInBlocked] = useState(false);
   const webviewRef = useRef<any>(null);
   const sessionEndedRef = useRef(false);
+  const locked = snapshot?.activeSession?.examId === examId;
   const guardDomainsKey = configPackage?.browserPolicy.allowedDomains.join("|") ?? "";
   const guardPrefixesKey =
     configPackage?.browserPolicy.urlRules
@@ -6788,7 +6767,7 @@ const LinkExamPage = () => {
       sessionEndedRef.current = true;
       try {
         const released = await waitForSessionRelease(endSession(reason, pin));
-        if (!released) { sessionEndedRef.current = false; throw new Error("Session release failed. Check the invigilator PIN and try again."); }
+        if (!released) { sessionEndedRef.current = false; throw new Error(useLockedscreenStore.getState().error ?? "Session release failed. Check the invigilator PIN and try again."); }
         return true;
       } catch (error) {
         sessionEndedRef.current = false;
@@ -6809,31 +6788,12 @@ const LinkExamPage = () => {
     }
 
     sessionEndedRef.current = false;
-    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" });
-
-    return () => {
-      void endCurrentSession("Closed hosted exam runtime");
-    };
-  }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
-
-  useEffect(() => {
-    if (!configPackage) {
-      return;
-    }
-
-    void window.lockedscreenApi.setNavigationGuard({
-      allowedDomains: configPackage.browserPolicy.allowedDomains,
-      allowedPrefixes: configPackage.browserPolicy.urlRules
-        .filter((rule) => rule.kind === "prefix")
-        .map((rule) => rule.pattern),
-      startUrl: configPackage.browserPolicy.startUrl,
-      mode: "link"
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" }).then(started => {
+      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate));
     });
 
-    return () => {
-      void window.lockedscreenApi.setNavigationGuard(null);
-    };
-  }, [configPackage?.id, configPackage?.browserPolicy.startUrl, guardDomainsKey, guardPrefixesKey]);
+  }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
+
 
   useEffect(() => {
     return window.lockedscreenApi.onEmbeddedGoogleSignInBlocked(() => {
@@ -6878,7 +6838,7 @@ const LinkExamPage = () => {
   }, [expired, hostedZoom, submitted]);
 
   useEffect(() => {
-    if (!session || submitted) {
+    if (!session || submitted || !locked) {
       return;
     }
 
@@ -6896,7 +6856,7 @@ const LinkExamPage = () => {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted]);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
 
   const finalize = async () => {
     if (submitted || submitting || !exam || !session) {
@@ -6914,19 +6874,9 @@ const LinkExamPage = () => {
     setSubmitted(true);
     setSubmitting(false);
     if (configPackage?.studentLmsBinding.enabled && configPackage) {
-      if (configPackage.studentLmsBinding.provider === "google-classroom" && usesPublisherGoogleConnection(configPackage.studentLmsBinding.googleAuthMode, configPackage.studentLmsBinding.clientId)) return;
-      setTurningIn(true);
-      const updatedSubmission = await turnInStudentLms({ submissionId: result.id, packageId: configPackage.id });
-      if (updatedSubmission) {
-        setSubmissionResult(updatedSubmission);
-      }
-      setTurningIn(false);
       return;
     }
 
-    if (snapshot?.installedRole !== "student" && !requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
-      navigate("/student");
-    }
   };
 
   const returnToStart = () => {
@@ -6961,6 +6911,9 @@ const LinkExamPage = () => {
   }
 
   const webviewHidden = submitted || expired || shellUnlockOpen;
+  if (!locked && !submitted && !sessionEndedRef.current) {
+    return <ExamStartupStatus error={error} onBack={() => navigate("/student", { replace: true })} />;
+  }
 
   return (
     <StudentShell
@@ -6971,7 +6924,7 @@ const LinkExamPage = () => {
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
-      verifyPinInMain={snapshot?.installedRole === "student"}
+      verifyPinInMain
       onUnlock={releaseToStudentPortal}
       onUnlockDialogChange={setShellUnlockOpen}
       onZoomChange={setHostedZoom}
@@ -7113,6 +7066,13 @@ const ExamZoomControls = ({ zoom, onChange }: { zoom: number; onChange: (zoom: n
   </div>
 );
 
+const ExamStartupStatus = ({ error, onBack }: { error: string | null; onBack: () => void }) => (
+  <div className="mx-auto max-w-xl space-y-4 p-6" role="status">
+    <h1 className="text-xl font-semibold">{error ? "Exam could not start" : "Securing exam environment"}</h1>
+    {error ? <><p className="text-sm text-rose-600">{error}</p><Button variant="secondary" onClick={onBack}>Return to exams</Button></> : null}
+  </div>
+);
+
 const StudentShell = ({
   exam,
   configPackage,
@@ -7142,7 +7102,8 @@ const StudentShell = ({
   scaleContent?: boolean;
   children: ReactNode;
 }) => {
-  const { launchApprovedApplication } = useLockedscreenStore();
+  const { snapshot } = useLockedscreenStore();
+  const securityHold = snapshot?.activeSession?.securityHold;
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const remaining = getRemainingSeconds(session, currentTime);
   const [unlockOpen, setUnlockOpen] = useState(false);
@@ -7399,32 +7360,6 @@ const StudentShell = ({
         </div>
       ) : null}
 
-      {configPackage?.allowedApplications.length ? (
-        <Card className="space-y-3 border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <CardTitle>Approved Tools</CardTitle>
-              <CardDescription>
-                These applications are package-approved and launched under kiosk supervision when permitted by the invigilator.
-              </CardDescription>
-            </div>
-            <Badge className="bg-slate-900 text-white">{configPackage.allowedApplications.length}</Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {configPackage.allowedApplications.map((entry) => (
-              <Button
-                key={entry.id}
-                variant="secondary"
-                className="px-3 py-2"
-                onClick={() => void launchApprovedApplication({ packageId: configPackage.id, appId: entry.id })}
-              >
-                {entry.label}
-              </Button>
-            ))}
-          </div>
-        </Card>
-      ) : null}
-
       {unlockOpen ? (
         <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/80 p-2 pt-4 backdrop-blur-sm sm:p-4 sm:pt-10 lg:pt-20">
         <Card className="w-full max-w-3xl border-amber-200 bg-white p-4 text-slate-950 shadow-2xl dark:bg-slate-950 dark:text-slate-50">
@@ -7451,7 +7386,7 @@ const StudentShell = ({
                   <LabelledField label="Invigilator PIN">
                     <Input
                       ref={unlockInputRef}
-                      type="text"
+                      type="password"
                       inputMode="numeric"
                       autoComplete="off"
                       autoFocus
@@ -7481,10 +7416,10 @@ const StudentShell = ({
               <Button variant="secondary" className="px-3 py-2" onClick={() => setUnlockOpen(false)} disabled={capturePending || releasePending}>
                 Cancel
               </Button>
-              <Button variant="secondary" className="px-3 py-2" onClick={() => void captureScreenshot()} disabled={capturePending || releasePending}>
+              {!verifyPinInMain ? <Button variant="secondary" className="px-3 py-2" onClick={() => void captureScreenshot()} disabled={capturePending || releasePending}>
                 <Save className="size-4" />
                 {capturePending ? "Saving..." : "Save screenshot"}
-              </Button>
+              </Button> : null}
               <Button className="px-3 py-2" onClick={attemptUnlock} disabled={capturePending || releasePending}>
                 {releasePending ? "Releasing..." : sessionSubmitted ? "Release student" : "Unlock session"}
               </Button>
@@ -7499,7 +7434,12 @@ const StudentShell = ({
         className={unlockOpen ? "pointer-events-none invisible" : undefined}
         style={scaleContent ? ({ zoom: contentZoom } as CSSProperties) : undefined}
       >
-        {children}
+        {securityHold ? (
+          <div className="space-y-2 border border-rose-400 p-4" role="alert">
+            <h2 className="font-semibold">Exam paused</h2>
+            <p className="text-sm">{securityHold}</p>
+          </div>
+        ) : children}
       </div>
     </motion.div>
   );

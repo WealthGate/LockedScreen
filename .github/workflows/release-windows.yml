@@ -12,12 +12,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
       - run: npm ci
+      - name: Test exam isolation and existing workflows
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem -Path apps/desktop/test,packages/storage/test -Filter *.test.mjs -File | Select-Object -ExpandProperty FullName)
+          node --test @tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project apps/windows-lockdown/KeyboardPolicy.Tests/KeyboardPolicy.Tests.csproj -c Release
       - name: Build Teacher installer
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-edition.ps1 -Edition teacher -Target github
       - name: Build Student installer

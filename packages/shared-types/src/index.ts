@@ -544,6 +544,7 @@ export interface SecurityOverview {
 }
 
 export interface AppStateSnapshot {
+  activeSession?: SessionStartRequest & { startedAt: string; securityHold?: string };
   installedRole?: InstalledAppRole;
   exams: Exam[];
   configPackages: ExamConfigPackage[];

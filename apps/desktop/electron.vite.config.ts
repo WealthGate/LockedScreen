@@ -34,7 +34,7 @@ export default defineConfig({
       __LOCKEDSCREEN_EDITION__: JSON.stringify(edition),
       __LOCKEDSCREEN_STORE_PRODUCT_ID__: JSON.stringify(process.env.LOCKEDSCREEN_STORE_PRODUCT_ID ?? "9NRCCBKRLXBJ")
     },
-    plugins: [externalizeDepsPlugin({ exclude: bundledWorkspacePackages })],
+    plugins: [externalizeDepsPlugin({ exclude: bundledWorkspacePackages, include: ["@napi-rs/canvas", "pdfjs-dist", "tesseract.js", "mammoth"] })],
     resolve: { alias }
   },
   preload: {

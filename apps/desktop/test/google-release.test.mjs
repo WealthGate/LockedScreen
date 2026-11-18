@@ -24,7 +24,8 @@ test("hosted Google turn-in requires a saved active-exam submission and correct 
     assert.doesNotThrow(() => assertGoogleRelease("student", config, submission, "package", "9876", "2468"));
     assert.throws(() => assertGoogleRelease("student", config, { examId: "another" }, "package", "9876", "2468"), /active exam/);
     assert.throws(() => assertGoogleRelease("teacher", config, submission, "package", "wrong", "2468"), /invigilator PIN/);
-    assert.doesNotThrow(() => assertGoogleRelease("teacher", config, submission, "package", "2468", "2468"));
+    assert.throws(() => assertGoogleRelease("teacher", config, submission, "package", "2468", "2468"), /invigilator PIN/);
+    assert.doesNotThrow(() => assertGoogleRelease("teacher", config, submission, "package", "9876", "2468"));
     const main = await readFile(new URL("../src/main/index.ts", import.meta.url), "utf8");
     const start = main.indexOf('handleIpc("studentLms:turnIn"');
     const turnIn = main.slice(start, main.indexOf('handleIpc(', start + 10));

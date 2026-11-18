@@ -1,9 +1,17 @@
-param([switch]$PrepareOnly)
+param([switch]$PrepareOnly, [string]$NodeExecutable)
 $ErrorActionPreference = 'Stop'
 $releaseRoot = Split-Path $PSScriptRoot -Parent
+$version = (Get-Content -LiteralPath (Join-Path $releaseRoot 'apps/desktop/package.json') -Raw | ConvertFrom-Json).version
 Push-Location $releaseRoot
 try {
   $nativeOutput = Join-Path $releaseRoot 'apps/desktop/build/store-native'
+  $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot 'apps/desktop/build')) + [System.IO.Path]::DirectorySeparatorChar
+  $nativeOutput = [System.IO.Path]::GetFullPath($nativeOutput)
+  if (!$nativeOutput.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path $nativeOutput -Leaf) -ne 'store-native') { throw 'Unsafe native staging directory.' }
+  if (Test-Path -LiteralPath $nativeOutput) {
+    if ((Get-Item -LiteralPath $nativeOutput).Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Native staging must not be a symbolic link.' }
+    Remove-Item -LiteralPath $nativeOutput -Recurse -Force
+  }
   foreach ($component in @('Service', 'Client', 'Agent')) {
     dotnet publish "apps/windows-lockdown/Lockedscreen.Security.$component/Lockedscreen.Security.$component.csproj" -c Release -r win-x64 --self-contained true -o $nativeOutput
     if ($LASTEXITCODE -ne 0) { throw "Native publish failed: $component" }
@@ -26,13 +34,16 @@ try {
     }
   } finally { $sourceIcon.Dispose() }
   if ($PrepareOnly) { return }
-  npm.cmd run typecheck
+  if (!$NodeExecutable) { $NodeExecutable = (Get-Command node.exe).Source }
+  if ([int](& $NodeExecutable -p 'process.versions.node.split(".")[0]') -lt 24) { throw 'Builds require Node 24 or newer. Provide -NodeExecutable for a non-default runtime.' }
+  & $NodeExecutable (Join-Path $releaseRoot 'node_modules/typescript/bin/tsc') --noEmit --project apps/desktop/tsconfig.json
   if ($LASTEXITCODE -ne 0) { throw 'Type check failed' }
-  npm.cmd run build:desktop
-  if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed' }
   Push-Location apps/desktop
   try {
-    npx.cmd electron-builder --config electron-builder.store.cjs --win appx --x64 --publish never
+    & $NodeExecutable (Join-Path $releaseRoot 'node_modules/electron-vite/bin/electron-vite.js') build
+    if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed' }
+    & $NodeExecutable (Join-Path $releaseRoot 'node_modules/electron-builder/cli.js') --config electron-builder.store.cjs "--config.directories.output=dist-store/$version" --win appx --x64 --publish never
     if ($LASTEXITCODE -ne 0) { throw 'Store packaging failed' }
+    Copy-Item -LiteralPath "dist-store/$version/LockedScreen-Store-$version-x64.appx" -Destination "dist-store/LockedScreen-Store-$version-x64.appx"
   } finally { Pop-Location }
 } finally { Pop-Location }

@@ -16,12 +16,17 @@ test('native readiness and recovery use real command outcomes rather than servic
         if (file.includes('.Agent.') && state.agentDenied) { child.emit('error', new Error('Access denied')); return; }
         const command = args[0];
         const agent = file.includes('.Agent.');
-        if (agent && command === 'run') { state.agentRunning = true; return; }
+        if (agent && command === 'run') {
+          state.agentRunning = true;
+          state.sessionId = JSON.parse(Buffer.from(args[1], 'base64').toString()).sessionId;
+          return;
+        }
+        if (agent && command === 'stop' && !state.failStop) state.agentRunning = false;
         const code = (command === 'begin-session' && state.rejectBegin) || (command === 'stop' && state.failStop) ? 1 : 0;
         // stdout can arrive after process exit; consumers must wait for close.
         child.emit('exit', code);
         queueMicrotask(() => {
-          const response = agent ? { running: state.agentRunning } : { ok: !state.unhealthy, status: { sessionActive: false } };
+          const response = agent ? { running: state.agentRunning, keyboardBlockingReady: state.keyboardReady !== false, sessionId: state.wrongSession ? 'old-session' : state.sessionId } : { ok: !state.unhealthy, status: { sessionActive: false } };
           child.stdout.emit('data', Buffer.from(JSON.stringify(response)));
           child.emit('close', code);
         });
@@ -92,6 +97,21 @@ test('native readiness and recovery use real command outcomes rather than servic
       assert(begin >= 0);
       assert(state.calls.slice(begin + 1).some(([, command]) => command === 'stop'));
       assert(state.calls.slice(begin + 1).some(([, command]) => command === 'end-session'));
+    });
+    await t.test('live protection must match this exam and have a ready keyboard filter', async () => {
+      state.rejectBegin = false;
+      await native.beginNativeLockdownSession(
+        { examId: 'fictional', packageId: 'test', mode: 'app' },
+        { label: 'Test', securityMode: 'restricted-app', processPolicy: { enabled: false, disallowedProcessNames: [] } }, async () => {}
+      );
+      await native.checkActiveNativeSession();
+      state.keyboardReady = false;
+      await assert.rejects(native.checkActiveNativeSession(), /keyboard protection stopped/);
+      state.keyboardReady = true; state.wrongSession = true;
+      await assert.rejects(native.checkActiveNativeSession(), /keyboard protection stopped/);
+      state.wrongSession = false;
+      await native.endNativeLockdownSession(async () => {});
+      await assert.rejects(native.checkActiveNativeSession(), /not attached/);
     });
   } finally {
     if (previous === undefined) delete process.resourcesPath; else process.resourcesPath = previous;

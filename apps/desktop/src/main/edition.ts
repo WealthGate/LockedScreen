@@ -13,7 +13,8 @@ const studentChannels = new Set([
   "exam:hideForStudent", "configPackage:import",
   "session:begin", "session:launchAlternateDesktop", "session:end",
   "applications:launch", "exam:submit", "studentLms:turnIn",
-  "window:setAssistKiosk", "window:setNavigationGuard", "shell:openExternal"
+  "window:setAssistKiosk", "window:setNavigationGuard", "shell:openExternal",
+  "updates:getState", "updates:check", "updates:download", "updates:install"
 ]);
 
 export const assertRoleAccess = (role: InstalledAppRole, channel: string): void => {

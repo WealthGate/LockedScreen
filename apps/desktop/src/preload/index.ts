@@ -33,6 +33,7 @@ export interface LockedscreenApi {
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
   onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
+  onSessionSecurityHold: (callback: () => void) => () => void;
   onEmbeddedGoogleSignInBlocked: (callback: (payload: { url?: string }) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
@@ -105,6 +106,11 @@ const api: LockedscreenApi = {
     const listener = (_event: Electron.IpcRendererEvent, payload: { reason?: string }) => callback(payload);
     ipcRenderer.on("session:exitBlocked", listener);
     return () => ipcRenderer.removeListener("session:exitBlocked", listener);
+  },
+  onSessionSecurityHold: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("session:securityHold", listener);
+    return () => ipcRenderer.removeListener("session:securityHold", listener);
   },
   onEmbeddedGoogleSignInBlocked: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { url?: string }) => callback(payload);

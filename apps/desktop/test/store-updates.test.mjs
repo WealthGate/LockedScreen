@@ -21,9 +21,15 @@ test('Store update actions never invoke the GitHub installer', async () => {
       }}]
     });
     const module = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
-    module.configureAppUpdates(() => null);
+    let locked = true;
+    module.configureAppUpdates(() => null, { canInstall: () => !locked, registerIpc: (channel, handler) => handlers.set(channel, handler) });
     module.checkForAppUpdatesAfterStartup();
     assert.equal((await handlers.get('updates:getState')()).channel, 'microsoft-store');
+    for (const action of ['check', 'download', 'install']) {
+      assert.match((await handlers.get(`updates:${action}`)()).message, /Finish the exam/);
+    }
+    assert.equal(opened.length, 0, 'Store links must not escape an active exam');
+    locked = false;
     for (const action of ['check', 'download', 'install']) await handlers.get(`updates:${action}`)();
     assert.deepEqual(opened, Array(3).fill('ms-windows-store://pdp/?productid=9NRCCBKRLXBJ'));
   } finally {

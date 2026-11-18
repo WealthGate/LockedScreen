@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 import { assertRoleAccess, buildEdition } from "./edition";
-import { createPinVerifier, verifyInvigilatorPin } from "./security/invigilator-pin";
+import { createPinVerifier } from "./security/invigilator-pin";
 import { assertGoogleRelease } from "./security/google-release";
-import { usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
+import { assertSessionExitPin, assertSessionOperation, assertSessionPinConfigured, createSessionStartBarrier, isSameSession, unsafeProductionSwitch } from "./security/session-policy";
 
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
@@ -53,7 +53,8 @@ import {
   endNativeLockdownSession,
   launchAlternateDesktopExamShell,
   hasAlternateDesktopHost,
-  nativeCompanionRequired
+  checkActiveNativeSession,
+  verifyHostedNativeSession
 } from "./security/native-security";
 
 const questionAuthoringTemplate = `LOCKEDSCREEN Question Authoring Template
@@ -116,11 +117,13 @@ Notes:
 import { automaticPackagePassword, isProtectedPackageFile, protectConfigPackage, unprotectConfigPackage } from "./security/package-crypto";
 import {
   beginManagedSession,
+  assertExamNavigation,
   configureHostedPartition,
   configureWebContents,
   endManagedSession,
   getActivePackage,
   getActiveSession,
+  holdManagedSession,
   launchApprovedApplication,
   setNavigationGuard,
   urlAllowedByGuard
@@ -129,6 +132,11 @@ import { turnInSubmissionToLms } from "./student-lms-turnin";
 import { checkForAppUpdatesAfterStartup, configureAppUpdates } from "./update-service";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+if (app.isPackaged && unsafeProductionSwitch(name => app.commandLine.hasSwitch(name))) {
+  console.error("LockedScreen refuses debugging or sandbox-disabling launch options in production.");
+  app.exit(1);
+}
+app.enableSandbox();
 if (buildEdition === "student") {
   app.setPath("userData", join(app.getPath("appData"), "@lockedscreen", "student"));
 }
@@ -172,10 +180,19 @@ const readInstalledRole = (): InstalledAppRole => {
   }
 };
 const installedRole = buildEdition === "selectable" ? readInstalledRole() : buildEdition;
+let sessionStarting = false;
+let activeSubmissionId: string | null = null;
+const sessionStartBarrier = createSessionStartBarrier();
 const handleIpc = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void => {
   ipcMain.handle(channel, (...args) => {
+    const event = args[0];
+    if (!mainWindow || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame || !isAppUrl(event.senderFrame.url)) {
+      throw new Error("This operation is only available from the trusted LockedScreen application window.");
+    }
     assertRoleAccess(installedRole, channel);
-    return listener(...args);
+    assertSessionOperation(Boolean(getActiveSession()) || sessionStarting || hasAlternateDesktopHost(), channel);
+    return sessionStartBarrier.run(channel, () => listener(...args));
   });
 };
 const preloadPath = (() => {
@@ -194,6 +211,28 @@ const preloadPath = (() => {
 
 let mainWindow: BrowserWindow | null = null;
 let processMonitorTimer: NodeJS.Timeout | null = null;
+let nativeMonitorTimer: NodeJS.Timeout | null = null;
+const monitorNativeSession = (): void => {
+  if (nativeMonitorTimer) clearInterval(nativeMonitorTimer);
+  let checking = false;
+  nativeMonitorTimer = setInterval(() => {
+    const current = getActiveSession();
+    if (checking || !current || current.securityHold) return;
+    checking = true;
+    void (async () => {
+      try {
+        if (screen.getAllDisplays().length !== 1) throw new Error("Display configuration changed. Ask the invigilator to release this exam.");
+        await checkActiveNativeSession();
+      } catch (error) {
+        if (getActiveSession() !== current) return;
+        const reason = error instanceof Error ? error.message : "Native lockdown health check failed.";
+        holdManagedSession(reason);
+        mainWindow?.webContents.send("session:securityHold", { reason });
+        await recordSecurityEvent("kiosk", "error", "Exam paused because lockdown could not be confirmed.", reason);
+      } finally { checking = false; }
+    })();
+  }, 2000);
+};
 let lastProcessAlert = "";
 let pendingLaunchContext: LaunchContext = {
   route: launchRoute,
@@ -287,7 +326,15 @@ const isStudentTurnInState = (value: unknown): value is StudentLmsTurnInState =>
   typeof value.provider === "string" &&
   typeof value.status === "string";
 
-const isAppUrl = (input: string): boolean => input.startsWith("http://localhost:") || input.startsWith("file://");
+const isAppUrl = (input: string): boolean => {
+  try {
+    const target = new URL(input);
+    const expected = process.env.ELECTRON_RENDERER_URL
+      ? new URL(process.env.ELECTRON_RENDERER_URL)
+      : new URL(`file:///${join(__dirname, "../renderer/index.html").replace(/\\/g, "/")}`);
+    return target.protocol === expected.protocol && target.host === expected.host && target.pathname === expected.pathname;
+  } catch { return false; }
+};
 
 const createPackageImportRoute = (): string => `/package-import?open=${Date.now()}`;
 
@@ -326,6 +373,7 @@ const publishLaunchContext = (nextContext: LaunchContext): void => {
 };
 
 const queuePackageImportLaunch = async (filePath: string): Promise<void> => {
+  if (getActiveSession() || sessionStarting || hasAlternateDesktopHost()) return;
   const packageImport = await readPackageLaunchInfo(filePath);
   if (!packageImport) {
     return;
@@ -360,6 +408,8 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
   const snapshot = await operation;
   return {
     ...snapshot,
+    activeSession: getActiveSession() ?? undefined,
+    settings: getActiveSession() ? { ...snapshot.settings, adminUnlockPin: "", invigilatorUnlockPin: "" } : snapshot.settings,
     installedRole,
     runtime: runtimeEnvironment,
     securityOverview: await buildSecurityOverview(snapshot, runtimeEnvironment, getActivePackage())
@@ -537,6 +587,7 @@ const createWindow = async (): Promise<void> => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      devTools: !app.isPackaged,
       webviewTag: true,
       spellcheck: false
     }
@@ -551,7 +602,7 @@ const createWindow = async (): Promise<void> => {
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.on("close", (event) => {
-    if (!getActivePackage()) {
+    if (!getActivePackage() && !sessionStarting) {
       return;
     }
 
@@ -567,7 +618,7 @@ const createWindow = async (): Promise<void> => {
     );
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!isAppUrl(url)) {
+    if (getActiveSession() || sessionStarting || !isAppUrl(url)) {
       event.preventDefault();
     }
   });
@@ -660,7 +711,8 @@ app.whenReady().then(async () => {
   }
 
   configureAppUpdates(() => mainWindow, {
-    canInstall: () => !launchedByNativeHost && !hasAlternateDesktopHost() && !getActivePackage()
+    canInstall: () => !sessionStarting && !launchedByNativeHost && !hasAlternateDesktopHost() && !getActivePackage(),
+    registerIpc: handleIpc
   });
   await storage.getSnapshot();
 
@@ -1226,111 +1278,138 @@ app.whenReady().then(async () => {
       throw new Error("Invalid session start request.");
     }
 
-    const snapshot = await storage.getSnapshot();
-    const configPackage = snapshot.configPackages.find((candidate) => candidate.id === request.packageId);
-    if (!configPackage) {
-      throw new Error("Configuration package not found.");
+    const current = getActiveSession();
+    if (current) {
+      if (!isSameSession(current, request)) throw new Error("The current exam must be released with the invigilator PIN first.");
+      return withRuntime(storage.getSnapshot());
     }
-
-    if (installedRole === "student") {
-      await refreshRuntimeEnvironment();
-      if (!runtimeEnvironment.nativeLockdown.lockdownCapable) throw new Error("Native lockdown is unavailable on this device.");
-      if (!configPackage.quitUnlockPolicy.pinVerifier) throw new Error("Ask your teacher to re-export this exam package with the updated Teacher edition.");
-    }
-
-    const needsNativeCompanion =
-      !launchedByNativeHost &&
-      (installedRole === "student" || configPackage.securityMode === "full-kiosk" || request.mode === "app") &&
-      (installedRole === "student" || nativeCompanionRequired(snapshot.securityProfile));
-
-    if (needsNativeCompanion) {
-      await beginNativeLockdownSession(request, configPackage, recordSecurityEvent);
-    }
-
+    sessionStartBarrier.assertIdle();
+    if (sessionStarting || hasAlternateDesktopHost()) throw new Error("An exam session is already starting or running.");
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error("The exam window is not available.");
+    sessionStarting = true;
     try {
-      await beginManagedSession(mainWindow, request, configPackage, recordSecurityEvent);
-    } catch (error) {
-      if (needsNativeCompanion) {
-        await endNativeLockdownSession(recordSecurityEvent);
+      const snapshot = await storage.getSnapshot();
+      const configPackage = snapshot.configPackages.find((candidate) => candidate.id === request.packageId);
+      if (!configPackage) {
+        throw new Error("Configuration package not found.");
       }
-      throw error;
-    }
+      const exam = snapshot.exams.find(candidate => candidate.id === request.examId);
+      if (!exam || configPackage.examId !== request.examId || exam.mode !== request.mode) throw new Error("The exam and configuration package do not match.");
+      if (screen.getAllDisplays().length !== 1) throw new Error("Disconnect additional displays before starting a secure exam.");
+      assertSessionPinConfigured(configPackage, snapshot.settings.invigilatorUnlockPin, installedRole !== "student");
+      assertExamNavigation(configPackage, request.mode);
 
-    await refreshProcessPolicyMonitor();
-    return withRuntime(storage.getSnapshot());
+      await refreshRuntimeEnvironment();
+      if (!runtimeEnvironment.nativeLockdown.lockdownCapable) throw new Error("Native lockdown is unavailable. The exam has not started. Refresh diagnostics or repair the installation.");
+
+      const needsNativeCompanion = !launchedByNativeHost;
+
+      if (needsNativeCompanion) {
+        await beginNativeLockdownSession(request, configPackage, recordSecurityEvent);
+      } else {
+        await verifyHostedNativeSession(request, getArgValue("--lockedscreen-native-session="));
+      }
+
+      try {
+        await beginManagedSession(mainWindow, request, configPackage, recordSecurityEvent);
+      } catch (error) {
+        if (needsNativeCompanion) {
+          await endNativeLockdownSession(recordSecurityEvent);
+        }
+        throw error;
+      }
+
+      await refreshProcessPolicyMonitor();
+      monitorNativeSession();
+      activeSubmissionId = null;
+      return withRuntime(storage.getSnapshot());
+    } finally { sessionStarting = false; }
   });
 
   handleIpc("session:launchAlternateDesktop", async (_event, payload: unknown) => {
     if (!isRecord(payload) || typeof payload.examId !== "string" || !isCandidate(payload.candidate)) {
       throw new Error("Invalid alternate desktop launch payload.");
     }
+    sessionStartBarrier.assertIdle();
+    if (sessionStarting || getActiveSession() || hasAlternateDesktopHost()) throw new Error("An exam session is already starting or running.");
+    sessionStarting = true;
+    try {
+      const snapshot = await storage.getSnapshot();
+      const exam = snapshot.exams.find((candidate) => candidate.id === payload.examId);
+      if (!exam) {
+        throw new Error("Exam not found.");
+      }
 
-    const snapshot = await storage.getSnapshot();
-    const exam = snapshot.exams.find((candidate) => candidate.id === payload.examId);
-    if (!exam) {
-      throw new Error("Exam not found.");
-    }
+      const configPackage =
+        snapshot.configPackages.find((candidate) => candidate.examId === payload.examId && candidate.status !== "archived") ??
+        snapshot.configPackages.find((candidate) => candidate.examId === payload.examId);
 
-    const configPackage =
-      snapshot.configPackages.find((candidate) => candidate.examId === payload.examId && candidate.status !== "archived") ??
-      snapshot.configPackages.find((candidate) => candidate.examId === payload.examId);
+      if (!configPackage) {
+        throw new Error("Configuration package not found.");
+      }
 
-    if (!configPackage) {
-      throw new Error("Configuration package not found.");
-    }
+      if (screen.getAllDisplays().length !== 1) throw new Error("Disconnect additional displays before starting a secure exam.");
+      assertSessionPinConfigured(configPackage, snapshot.settings.invigilatorUnlockPin, installedRole !== "student");
+      assertExamNavigation(configPackage, exam.mode);
+      if (configPackage.securityMode !== "full-kiosk") {
+        return false;
+      }
 
-    if (installedRole === "student" && !configPackage.quitUnlockPolicy.pinVerifier) {
-      throw new Error("Ask your teacher to re-export this exam package with the updated Teacher edition.");
-    }
-    if (configPackage.securityMode !== "full-kiosk" || (installedRole !== "student" && !nativeCompanionRequired(snapshot.securityProfile))) {
-      return false;
-    }
+      if (!app.isPackaged) {
+        return false;
+      }
 
-    if (!app.isPackaged) {
-      return false;
-    }
-
-    await launchAlternateDesktopExamShell(
-      {
-        examId: exam.id,
-        examMode: exam.mode,
-        packageId: configPackage.id,
-        route:
-          (exam.mode === "link" ? `/link/${exam.id}` : `/session/${exam.id}`) +
-          `?candidateName=${encodeURIComponent(payload.candidate.name)}&candidateId=${encodeURIComponent(payload.candidate.id)}`,
-        shellExecutablePath: process.execPath,
-        shellArgs: [
-          "--lockedscreen-route=" +
+      await launchAlternateDesktopExamShell(
+        {
+          examId: exam.id,
+          examMode: exam.mode,
+          packageId: configPackage.id,
+          route:
             (exam.mode === "link" ? `/link/${exam.id}` : `/session/${exam.id}`) +
             `?candidateName=${encodeURIComponent(payload.candidate.name)}&candidateId=${encodeURIComponent(payload.candidate.id)}`,
-          "--lockedscreen-native-hosted=1"
-        ]
-      },
-      configPackage,
-      recordSecurityEvent
-    );
+          shellExecutablePath: process.execPath,
+          shellArgs: [
+            `--user-data-dir=${app.getPath("userData")}`,
+            "--lockedscreen-route=" +
+            (exam.mode === "link" ? `/link/${exam.id}` : `/session/${exam.id}`) +
+            `?candidateName=${encodeURIComponent(payload.candidate.name)}&candidateId=${encodeURIComponent(payload.candidate.id)}`,
+            "--lockedscreen-native-hosted=1"
+          ]
+        },
+        configPackage,
+        recordSecurityEvent
+      );
 
-    return true;
+      return true;
+    } finally { sessionStarting = false; }
   });
 
   handleIpc("session:end", async (_event, reason: unknown, pin: unknown) => {
-    if (installedRole === "student" && getActivePackage() &&
-      !verifyInvigilatorPin(pin, getActivePackage()?.quitUnlockPolicy.pinVerifier)) {
-      throw new Error("Incorrect invigilator PIN.");
-    }
+    if (sessionStarting) throw new Error("Wait for the exam startup check to finish.");
+    const config = getActivePackage();
+    if (!config) return withRuntime(storage.getSnapshot());
+    sessionStarting = true;
     try {
-      await endManagedSession(mainWindow, typeof reason === "string" ? reason : "Session closed", recordSecurityEvent);
-    } finally {
+      {
+        const snapshot = await storage.getSnapshot();
+        assertSessionExitPin(config, pin, snapshot.settings.invigilatorUnlockPin);
+      }
+      activeSubmissionId = null;
+      if (nativeMonitorTimer) { clearInterval(nativeMonitorTimer); nativeMonitorTimer = null; }
       try {
-        await endNativeLockdownSession(recordSecurityEvent);
+        await endManagedSession(mainWindow, typeof reason === "string" ? reason : "Session closed", recordSecurityEvent);
       } finally {
-        if (processMonitorTimer) {
-          clearInterval(processMonitorTimer);
-          processMonitorTimer = null;
+        try {
+          await endNativeLockdownSession(recordSecurityEvent);
+        } finally {
+          if (processMonitorTimer) {
+            clearInterval(processMonitorTimer);
+            processMonitorTimer = null;
+          }
         }
       }
-    }
-    return withRuntime(storage.getSnapshot());
+      return withRuntime(storage.getSnapshot());
+    } finally { sessionStarting = false; }
   });
 
   handleIpc("applications:launch", async (_event, payload: unknown) => {
@@ -1354,12 +1433,21 @@ app.whenReady().then(async () => {
     }
 
     const activePackage = getActivePackage();
+    const current = getActiveSession();
+    if (!current || !activePackage || payload.exam.id !== current.examId || payload.session.examId !== current.examId) {
+      throw new Error("Only the active exam can be submitted.");
+    }
+    if (current.securityHold) throw new Error(current.securityHold);
+    if (activeSubmissionId) throw new Error("This exam session has already been submitted.");
+    const trustedExam = (await storage.getSnapshot()).exams.find(exam => exam.id === current.examId);
+    if (!trustedExam) throw new Error("Active exam not found.");
     const activePackageIsLockdownOnly = activePackage?.externalDeliveryMode === "lockdown-only";
-    const result = await storage.recordSubmission(payload.exam, payload.session, {
+    const result = await storage.recordSubmission(trustedExam, payload.session, {
       externalDeliveryMode: activePackage?.externalDeliveryMode,
       packageId: activePackage?.id,
       resultDestinations: activePackageIsLockdownOnly ? [] : undefined
     });
+    activeSubmissionId = result.id;
     let snapshot = await storage.getSnapshot();
 
     if (!activePackageIsLockdownOnly && activePackage?.studentLmsBinding.enabled) {
@@ -1431,15 +1519,21 @@ app.whenReady().then(async () => {
 
     if (submission.examId !== configPackage.examId) throw new Error("Submission does not belong to this exam package.");
     const activePackage = getActivePackage();
-    const studentBinding = configPackage.studentLmsBinding;
-    if (activePackage && studentBinding.provider === "google-classroom" && usesPublisherGoogleConnection(studentBinding.googleAuthMode, studentBinding.clientId)) {
-      assertGoogleRelease(installedRole, activePackage, submission, configPackage.id, payload.pin, snapshot.settings.invigilatorUnlockPin);
+    if (activePackage && activeSubmissionId !== submission.id) throw new Error("Submit this exam session before requesting turn-in.");
+    if (activePackage) {
+      if (sessionStarting) throw new Error("Wait for the current exam transition to finish.");
+      sessionStarting = true;
       try {
-        await endManagedSession(mainWindow, "Invigilator approved release for Google turn-in", recordSecurityEvent);
-      } finally {
-        await endNativeLockdownSession(recordSecurityEvent);
-        if (processMonitorTimer) { clearInterval(processMonitorTimer); processMonitorTimer = null; }
-      }
+        assertGoogleRelease(installedRole, activePackage, submission, configPackage.id, payload.pin, snapshot.settings.invigilatorUnlockPin);
+        try {
+          await endManagedSession(mainWindow, "Invigilator approved release for Google turn-in", recordSecurityEvent);
+        } finally {
+          await endNativeLockdownSession(recordSecurityEvent);
+          activeSubmissionId = null;
+          if (nativeMonitorTimer) { clearInterval(nativeMonitorTimer); nativeMonitorTimer = null; }
+          if (processMonitorTimer) { clearInterval(processMonitorTimer); processMonitorTimer = null; }
+        }
+      } finally { sessionStarting = false; }
     }
 
     try {
@@ -1565,6 +1659,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
+  if (nativeMonitorTimer) clearInterval(nativeMonitorTimer);
   if (processMonitorTimer) {
     clearInterval(processMonitorTimer);
     processMonitorTimer = null;

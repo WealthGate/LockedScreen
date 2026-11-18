@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { BrowserWindow, clipboard, session as electronSession, type Input, type WebContents } from "electron";
 
 import type { ExamConfigPackage, NavigationGuard, SessionStartRequest } from "@lockedscreen/shared-types";
+import { isSameSession } from "./session-policy";
 
 const hostedPartition = "persist:lockedscreen-link";
 
@@ -12,6 +13,7 @@ export interface ActiveSessionState {
   packageId: string;
   mode: SessionStartRequest["mode"];
   startedAt: string;
+  securityHold?: string;
 }
 
 type SecurityEventRecorder = (category: string, severity: string, message: string, details?: string) => Promise<void>;
@@ -20,26 +22,6 @@ let activeSession: ActiveSessionState | null = null;
 let activePackage: ExamConfigPackage | null = null;
 let navigationGuard: NavigationGuard | null = null;
 let exitCleanupPending = false;
-
-const hostedAuthDomains = [
-  "accounts.google.com",
-  "accounts.youtube.com",
-  "myaccount.google.com",
-  "www.google.com",
-  "oauth2.googleapis.com",
-  "apis.google.com",
-  "content.googleapis.com",
-  "ssl.gstatic.com",
-  "www.gstatic.com",
-  "fonts.gstatic.com",
-  "fonts.googleapis.com",
-  "lh3.googleusercontent.com",
-  "lh4.googleusercontent.com",
-  "lh5.googleusercontent.com",
-  "lh6.googleusercontent.com",
-  "ogs.google.com",
-  "googleusercontent.com"
-];
 
 const isHostedGoogleFormsUrl = (target: URL): boolean => {
   if (target.hostname === "forms.gle" || target.hostname === "forms.google.com") {
@@ -85,47 +67,84 @@ const notifyEmbeddedGoogleSignInBlocked = (url: string): void => {
 
 export const getActiveSession = (): ActiveSessionState | null => activeSession;
 export const getActivePackage = (): ExamConfigPackage | null => activePackage;
+export const holdManagedSession = (message: string): void => {
+  if (activeSession) activeSession.securityHold = message;
+};
 
 export const setNavigationGuard = (guard: NavigationGuard | null): void => {
+  if (activeSession) throw new Error("Navigation policy cannot be changed during an active exam.");
   navigationGuard = guard;
 };
 
-export const urlAllowedByGuard = (targetUrl: string): boolean => {
-  if (!navigationGuard) {
+const matchesUrlPrefix = (target: URL, prefix: string): boolean => {
+  try {
+    const allowed = new URL(prefix);
+    if (allowed.protocol !== "https:" || target.origin !== allowed.origin) return false;
+    const path = allowed.pathname;
+    if (target.pathname !== path && !target.pathname.startsWith(path.endsWith("/") ? path : `${path}/`)) return false;
+    return [...allowed.searchParams].every(([name, value]) => target.searchParams.getAll(name).includes(value));
+  } catch { return false; }
+};
+
+const urlAllowedByPolicy = (guard: NavigationGuard | null, targetUrl: string): boolean => {
+  if (!guard) {
     return false;
   }
 
   try {
     const target = new URL(targetUrl);
-    const domainAllowed = navigationGuard.allowedDomains.some(
+    if (target.protocol !== "https:" || target.username || target.password) return false;
+    const domainAllowed = guard.allowedDomains.some(
       (domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)
     );
     // Google account sign-in is intentionally not allowed inside the embedded exam browser.
     // Google blocks embedded OAuth/user-agent sign-in, and opening a normal browser during
     // a locked exam would weaken the secure session.
-    if (navigationGuard.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
+    if (guard.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
       return false;
     }
 
-    // Trusted Google support domains are allowed for Forms assets and post-submit score pages,
-    // but not for account sign-in screens.
-    const googleAuthAllowed =
-      navigationGuard.mode === "link" &&
-      hostedAuthDomains.some((domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`));
+    // Asset requests do not need a top-level navigation exception. Never grant general
+    // Google Search/account/storage browsing just to load Forms fonts or scripts.
     // Google Forms posts the final response to docs.google.com/forms/.../formResponse, then may open
     // docs.google.com/forms/.../viewscore so students can see grades released by the teacher.
     // Both routes stay inside Google Forms and are allowed without opening the unrestricted browser.
-    const googleFormsAllowed = navigationGuard.mode === "link" && isHostedGoogleFormsUrl(target);
-    const googleFormsScoreAllowed = navigationGuard.mode === "link" && isHostedGoogleFormsScoreUrl(target);
-    const prefixAllowed = navigationGuard.allowedPrefixes?.some((prefix) => targetUrl.startsWith(prefix)) ?? false;
-    return domainAllowed || googleAuthAllowed || googleFormsAllowed || googleFormsScoreAllowed || prefixAllowed;
+    const googleFormsAllowed = guard.mode === "link" && isHostedGoogleFormsUrl(target);
+    const googleFormsScoreAllowed = guard.mode === "link" && isHostedGoogleFormsScoreUrl(target);
+    const prefixAllowed = guard.allowedPrefixes?.some((prefix) => matchesUrlPrefix(target, prefix)) ?? false;
+    return domainAllowed || googleFormsAllowed || googleFormsScoreAllowed || prefixAllowed;
   } catch {
     return false;
   }
 };
 
+export const urlAllowedByGuard = (targetUrl: string): boolean => urlAllowedByPolicy(navigationGuard, targetUrl);
+
+const packageNavigationGuard = (config: ExamConfigPackage, mode: SessionStartRequest["mode"]): NavigationGuard => ({
+  mode, allowedDomains: config.browserPolicy.allowedDomains,
+  allowedPrefixes: config.browserPolicy.urlRules.filter(rule => rule.kind === "prefix").map(rule => rule.pattern),
+  startUrl: config.browserPolicy.startUrl
+});
+
+export const assertExamNavigation = (config: ExamConfigPackage, mode: SessionStartRequest["mode"]): void => {
+  if (mode === "link" && !urlAllowedByPolicy(packageNavigationGuard(config, mode), config.browserPolicy.startUrl ?? "")) {
+    throw new Error("The hosted exam start URL is not approved. Configure an HTTPS exam URL and its navigation policy before starting.");
+  }
+};
+
 export const configureHostedPartition = (recordSecurityEvent: SecurityEventRecorder): void => {
   const targetSession = electronSession.fromPartition(hostedPartition);
+  targetSession.webRequest.onBeforeRequest((details, callback) => {
+    // Covers redirects and programmatic webview.src/loadURL changes as well as user navigation.
+    if (details.resourceType === "mainFrame" && (!activeSession || activeSession.securityHold || !urlAllowedByGuard(details.url))) {
+      try {
+        if (isEmbeddedGoogleAccountSignInUrl(new URL(details.url))) notifyEmbeddedGoogleSignInBlocked(details.url);
+      } catch { /* Malformed URLs are denied by the same guard. */ }
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
   targetSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   targetSession.on("will-download", (event) => {
     event.preventDefault();
@@ -159,7 +178,7 @@ const activeShortcutBlocked = (input: Input): boolean => {
     return true;
   }
 
-  if (input.alt && ["escape", "f4", "left", "right", "tab"].includes(lowerKey)) {
+  if (input.alt && ["escape", "f4", "left", "right", "arrowleft", "arrowright", "tab", " ", "space"].includes(lowerKey)) {
     return true;
   }
 
@@ -171,6 +190,21 @@ const activeShortcutBlocked = (input: Input): boolean => {
 };
 
 export const configureWebContents = (contents: WebContents, recordSecurityEvent: SecurityEventRecorder): void => {
+  contents.on("will-attach-webview", (event, preferences, params) => {
+    if (!activeSession || activeSession.securityHold || !urlAllowedByGuard(params.src ?? "")) {
+      event.preventDefault();
+      return;
+    }
+    delete preferences.preload;
+    preferences.nodeIntegration = false;
+    preferences.nodeIntegrationInSubFrames = false;
+    preferences.contextIsolation = true;
+    preferences.sandbox = true;
+    preferences.devTools = false;
+    preferences.webSecurity = true;
+    preferences.allowRunningInsecureContent = false;
+    preferences.webviewTag = false;
+  });
   contents.setWindowOpenHandler(({ url }) => {
     try {
       const target = new URL(url);
@@ -188,7 +222,7 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
       // Fall through to the normal guard for malformed popup URLs.
     }
 
-    if (urlAllowedByGuard(url)) {
+    if (contents.getType() === "webview" && urlAllowedByGuard(url)) {
       // Keep approved popups inside the locked exam webview instead of opening a normal browser window.
       void contents.loadURL(url);
     } else {
@@ -240,12 +274,64 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
   }
 };
 
+let restoreWindow: (() => void) | null = null;
+
+export const reinforceExamWindow = (browserWindow: BrowserWindow | null): void => {
+  if (!activeSession || !browserWindow || browserWindow.isDestroyed()) return;
+  if (browserWindow.isMinimized()) browserWindow.restore();
+  if (!browserWindow.isKiosk()) browserWindow.setKiosk(true);
+  browserWindow.setAlwaysOnTop(true, "screen-saver");
+  browserWindow.show();
+  browserWindow.focus();
+};
+
 const applyWindowState = async (browserWindow: BrowserWindow | null, configPackage: ExamConfigPackage | null): Promise<void> => {
   if (!browserWindow) {
     return;
   }
 
   const enabled = Boolean(configPackage);
+  if (enabled && !restoreWindow) {
+    const previous = {
+      kiosk: browserWindow.isKiosk(), fullscreen: browserWindow.isFullScreen(),
+      top: browserWindow.isAlwaysOnTop(), resizable: browserWindow.isResizable(),
+      minimizable: browserWindow.isMinimizable(), movable: browserWindow.isMovable(),
+      maximizable: browserWindow.isMaximizable()
+    };
+    browserWindow.setResizable(false);
+    browserWindow.setMinimizable(false);
+    browserWindow.setMaximizable(false);
+    browserWindow.setMovable(false);
+    browserWindow.setContentProtection(true);
+    const recover = () => reinforceExamWindow(browserWindow);
+    browserWindow.on("blur", recover);
+    browserWindow.on("minimize", recover);
+    browserWindow.on("leave-full-screen", recover);
+    const timer = setInterval(() => {
+      if (!browserWindow.isDestroyed() && (!browserWindow.isFocused() || !browserWindow.isKiosk() || browserWindow.isMinimized())) recover();
+    }, 500);
+    restoreWindow = () => {
+      clearInterval(timer);
+      browserWindow.removeListener("blur", recover);
+      browserWindow.removeListener("minimize", recover);
+      browserWindow.removeListener("leave-full-screen", recover);
+      if (browserWindow.isDestroyed()) return;
+      browserWindow.setKiosk(previous.kiosk);
+      browserWindow.setFullScreen(previous.fullscreen);
+      browserWindow.setAlwaysOnTop(previous.top, "screen-saver");
+      browserWindow.setResizable(previous.resizable);
+      browserWindow.setMinimizable(previous.minimizable);
+      browserWindow.setMaximizable(previous.maximizable);
+      browserWindow.setMovable(previous.movable);
+      browserWindow.setContentProtection(false);
+    };
+  }
+  if (!enabled) {
+    restoreWindow?.();
+    restoreWindow = null;
+    return;
+  }
+  browserWindow.setKiosk(true);
   browserWindow.setAlwaysOnTop(enabled, "screen-saver");
   browserWindow.setFullScreen(enabled);
   if (configPackage?.clipboardPolicy.mode !== "allow") {
@@ -259,8 +345,16 @@ export const beginManagedSession = async (
   configPackage: ExamConfigPackage,
   recordSecurityEvent: SecurityEventRecorder
 ): Promise<void> => {
+  if (activeSession) {
+    if (isSameSession(activeSession, request)) return;
+    throw new Error("Release the current exam with the invigilator PIN before starting another exam.");
+  }
   if (exitCleanupPending) {
     throw new Error("Previous exam browser cleanup is still running. Wait for it to finish or restart the app before starting another exam.");
+  }
+  assertExamNavigation(configPackage, request.mode);
+  if (configPackage.sessionPolicy.clearSessionOnStart && request.mode === "link") {
+    await clearHostedPartitionData();
   }
   activeSession = {
     examId: request.examId,
@@ -269,12 +363,16 @@ export const beginManagedSession = async (
     startedAt: new Date().toISOString()
   };
   activePackage = configPackage;
-
-  if (configPackage.sessionPolicy.clearSessionOnStart && request.mode === "link") {
-    await clearHostedPartitionData();
+  navigationGuard = packageNavigationGuard(configPackage, request.mode);
+  try {
+    await applyWindowState(browserWindow, configPackage);
+  } catch (error) {
+    activeSession = null;
+    activePackage = null;
+    navigationGuard = null;
+    await applyWindowState(browserWindow, null);
+    throw error;
   }
-
-  await applyWindowState(browserWindow, configPackage);
   await recordSecurityEvent(
     "session",
     "info",

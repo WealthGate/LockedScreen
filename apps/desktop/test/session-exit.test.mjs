@@ -21,10 +21,17 @@ test('managed exit releases window and session despite cleanup or audit failures
   const config = {
     label: 'Fictional test exam', securityMode: 'test',
     sessionPolicy: { clearSessionOnStart: false, clearSessionOnEnd: true },
-    clipboardPolicy: { mode: 'allow' }
+    clipboardPolicy: { mode: 'allow' },
+    browserPolicy: { startUrl: 'https://example.org/exam', allowedDomains: ['example.org'], urlRules: [] }
   };
   const windowState = {};
   const window = {
+    isDestroyed: () => false, isKiosk: () => windowState.kiosk ?? false,
+    isFullScreen: () => windowState.fullscreen ?? false, isAlwaysOnTop: () => windowState.top ?? false,
+    isResizable: () => true, isMinimizable: () => true, isMovable: () => true, isMaximizable: () => true,
+    isFocused: () => true, isMinimized: () => false,
+    setKiosk: value => { windowState.kiosk = value; }, setResizable() {}, setMinimizable() {},
+    setMaximizable() {}, setMovable() {}, setContentProtection() {}, on() {}, removeListener() {}, show() {}, focus() {},
     setAlwaysOnTop: value => { windowState.top = value; },
     setFullScreen: value => { windowState.fullscreen = value; }
   };
@@ -39,13 +46,21 @@ test('managed exit releases window and session despite cleanup or audit failures
           : scenario === 'cleanup stalls' ? () => new Promise(resolve => { finishCleanup = resolve; }) : async () => {};
         state.clearCache = scenario === 'cache rejects' ? failure : async () => {};
         await controller.beginManagedSession(window, { examId: 'test', packageId: 'test', mode: 'link' }, config, audit);
-        controller.setNavigationGuard({ mode: 'link', allowedDomains: ['example.org'] });
+        const started = controller.getActiveSession();
+        await controller.beginManagedSession(window, { examId: 'test', packageId: 'test', mode: 'link' }, config, audit);
+        assert.equal(controller.getActiveSession(), started, 'duplicate starts must not reset the session');
+        await assert.rejects(controller.beginManagedSession(window, { examId: 'other', packageId: 'test', mode: 'link' }, config, audit), /Release the current exam/);
+        assert.equal(windowState.kiosk, true);
+        assert.throws(() => controller.setNavigationGuard(null), /cannot be changed/);
+        assert.equal(controller.urlAllowedByGuard('https://example.org'), true);
+        assert.equal(controller.urlAllowedByGuard('file://example.org/file'), false);
         assert.equal(windowState.fullscreen, true);
         const exitAudit = scenario === 'audit rejects' ? failure
           : scenario === 'audit stalls' ? () => new Promise(() => {}) : audit;
         const ending = controller.endManagedSession(window, 'Test invigilator exit', exitAudit);
         assert.equal(windowState.fullscreen, false);
         assert.equal(windowState.top, false);
+        assert.equal(windowState.kiosk, false);
         assert.equal(controller.getActiveSession(), null);
         assert.equal(controller.getActivePackage(), null);
         assert.equal(controller.urlAllowedByGuard('https://example.org'), false);
