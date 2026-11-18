@@ -35,7 +35,8 @@ try {
   } finally { $sourceIcon.Dispose() }
   if ($PrepareOnly) { return }
   if (!$NodeExecutable) { $NodeExecutable = (Get-Command node.exe).Source }
-  if ([int](& $NodeExecutable -p 'process.versions.node.split(".")[0]') -lt 24) { throw 'Builds require Node 24 or newer. Provide -NodeExecutable for a non-default runtime.' }
+  $nodeMajor = ([Version]((& $NodeExecutable --version).TrimStart('v'))).Major
+  if ($nodeMajor -lt 24) { throw 'Builds require Node 24 or newer. Provide -NodeExecutable for a non-default runtime.' }
   & $NodeExecutable (Join-Path $releaseRoot 'node_modules/typescript/bin/tsc') --noEmit --project apps/desktop/tsconfig.json
   if ($LASTEXITCODE -ne 0) { throw 'Type check failed' }
   Push-Location apps/desktop

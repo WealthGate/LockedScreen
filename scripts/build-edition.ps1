@@ -14,7 +14,8 @@ foreach ($key in @('LOCKEDSCREEN_EDITION','LOCKEDSCREEN_TARGET','LOCKEDSCREEN_ST
 Push-Location $releaseRoot
 try {
   if (!$NodeExecutable) { $NodeExecutable = (Get-Command node.exe).Source }
-  if ([int](& $NodeExecutable -p 'process.versions.node.split(".")[0]') -lt 24) { throw 'Builds require Node 24 or newer. Provide -NodeExecutable for a non-default runtime.' }
+  $nodeMajor = ([Version]((& $NodeExecutable --version).TrimStart('v'))).Major
+  if ($nodeMajor -lt 24) { throw 'Builds require Node 24 or newer. Provide -NodeExecutable for a non-default runtime.' }
   $npmCli = if ($env:npm_execpath) { $env:npm_execpath } else { Join-Path (Split-Path (Get-Command npm.cmd).Source -Parent) 'node_modules/npm/bin/npm-cli.js' }
   $env:LOCKEDSCREEN_EDITION = $Edition
   $env:LOCKEDSCREEN_TARGET = $Target

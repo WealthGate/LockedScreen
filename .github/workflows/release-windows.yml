@@ -26,11 +26,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project apps/windows-lockdown/KeyboardPolicy.Tests/KeyboardPolicy.Tests.csproj -c Release
       - name: Build Teacher installer
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-edition.ps1 -Edition teacher -Target github
+        shell: pwsh
+        run: ./scripts/build-edition.ps1 -Edition teacher -Target github
       - name: Build Student installer
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-edition.ps1 -Edition student -Target github -SkipNative
+        shell: pwsh
+        run: ./scripts/build-edition.ps1 -Edition student -Target github -SkipNative
       - name: Build role-selecting web setup
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-web-setup.ps1 -Test
+        shell: pwsh
+        run: ./scripts/build-web-setup.ps1 -Test
       - name: Upload for supervised release validation
         uses: actions/upload-artifact@v4
         with:
