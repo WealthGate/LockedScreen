@@ -23,6 +23,7 @@ import {
 import { MemoryRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { calculateCompletion, createSession, getRemainingSeconds, updateResponse } from "@lockedscreen/exam-engine";
+import { publisherGoogleConnection, usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
 import type {
   Candidate,
   AppSettings,
@@ -65,6 +66,8 @@ import desktopPackage from "../../package.json";
 import { RichContent } from "./components/rich-content";
 import { RichContentEditor } from "./components/rich-content-editor";
 import { useLockedscreenStore } from "./lib/store";
+import { waitForSessionRelease } from "./lib/session-release";
+import { needsStudentLmsTurnIn } from "./lib/lms-turn-in";
 
 const teacherNavItems = [
   { to: "/teacher", label: "Dashboard", icon: LayoutDashboard },
@@ -87,7 +90,6 @@ const hostedExamUserAgent =
 const minExamZoom = 0.75;
 const maxExamZoom = 1.75;
 const examZoomStep = 0.1;
-const sessionReleaseTimeoutMs = 5000;
 const initialUpdateState: AppUpdateState = {
   status: "idle",
   currentVersion: desktopPackage.version
@@ -95,33 +97,6 @@ const initialUpdateState: AppUpdateState = {
 
 const clampExamZoom = (value: number) =>
   Math.min(maxExamZoom, Math.max(minExamZoom, Math.round(value * 100) / 100));
-
-const wait = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-
-const waitForSessionRelease = async (operation: Promise<unknown>): Promise<boolean> => {
-  let finished = false;
-  let failure: unknown;
-
-  const guardedOperation = operation
-    .then(() => {
-      finished = true;
-    })
-    .catch((error) => {
-      finished = true;
-      failure = error;
-    });
-
-  await Promise.race([guardedOperation, wait(sessionReleaseTimeoutMs)]);
-
-  if (failure) {
-    throw failure;
-  }
-
-  return finished;
-};
 
 const isHostedFormCompletionUrl = (candidateUrl: string) => {
   try {
@@ -317,20 +292,19 @@ const usesNativeCompanion = (profile: SecurityProfile): boolean =>
   profile.kioskMode === "windows-native-companion" || profile.kioskMode === "hybrid";
 
 const isSecureSessionReady = (snapshot: AppStateSnapshot): boolean => {
+  if (snapshot.activeSession) return !snapshot.activeSession.securityHold;
   const officialKioskReady =
     snapshot.securityProfile.kioskConfigured &&
     snapshot.securityProfile.dedicatedExamAccount &&
     usesOfficialKiosk(snapshot.securityProfile);
-  const nativeReady =
-    snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile) &&
-    snapshot.runtime?.nativeLockdown.lockdownCapable === true;
+  const nativeReady = snapshot.runtime?.nativeLockdown.lockdownCapable === true;
 
   return officialKioskReady || nativeReady;
 };
 
 const canUseTestingMode = (snapshot: AppStateSnapshot): boolean =>
-  snapshot.settings.allowNonKioskTestingMode || snapshot.runtime?.canOnlyUseTestingMode === true;
+  snapshot.installedRole !== "student" &&
+  (snapshot.settings.allowNonKioskTestingMode || snapshot.runtime?.canOnlyUseTestingMode === true);
 
 const testingModeCopy = (snapshot: AppStateSnapshot): string =>
   snapshot.runtime?.canOnlyUseTestingMode
@@ -356,8 +330,7 @@ const isNativeFullKioskExam = (snapshot: AppStateSnapshot, examId: string): bool
   const configPackage = getConfigPackageForExam(snapshot, examId);
   return (
     configPackage?.securityMode === "full-kiosk" &&
-    snapshot.securityProfile.nativeCompanionVerified &&
-    usesNativeCompanion(snapshot.securityProfile)
+    snapshot.runtime?.nativeLockdown.lockdownCapable === true
   );
 };
 
@@ -733,6 +706,14 @@ const lmsAccountOptionLabel = (connection: LmsConnection): string => {
 const AppFrame = () => {
   const location = useLocation();
   const { snapshot, loading, error, load } = useLockedscreenStore();
+  const examLocationRef = useRef<{ startedAt: string; route: string } | null>(null);
+  const activeSession = snapshot?.activeSession;
+  if (activeSession && examLocationRef.current?.startedAt !== activeSession.startedAt) {
+    const path = `${activeSession.mode === "link" ? "/link/" : "/session/"}${activeSession.examId}`;
+    examLocationRef.current = { startedAt: activeSession.startedAt, route: path + (location.pathname === path ? location.search : "") };
+  }
+  if (!activeSession) examLocationRef.current = null;
+  const examRoute = examLocationRef.current?.route;
   const [launchContext, setLaunchContext] = useState<LaunchContext | null>(null);
   const [updateState, setUpdateState] = useState<AppUpdateState | null>(initialUpdateState);
   const installedRole: InstalledAppRole = launchContext?.installedRole ?? "teacher";
@@ -742,7 +723,7 @@ const AppFrame = () => {
     location.pathname.startsWith("/session/") ||
     location.pathname.startsWith("/link/") ||
     location.pathname.startsWith("/package-import");
-  const canShowUpdates = !location.pathname.startsWith("/session/") && !location.pathname.startsWith("/link/");
+  const canShowUpdates = !activeSession && !location.pathname.startsWith("/session/") && !location.pathname.startsWith("/link/");
 
   useEffect(() => {
     void load();
@@ -750,6 +731,7 @@ const AppFrame = () => {
     const unsubscribe = window.lockedscreenApi.onLaunchContextChanged(setLaunchContext);
     return unsubscribe;
   }, [load]);
+  useEffect(() => window.lockedscreenApi.onSessionSecurityHold(() => { void load(); }), [load]);
 
   useEffect(() => {
     void window.lockedscreenApi.getUpdateState().then(setUpdateState);
@@ -761,7 +743,7 @@ const AppFrame = () => {
     document.documentElement.className = themeClass(snapshot?.settings.defaultTheme ?? "system");
   }, [snapshot?.settings.defaultTheme]);
 
-  if (loading && !snapshot) {
+  if ((loading && !snapshot) || !launchContext) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-slate-800 dark:text-slate-100">
         Loading workspace...
@@ -791,16 +773,16 @@ const AppFrame = () => {
     <div className={`min-h-screen min-w-0 max-w-full overflow-x-hidden text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-3 sm:p-6"}`}>
       {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
-        <Routes>
-          <Route path="/" element={<StudentPortalPage />} />
-          <Route path="/student" element={<StudentPortalPage />} />
+        <Routes location={examRoute ?? location}>
+          <Route path="/" element={<StudentPortalPage studentOnly />} />
+          <Route path="/student" element={<StudentPortalPage studentOnly />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
           <Route path="/link/:examId" element={<LinkExamPage />} />
           <Route path="/package-import" element={<PackageImportPage launchContext={launchContext} />} />
-          <Route path="*" element={<StudentPortalPage />} />
+          <Route path="*" element={<StudentPortalPage studentOnly />} />
         </Routes>
       ) : (
-        <Routes>
+        <Routes location={examRoute ?? location}>
           <Route path="/" element={<ProfileSelectPage launchContext={launchContext} />} />
           <Route path="/student" element={<StudentPortalPage />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
@@ -810,7 +792,7 @@ const AppFrame = () => {
           <Route path="*" element={<ProfileSelectPage launchContext={launchContext} />} />
         </Routes>
       )}
-      {launchContext?.route ? (
+      {!activeSession && launchContext?.route ? (
         <LaunchContextNavigator
           route={launchContext.route}
           navigationKey={`${launchContext.route}|${launchContext.packageImport?.filePath ?? ""}`}
@@ -980,10 +962,11 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
   );
 };
 
-const StudentPortalPage = () => {
+const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { snapshot, launchAlternateDesktopSession, hideExamForStudent } = useLockedscreenStore();
+  const { snapshot, launchAlternateDesktopSession, hideExamForStudent, importConfigPackage, error } = useLockedscreenStore();
+  const [openingPackage, setOpeningPackage] = useState(false);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [candidateName, setCandidateName] = useState("");
   const [candidateId, setCandidateId] = useState("");
@@ -1111,12 +1094,20 @@ const StudentPortalPage = () => {
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/")}>
+              {!studentOnly ? <Button className="bg-white text-slate-950 hover:bg-slate-100" onClick={() => navigate("/")}>
                 <ArrowLeft className="size-4" />
                 Change profile
+              </Button> : null}
+              <Button className="bg-white text-slate-950 hover:bg-slate-100" disabled={openingPackage} onClick={async () => {
+                setOpeningPackage(true);
+                try { await importConfigPackage(); } finally { setOpeningPackage(false); }
+              }}>
+                {openingPackage ? <Loader2 className="size-4 animate-spin" /> : <FileInput className="size-4" />}
+                Open exam package
               </Button>
               <Badge className="bg-teal-100 text-teal-950">{snapshot.exams.length} exam(s) available</Badge>
             </div>
+            {error ? <p role="alert" className="text-sm text-rose-200">{error}</p> : null}
           </div>
         </Card>
 
@@ -2855,6 +2846,7 @@ const SettingsPage = () => {
               provider: "google-classroom",
               clientId: teacherConnection.clientId,
               clientSecret: teacherConnection.clientSecret,
+              googleAuthMode: teacherConnection.googleAuthMode,
               tenantId: "",
               scope: defaultStudentLmsScope("google-classroom")
             }
@@ -3016,6 +3008,7 @@ const SettingsPage = () => {
             connectionId: packageDraft.studentLmsBinding.connectionId?.trim() || undefined,
             clientId: packageDraft.studentLmsBinding.clientId.trim(),
             clientSecret: packageDraft.studentLmsBinding.clientSecret?.trim() || undefined,
+            googleAuthMode: packageDraft.studentLmsBinding.googleAuthMode,
             tenantId: packageDraft.studentLmsBinding.provider === "microsoft-365"
               ? packageDraft.studentLmsBinding.tenantId?.trim() || "common"
               : undefined,
@@ -3213,10 +3206,11 @@ const SettingsPage = () => {
       }
     });
 
-  const handleSaveConnection = async () => {
+  const buildConnectionDraft = (): LmsConnection => {
     const googleScopes = settings.googleIntegration.requestedScopes.join(" ");
-    const nextConnection = {
+    return {
       ...connectionDraft,
+      googleAuthMode: connectionDraft.provider === "google-classroom" ? settings.googleIntegration.authMode : undefined,
       label: connectionDraft.label.trim() || providerLabel(connectionDraft.provider),
       clientId:
         connectionDraft.provider === "google-classroom"
@@ -3234,7 +3228,10 @@ const SettingsPage = () => {
           ? googleScopes
           : connectionDraft.scope.trim() || defaultLmsScope(connectionDraft.provider)
     };
+  };
 
+  const handleSaveConnection = async () => {
+    const nextConnection = buildConnectionDraft();
     await runAdminAction("save-lms-connection", () => saveLmsConnection(nextConnection), {
       success: `Saved LMS connection "${nextConnection.label}".`,
       empty: "LMS connection was not saved.",
@@ -3268,6 +3265,13 @@ const SettingsPage = () => {
     });
 
     try {
+      if (connectionDraft.provider === "google-classroom") {
+        const saved = await saveLmsConnection(buildConnectionDraft());
+        if (!saved) {
+          setActionFeedback({ tone: "error", text: "Could not create the Classroom connection. Check the school setup and try again." });
+          return;
+        }
+      }
       const nextSnapshot = await connectLmsConnection(connectionDraft.id);
       if (!nextSnapshot) {
         setActionFeedback({ tone: "error", text: "LMS connection did not complete." });
@@ -3598,19 +3602,6 @@ const SettingsPage = () => {
 
   const handleExportPackage = async () => {
     const nextPackage = packageDirty ? buildPackageDraft() : null;
-    const exportCandidate = nextPackage ?? packageDraft;
-    if (
-      exportCandidate.externalDeliveryMode === "integrated" &&
-      exportCandidate.studentLmsBinding.enabled &&
-      !exportCandidate.studentLmsBinding.assignmentId.trim()
-    ) {
-      setActionFeedback({
-        tone: "error",
-        text:
-          "Choose an existing LMS assignment or post the package to the class before exporting with student LMS turn-in enabled. If the assignment will be created later, disable student LMS turn-in and use a server-side grade-sync mapping, then re-save/re-export after the assignment exists."
-      });
-      return;
-    }
 
     await runAdminAction(
       "export-package",
@@ -3643,16 +3634,19 @@ const SettingsPage = () => {
       return;
     }
 
-    if (packageDirty) {
-      await handleSavePackage();
-    }
-
     await runAdminAction(
       "publish-classroom-package",
-      () => publishConfigPackageToClassroom({ packageId: packageDraft.id }),
+      async () => {
+        if (packageDirty) {
+          const saved = await saveConfigPackage(buildPackageDraft());
+          if (!saved) throw new Error("The package could not be saved. No assignment was posted.");
+          setPackageDirty(false);
+        }
+        return publishConfigPackageToClassroom({ packageId: packageDraft.id });
+      },
       {
         success: (published) =>
-          `Posted "${published.courseWork.title}" to Google Classroom${published.driveFileName ? ` with ${published.driveFileName}` : ""}.`,
+          `Posted "${published.courseWork.title}" to Google Classroom. Assignment ID: ${published.courseWork.id}.`,
         empty: "Google Classroom post did not complete.",
         onSuccess: (published) => {
           setPackageDraft((current) => current ? ({
@@ -3831,7 +3825,10 @@ const SettingsPage = () => {
             </div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-            Exported package files do not require a PIN or password. Double-clicking a package on a student install imports it and opens the exam environment.
+            Opening the file imports the package; it does not start the exam.{" "}
+            {hasExamStartCode(packageDraft.studentAccessPolicy)
+              ? "Students must enter the teacher's exam start code to begin."
+              : "No exam start code is set for this package."}
           </div>
         </Card>
 
@@ -3850,12 +3847,24 @@ const SettingsPage = () => {
       </div>
 
       <div className={settingsTabClass("google")} style={settingsTabStyle("google")}> 
+      <Card className="mb-4 space-y-3">
+        <CardTitle>Classroom quick start</CardTitle>
+        <ol className="list-decimal space-y-2 pl-5 text-sm">
+          <li>Under LMS connections below, select <strong>Connect Google Classroom</strong> and sign in with your school account.</li>
+          <li>Open <strong>Student turn-in</strong>, choose your class, and select an assignment or post a new one.</li>
+          <li>Save the exam package and verify a test submission with a practice student account.</li>
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setSettingsTab("turnin")}>Student turn-in</Button>
+          <Button variant="secondary" onClick={() => void window.lockedscreenApi.openClassroomSetupGuide()}>Open setup guide</Button>
+        </div>
+      </Card>
       <Card className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle>Google Classroom integration</CardTitle>
             <CardDescription className="mt-2">
-              Teachers sign in with their school Google account after an admin completes the one-time school setup.
+              Teachers connect their Google account using the publisher-managed connection. School-managed OAuth is optional.
             </CardDescription>
           </div>
           <Badge>{settings.googleIntegration.enabled ? "Enabled" : "Disabled"}</Badge>
@@ -3905,6 +3914,26 @@ const SettingsPage = () => {
           </div>
 
           <div className="mt-4 grid gap-4">
+            <LabelledField label="Google connection provider">
+              <select
+                className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                value={settings.googleIntegration.authMode ?? "school-desktop"}
+                onChange={(event) => updateSettings((current) => ({
+                  ...current,
+                  googleIntegration: {
+                    ...current.googleIntegration,
+                    authMode: event.target.value === "publisher-hosted" ? "publisher-hosted" : "school-desktop",
+                    clientId: event.target.value === "publisher-hosted" ? publisherGoogleConnection.clientId : "",
+                    clientSecret: "", connectionStatus: "disconnected"
+                  }
+                }))}
+              >
+                <option value="publisher-hosted">LockedScreen publisher-managed</option>
+                <option value="school-desktop">School-managed Desktop OAuth</option>
+              </select>
+            </LabelledField>
+
+            {settings.googleIntegration.authMode !== "publisher-hosted" ? <>
             <LabelledField label="Google desktop app client ID">
               <Input
                 value={settings.googleIntegration.clientId}
@@ -3962,6 +3991,7 @@ const SettingsPage = () => {
               />
             </LabelledField>
 
+            </> : null}
             <LabelledField label="Default Google Sheets sync URL">
               <Input
                 placeholder="https://script.google.com/macros/s/.../exec"
@@ -4190,7 +4220,8 @@ const SettingsPage = () => {
               disabled={
                 adminBusy ||
                 !connectionHasAdminSetup ||
-                !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id)
+                (connectionDraft.provider !== "google-classroom" &&
+                  !snapshot.lmsConnections.some((candidate) => candidate.id === connectionDraft.id))
               }
             >
               {isPending("connect-lms")
@@ -4266,7 +4297,9 @@ const SettingsPage = () => {
                 : connectionDraft.status === "error"
                   ? connectionDraft.lastError || "Connection failed."
                   : connectionHasAdminSetup
-                    ? "Save the connection, then connect with the teacher's school account in the system browser."
+                    ? connectionDraft.provider === "google-classroom"
+                      ? "Connect with your school account in the system browser."
+                      : "Save the connection, then connect with the teacher's school account in the system browser."
                     : connectionDraft.provider === "google-classroom"
                       ? "School setup is required before teachers can connect Google Classroom."
                       : "Admin setup is optional. To use LMS turn-in, a school admin must first add the app registration in the admin/developer setup section."}
@@ -4417,6 +4450,7 @@ const SettingsPage = () => {
                       provider: selectedConnection?.provider === "microsoft-365" ? "microsoft-365" : "google-classroom",
                       clientId: selectedConnection?.clientId ?? current.studentLmsBinding.clientId,
                       clientSecret: selectedConnection?.clientSecret ?? current.studentLmsBinding.clientSecret,
+                      googleAuthMode: selectedConnection?.googleAuthMode ?? current.studentLmsBinding.googleAuthMode,
                       tenantId:
                         selectedConnection?.provider === "microsoft-365"
                           ? (selectedConnection.tenantId ?? "common")
@@ -4578,6 +4612,12 @@ const SettingsPage = () => {
                 }}
               >
                 <option value="">Load assignments from the selected class</option>
+                {packageDraft.studentLmsBinding.assignmentId &&
+                 !bindingCourseWork.some((item) => item.id === packageDraft.studentLmsBinding.assignmentId) ? (
+                  <option value={packageDraft.studentLmsBinding.assignmentId}>
+                    {packageDraft.studentLmsBinding.assignmentLabel || packageDraft.studentLmsBinding.assignmentId}
+                  </option>
+                ) : null}
                 {bindingCourseWork.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.title}{item.dueAt ? ` - due ${formatDateTime(item.dueAt) ?? item.dueAt}` : ""}
@@ -4615,7 +4655,7 @@ const SettingsPage = () => {
             <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950">
               <div className="font-semibold">Post this test to Google Classroom</div>
               <p className="mt-1">
-                Lockedscreen will post a downloadable `.lscp` package and a direct download link as classwork in the
+                Lockedscreen will attach the downloadable `.lscp` package to the assignment in the
                 selected class: {packageDraft.studentLmsBinding.courseLabel || "choose a class above first"}.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -6202,7 +6242,9 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
 const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
   const label = state?.currentVersion ? `Lockedscreen v${state.currentVersion}` : `Lockedscreen v${desktopPackage.version}`;
   const status =
-    state?.status === "available"
+    state?.channel === "microsoft-store"
+      ? "Microsoft Store updates"
+      : state?.status === "available"
       ? `Update ${state.availableVersion ?? ""} available`.trim()
       : state?.status === "downloaded"
         ? "Update ready"
@@ -6257,7 +6299,7 @@ const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
                   disabled: true
                 }
               : {
-                  label: state?.status === "error" ? "Check again" : "Check for updates",
+                  label: state?.channel === "microsoft-store" ? "Open Microsoft Store" : state?.status === "error" ? "Check again" : "Check for updates",
                   icon: null,
                   onClick: () => void window.lockedscreenApi.checkForUpdates(),
                   disabled: false
@@ -6294,7 +6336,7 @@ const StudentLmsTurnInPanel = ({
   configPackage: ExamConfigPackage | null;
   submission: SubmissionResult | null;
   turningIn: boolean;
-  onTurnIn: () => void;
+  onTurnIn: (pin?: string) => void;
 }) => {
   const binding = configPackage?.studentLmsBinding;
   if (!binding?.enabled || !submission) {
@@ -6303,7 +6345,9 @@ const StudentLmsTurnInPanel = ({
 
   const state = submission.studentLmsTurnIn;
   const status = state?.status ?? "pending";
-  const actionLabel = status === "success" ? "Turned in" : turningIn ? "Connecting..." : "Turn in to LMS";
+  const followUpRequired = needsStudentLmsTurnIn(binding, state);
+  const actionLabel = turningIn ? "Connecting..." : status === "success"
+    ? followUpRequired ? "Retry grade sync" : "Turned in" : status === "failed" ? "Retry delivery" : "Send result";
   const providerName = providerLabel(binding.provider);
   const gradeValue = typeof state?.gradeValue === "number" ? `${state.gradeValue} points` : null;
   const completionMessage =
@@ -6326,10 +6370,10 @@ const StudentLmsTurnInPanel = ({
           <CardDescription className="mt-2 text-slate-900 dark:text-slate-100">
             {status === "success"
               ? completionMessage
-              : "Sign in with the student LMS account to attach the Lockedscreen performance report and complete the turn-in."}
+              : turningIn ? "Sending your saved result and performance report." : "Your result is saved. Delivery can be retried without leaving the exam."}
           </CardDescription>
         </div>
-        <Button className="px-3 py-2" onClick={onTurnIn} disabled={turningIn || status === "success"}>
+        <Button className="px-3 py-2" onClick={() => onTurnIn()} disabled={turningIn || !followUpRequired}>
           {actionLabel}
         </Button>
       </div>
@@ -6379,7 +6423,7 @@ const StudentExamPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { examId } = useParams();
-  const { snapshot, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
+  const { snapshot, error, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
   const exam = snapshot?.exams.find((candidate) => candidate.id === examId);
   const configPackage = examId ? getConfigPackageForExam(snapshot ?? null, examId) : null;
   const sessionExamId = exam?.id ?? null;
@@ -6398,16 +6442,19 @@ const StudentExamPage = () => {
   const [turningIn, setTurningIn] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
   const sessionEndedRef = useRef(false);
+  const locked = snapshot?.activeSession?.examId === examId;
 
   const endCurrentSession = useCallback(
-    async (reason: string): Promise<boolean> => {
+    async (reason: string, pin?: string): Promise<boolean> => {
       if (sessionEndedRef.current) {
         return true;
       }
 
       sessionEndedRef.current = true;
       try {
-        return await waitForSessionRelease(endSession(reason));
+        const released = await waitForSessionRelease(endSession(reason, pin));
+        if (!released) { sessionEndedRef.current = false; throw new Error(useLockedscreenStore.getState().error ?? "Session release failed. Check the invigilator PIN and try again."); }
+        return true;
       } catch (error) {
         sessionEndedRef.current = false;
         throw error;
@@ -6416,8 +6463,21 @@ const StudentExamPage = () => {
     [endSession]
   );
 
-  const releaseToStudentPortal = useCallback(async () => {
-    await endCurrentSession("Invigilator released native exam runtime");
+  const handleStudentTurnIn = useCallback(async (submissionId: string, pin?: string) => {
+    if (!configPackage) return null;
+    setTurningIn(true);
+    try {
+      const updated = await turnInStudentLms({ submissionId, packageId: configPackage.id, pin });
+      if (updated) {
+        setSubmissionResult(updated);
+        if (!useLockedscreenStore.getState().snapshot?.activeSession) sessionEndedRef.current = true;
+      }
+      return updated;
+    } finally { setTurningIn(false); }
+  }, [configPackage, turnInStudentLms]);
+
+  const releaseToStudentPortal = useCallback(async (pin?: string) => {
+    await endCurrentSession("Invigilator released native exam runtime", pin);
     navigate("/student", { replace: true });
   }, [endCurrentSession, navigate]);
 
@@ -6427,10 +6487,9 @@ const StudentExamPage = () => {
     }
 
     sessionEndedRef.current = false;
-    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" });
-    return () => {
-      void endCurrentSession("Closed native exam runtime");
-    };
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" }).then(started => {
+      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate));
+    });
   }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
 
   useEffect(() => {
@@ -6445,19 +6504,6 @@ const StudentExamPage = () => {
     setTurningIn(false);
     setSubmissionResult(null);
   }, [sessionExamId, location.search]);
-
-  const handleStudentTurnIn = async (submissionId: string) => {
-    if (!configPackage) {
-      return;
-    }
-
-    setTurningIn(true);
-    const updatedSubmission = await turnInStudentLms({ submissionId, packageId: configPackage.id });
-    if (updatedSubmission) {
-      setSubmissionResult(updatedSubmission);
-    }
-    setTurningIn(false);
-  };
 
   const finalize = async () => {
     if (submitted || submitting || !session || !exam) {
@@ -6474,18 +6520,12 @@ const StudentExamPage = () => {
     setSubmissionResult(result);
     setSubmitted(true);
     setSubmitting(false);
-    if (configPackage?.studentLmsBinding.enabled) {
-      void handleStudentTurnIn(result.id);
-      return;
-    }
+    if (configPackage?.externalDeliveryMode !== "lockdown-only" && configPackage?.studentLmsBinding.enabled) await handleStudentTurnIn(result.id);
 
-    if (!requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
-      navigate("/student");
-    }
   };
 
   useEffect(() => {
-    if (!session || submitted) {
+    if (!session || submitted || !locked) {
       return;
     }
 
@@ -6502,13 +6542,16 @@ const StudentExamPage = () => {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted]);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
 
   if (!exam || !session) {
     return null;
   }
 
   const question = exam.questions[currentIndex];
+  if (!locked && !submitted && !sessionEndedRef.current) {
+    return <ExamStartupStatus error={error} onBack={() => navigate("/student", { replace: true })} />;
+  }
   const response = session.responses.find((entry) => entry.questionId === question?.id);
 
   return (
@@ -6520,6 +6563,7 @@ const StudentExamPage = () => {
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
+      verifyPinInMain
       onUnlock={releaseToStudentPortal}
     >
       {submitted ? (
@@ -6545,9 +6589,9 @@ const StudentExamPage = () => {
             configPackage={configPackage}
             submission={submissionResult}
             turningIn={turningIn}
-            onTurnIn={() => {
+            onTurnIn={(pin) => {
               if (submissionResult) {
-                void handleStudentTurnIn(submissionResult.id);
+                void handleStudentTurnIn(submissionResult.id, pin);
               }
             }}
           />
@@ -6675,7 +6719,7 @@ const LinkExamPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { examId } = useParams();
-  const { snapshot, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
+  const { snapshot, error, submitExam, turnInStudentLms, beginSession, endSession } = useLockedscreenStore();
   const exam = snapshot?.exams.find((candidate) => candidate.id === examId);
   const configPackage = examId ? getConfigPackageForExam(snapshot ?? null, examId) : null;
   const sessionExamId = exam?.id ?? null;
@@ -6699,6 +6743,7 @@ const LinkExamPage = () => {
   const [embeddedGoogleSignInBlocked, setEmbeddedGoogleSignInBlocked] = useState(false);
   const webviewRef = useRef<any>(null);
   const sessionEndedRef = useRef(false);
+  const locked = snapshot?.activeSession?.examId === examId;
   const guardDomainsKey = configPackage?.browserPolicy.allowedDomains.join("|") ?? "";
   const guardPrefixesKey =
     configPackage?.browserPolicy.urlRules
@@ -6707,14 +6752,16 @@ const LinkExamPage = () => {
       .join("|") ?? "";
 
   const endCurrentSession = useCallback(
-    async (reason: string): Promise<boolean> => {
+    async (reason: string, pin?: string): Promise<boolean> => {
       if (sessionEndedRef.current) {
         return true;
       }
 
       sessionEndedRef.current = true;
       try {
-        return await waitForSessionRelease(endSession(reason));
+        const released = await waitForSessionRelease(endSession(reason, pin));
+        if (!released) { sessionEndedRef.current = false; throw new Error(useLockedscreenStore.getState().error ?? "Session release failed. Check the invigilator PIN and try again."); }
+        return true;
       } catch (error) {
         sessionEndedRef.current = false;
         throw error;
@@ -6723,8 +6770,21 @@ const LinkExamPage = () => {
     [endSession]
   );
 
-  const releaseToStudentPortal = useCallback(async () => {
-    await endCurrentSession("Invigilator released hosted exam runtime");
+  const handleStudentTurnIn = useCallback(async (submissionId: string, pin?: string) => {
+    if (!configPackage) return null;
+    setTurningIn(true);
+    try {
+      const updated = await turnInStudentLms({ submissionId, packageId: configPackage.id, pin });
+      if (updated) {
+        setSubmissionResult(updated);
+        if (!useLockedscreenStore.getState().snapshot?.activeSession) sessionEndedRef.current = true;
+      }
+      return updated;
+    } finally { setTurningIn(false); }
+  }, [configPackage, turnInStudentLms]);
+
+  const releaseToStudentPortal = useCallback(async (pin?: string) => {
+    await endCurrentSession("Invigilator released hosted exam runtime", pin);
     navigate("/student", { replace: true });
   }, [endCurrentSession, navigate]);
 
@@ -6734,31 +6794,12 @@ const LinkExamPage = () => {
     }
 
     sessionEndedRef.current = false;
-    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" });
-
-    return () => {
-      void endCurrentSession("Closed hosted exam runtime");
-    };
-  }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
-
-  useEffect(() => {
-    if (!configPackage) {
-      return;
-    }
-
-    void window.lockedscreenApi.setNavigationGuard({
-      allowedDomains: configPackage.browserPolicy.allowedDomains,
-      allowedPrefixes: configPackage.browserPolicy.urlRules
-        .filter((rule) => rule.kind === "prefix")
-        .map((rule) => rule.pattern),
-      startUrl: configPackage.browserPolicy.startUrl,
-      mode: "link"
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" }).then(started => {
+      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate));
     });
 
-    return () => {
-      void window.lockedscreenApi.setNavigationGuard(null);
-    };
-  }, [configPackage?.id, configPackage?.browserPolicy.startUrl, guardDomainsKey, guardPrefixesKey]);
+  }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
+
 
   useEffect(() => {
     return window.lockedscreenApi.onEmbeddedGoogleSignInBlocked(() => {
@@ -6803,7 +6844,7 @@ const LinkExamPage = () => {
   }, [expired, hostedZoom, submitted]);
 
   useEffect(() => {
-    if (!session || submitted) {
+    if (!session || submitted || !locked) {
       return;
     }
 
@@ -6821,7 +6862,7 @@ const LinkExamPage = () => {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted]);
+  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
 
   const finalize = async () => {
     if (submitted || submitting || !exam || !session) {
@@ -6838,19 +6879,8 @@ const LinkExamPage = () => {
     setSubmissionResult(result);
     setSubmitted(true);
     setSubmitting(false);
-    if (configPackage?.studentLmsBinding.enabled && configPackage) {
-      setTurningIn(true);
-      const updatedSubmission = await turnInStudentLms({ submissionId: result.id, packageId: configPackage.id });
-      if (updatedSubmission) {
-        setSubmissionResult(updatedSubmission);
-      }
-      setTurningIn(false);
-      return;
-    }
+    if (configPackage?.externalDeliveryMode !== "lockdown-only" && configPackage?.studentLmsBinding.enabled) await handleStudentTurnIn(result.id);
 
-    if (!requiresInvigilatorExitAfterSubmit(configPackage) && configPackage?.sessionPolicy.allowExitAfterSubmit) {
-      navigate("/student");
-    }
   };
 
   const returnToStart = () => {
@@ -6885,6 +6915,9 @@ const LinkExamPage = () => {
   }
 
   const webviewHidden = submitted || expired || shellUnlockOpen;
+  if (!locked && !submitted && !sessionEndedRef.current) {
+    return <ExamStartupStatus error={error} onBack={() => navigate("/student", { replace: true })} />;
+  }
 
   return (
     <StudentShell
@@ -6895,6 +6928,7 @@ const LinkExamPage = () => {
       secureMode={snapshot ? isSecureSessionReady(snapshot) : false}
       testingModeName={snapshot ? testingModeLabel(snapshot) : "Testing mode"}
       unlockPin={snapshot?.settings.invigilatorUnlockPin ?? ""}
+      verifyPinInMain
       onUnlock={releaseToStudentPortal}
       onUnlockDialogChange={setShellUnlockOpen}
       onZoomChange={setHostedZoom}
@@ -6915,20 +6949,11 @@ const LinkExamPage = () => {
                 configPackage={configPackage}
                 submission={submissionResult}
                 turningIn={turningIn}
-                onTurnIn={() => {
-                  if (!submissionResult || !configPackage) {
+                onTurnIn={(pin) => {
+                  if (!submissionResult) {
                     return;
                   }
-
-                  setTurningIn(true);
-                  void turnInStudentLms({ submissionId: submissionResult.id, packageId: configPackage.id }).then(
-                    (updatedSubmission) => {
-                      if (updatedSubmission) {
-                        setSubmissionResult(updatedSubmission);
-                      }
-                      setTurningIn(false);
-                    }
-                  );
+                  void handleStudentTurnIn(submissionResult.id, pin);
                 }}
               />
             </div>
@@ -7036,6 +7061,13 @@ const ExamZoomControls = ({ zoom, onChange }: { zoom: number; onChange: (zoom: n
   </div>
 );
 
+const ExamStartupStatus = ({ error, onBack }: { error: string | null; onBack: () => void }) => (
+  <div className="mx-auto max-w-xl space-y-4 p-6" role="status">
+    <h1 className="text-xl font-semibold">{error ? "Exam could not start" : "Securing exam environment"}</h1>
+    {error ? <><p className="text-sm text-rose-600">{error}</p><Button variant="secondary" onClick={onBack}>Return to exams</Button></> : null}
+  </div>
+);
+
 const StudentShell = ({
   exam,
   configPackage,
@@ -7045,6 +7077,7 @@ const StudentShell = ({
   testingModeName,
   unlockPin,
   onUnlock,
+  verifyPinInMain = false,
   onUnlockDialogChange,
   onZoomChange,
   scaleContent = true,
@@ -7057,13 +7090,15 @@ const StudentShell = ({
   secureMode: boolean;
   testingModeName: string;
   unlockPin: string;
-  onUnlock: () => void | Promise<void>;
+  onUnlock: (pin?: string) => void | Promise<void>;
+  verifyPinInMain?: boolean;
   onUnlockDialogChange?: (open: boolean) => void;
   onZoomChange?: (zoom: number) => void;
   scaleContent?: boolean;
   children: ReactNode;
 }) => {
-  const { launchApprovedApplication } = useLockedscreenStore();
+  const { snapshot } = useLockedscreenStore();
+  const securityHold = snapshot?.activeSession?.securityHold;
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const remaining = getRemainingSeconds(session, currentTime);
   const [unlockOpen, setUnlockOpen] = useState(false);
@@ -7077,7 +7112,7 @@ const StudentShell = ({
   const unlockInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedUnlockPin = unlockPin.trim();
   const normalizedPinAttempt = pinAttempt.trim();
-  const invigilatorPinRequired = closeAttemptBlocked || Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
+  const invigilatorPinRequired = verifyPinInMain || closeAttemptBlocked || Boolean(configPackage?.quitUnlockPolicy.requireInvigilatorPin);
   const showSchoolBranding = configPackage?.teacherOptions.showSchoolBranding !== false;
   const showCandidateId = configPackage?.teacherOptions.showCandidateId !== false;
   const showTimer = configPackage?.teacherOptions.showTimer !== false;
@@ -7161,7 +7196,7 @@ const StudentShell = ({
   const releaseSession = async () => {
     setReleasePending(true);
     try {
-      await onUnlock();
+      await onUnlock(normalizedPinAttempt);
       setUnlockError(null);
       setUnlockOpen(false);
       setPinAttempt("");
@@ -7178,6 +7213,10 @@ const StudentShell = ({
       return;
     }
 
+    if (verifyPinInMain) {
+      void releaseSession();
+      return;
+    }
     if (!invigilatorPinRequired) {
       void releaseSession();
       return;
@@ -7192,6 +7231,10 @@ const StudentShell = ({
   };
 
   const captureScreenshot = async () => {
+    if (verifyPinInMain) {
+      setUnlockError("Screenshots are unavailable in the Student edition.");
+      return;
+    }
     if (normalizedUnlockPin.length > 0 && normalizedPinAttempt !== normalizedUnlockPin) {
       setUnlockError("Enter the invigilator PIN to save a screenshot.");
       return;
@@ -7312,32 +7355,6 @@ const StudentShell = ({
         </div>
       ) : null}
 
-      {configPackage?.allowedApplications.length ? (
-        <Card className="space-y-3 border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <CardTitle>Approved Tools</CardTitle>
-              <CardDescription>
-                These applications are package-approved and launched under kiosk supervision when permitted by the invigilator.
-              </CardDescription>
-            </div>
-            <Badge className="bg-slate-900 text-white">{configPackage.allowedApplications.length}</Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {configPackage.allowedApplications.map((entry) => (
-              <Button
-                key={entry.id}
-                variant="secondary"
-                className="px-3 py-2"
-                onClick={() => void launchApprovedApplication({ packageId: configPackage.id, appId: entry.id })}
-              >
-                {entry.label}
-              </Button>
-            ))}
-          </div>
-        </Card>
-      ) : null}
-
       {unlockOpen ? (
         <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-auto bg-slate-950/80 p-2 pt-4 backdrop-blur-sm sm:p-4 sm:pt-10 lg:pt-20">
         <Card className="w-full max-w-3xl border-amber-200 bg-white p-4 text-slate-950 shadow-2xl dark:bg-slate-950 dark:text-slate-50">
@@ -7350,21 +7367,16 @@ const StudentShell = ({
                 <CardTitle>{sessionSubmitted ? "Invigilator release required" : "Invigilator unlock required"}</CardTitle>
               </div>
               <CardDescription className="max-w-2xl">
-                {invigilatorPinRequired
-                  ? sessionSubmitted
-                    ? "This exam has already been submitted. The session remains locked until the invigilator enters the PIN and releases the student."
-                    : "Exit from the active exam session requires the invigilator PIN. The same PIN can be used to save an in-app screenshot without relying on blocked OS shortcuts."
-                  : sessionSubmitted
-                    ? "This exam has already been submitted. Use the release action below to leave the controlled session."
-                    : "Use the release action below to leave the controlled session."}{" "}
-                Complete suppression of the Windows key and task switching must still be enforced by a verified native Windows companion or official kiosk deployment.
+                {!sessionSubmitted
+                  ? "This exam has not been submitted. Releasing now will not send a result or grade to Classroom."
+                  : "Your result is saved. Invigilator release is required before leaving the controlled session."}
               </CardDescription>
               {invigilatorPinRequired ? (
                 <div className="mt-4 max-w-sm space-y-3">
                   <LabelledField label="Invigilator PIN">
                     <Input
                       ref={unlockInputRef}
-                      type="text"
+                      type="password"
                       inputMode="numeric"
                       autoComplete="off"
                       autoFocus
@@ -7394,10 +7406,10 @@ const StudentShell = ({
               <Button variant="secondary" className="px-3 py-2" onClick={() => setUnlockOpen(false)} disabled={capturePending || releasePending}>
                 Cancel
               </Button>
-              <Button variant="secondary" className="px-3 py-2" onClick={() => void captureScreenshot()} disabled={capturePending || releasePending}>
+              {!verifyPinInMain ? <Button variant="secondary" className="px-3 py-2" onClick={() => void captureScreenshot()} disabled={capturePending || releasePending}>
                 <Save className="size-4" />
                 {capturePending ? "Saving..." : "Save screenshot"}
-              </Button>
+              </Button> : null}
               <Button className="px-3 py-2" onClick={attemptUnlock} disabled={capturePending || releasePending}>
                 {releasePending ? "Releasing..." : sessionSubmitted ? "Release student" : "Unlock session"}
               </Button>
@@ -7412,7 +7424,12 @@ const StudentShell = ({
         className={unlockOpen ? "pointer-events-none invisible" : undefined}
         style={scaleContent ? ({ zoom: contentZoom } as CSSProperties) : undefined}
       >
-        {children}
+        {securityHold ? (
+          <div className="space-y-2 border border-rose-400 p-4" role="alert">
+            <h2 className="font-semibold">Exam paused</h2>
+            <p className="text-sm">{securityHold}</p>
+          </div>
+        ) : children}
       </div>
     </motion.div>
   );

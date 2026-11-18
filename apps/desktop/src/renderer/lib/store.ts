@@ -53,10 +53,10 @@ interface LockedscreenStore {
   syncPendingResults: () => Promise<AppStateSnapshot | null>;
   beginSession: (payload: { examId: string; packageId: string; mode: Exam["mode"] }) => Promise<AppStateSnapshot | null>;
   launchAlternateDesktopSession: (payload: { examId: string; candidate: Candidate }) => Promise<boolean>;
-  endSession: (reason?: string) => Promise<AppStateSnapshot | null>;
+  endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot | null>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot | null>;
   submitExam: (exam: Exam, session: ExamSession) => Promise<SubmissionResult | null>;
-  turnInStudentLms: (payload: { submissionId: string; packageId: string }) => Promise<SubmissionResult | null>;
+  turnInStudentLms: (payload: { submissionId: string; packageId: string; pin?: string }) => Promise<SubmissionResult | null>;
 }
 
 const withGuard = async <T>(operation: () => Promise<T>, onError: (message: string) => void): Promise<T | null> => {
@@ -234,12 +234,15 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
   exportConfigPackage: async (payload) =>
     withGuard(() => window.lockedscreenApi.exportConfigPackage(payload), (error) => set({ error })),
   publishConfigPackageToClassroom: async (payload) => {
-    const response = await withGuard(() => window.lockedscreenApi.publishConfigPackageToClassroom(payload), (error) => set({ error }));
-    if (response) {
+    set({ error: null });
+    try {
+      const response = await window.lockedscreenApi.publishConfigPackageToClassroom(payload);
       set({ snapshot: response.snapshot, error: null });
       return response.published;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Google Classroom post did not complete.";
+      throw new Error(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""));
     }
-    return null;
   },
   importConfigPackage: async (payload) => {
     const snapshot = await withGuard(() => window.lockedscreenApi.importConfigPackage(payload), (error) => set({ error }));
@@ -286,8 +289,8 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
       throw error;
     }
   },
-  endSession: async (reason) => {
-    const snapshot = await withGuard(() => window.lockedscreenApi.endSession(reason), (error) => set({ error }));
+  endSession: async (reason, pin) => {
+    const snapshot = await withGuard(() => window.lockedscreenApi.endSession(reason, pin), (error) => set({ error }));
     if (snapshot) {
       set({ snapshot, error: null });
     }
@@ -313,7 +316,7 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
   turnInStudentLms: async (payload) => {
     const response = await withGuard(() => window.lockedscreenApi.turnInStudentLms(payload), (error) => set({ error }));
     if (response) {
-      set({ snapshot: response.snapshot });
+      set({ snapshot: response.snapshot, error: null });
       return response.submission;
     }
     return null;

@@ -66,6 +66,32 @@ internal static class NativeMethods
 
     public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Message
+    {
+        public IntPtr Window;
+        public uint Id;
+        public nuint WParam;
+        public nint LParam;
+        public uint Time;
+        public int X;
+        public int Y;
+        public uint Private;
+    }
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    public static extern bool PeekMessage(out Message message, IntPtr window, uint min, uint max, uint remove);
+    [DllImport("user32.dll")]
+    public static extern int GetMessage(out Message message, IntPtr window, uint min, uint max);
+    [DllImport("user32.dll")]
+    public static extern bool TranslateMessage(ref Message message);
+    [DllImport("user32.dll")]
+    public static extern IntPtr DispatchMessage(ref Message message);
+    [DllImport("user32.dll")]
+    public static extern bool PostThreadMessage(uint threadId, uint message, IntPtr wParam, IntPtr lParam);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
 

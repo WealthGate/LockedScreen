@@ -1,8 +1,9 @@
 {
   "name": "lockedscreen",
-  "version": "0.6.54",
+  "version": "0.6.64",
   "private": true,
   "packageManager": "npm@10.8.2",
+  "engines": { "node": ">=24.0.0" },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -22,6 +23,6 @@
     "dist:linux": "npm run dist:linux --workspace @lockedscreen/desktop"
   },
   "devDependencies": {
-    "electron": "36.0.0"
+    "electron": "45.3.4"
   }
 }

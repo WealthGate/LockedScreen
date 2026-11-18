@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import type {
@@ -99,23 +100,40 @@ const ocrImageBuffer = async (input: Buffer): Promise<string> => {
   }
 };
 
-const ocrPdfBuffer = async (input: Buffer): Promise<ExtractedDocumentText> => {
-  const [{ getDocument }, { createCanvas }, worker] = await Promise.all([
-    import("pdfjs-dist/legacy/build/pdf.mjs"),
-    loadCanvas(),
-    createOcrWorker()
-  ]);
+const openPdfDocument = async (input: Buffer) => {
+  const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  // Resolve the trusted packaged worker explicitly; the main bundle may live inside ASAR.
+  GlobalWorkerOptions.workerSrc = pathToFileURL(requireFromParser.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs")).href;
+  const task = getDocument({
+    data: new Uint8Array(input), enableXfa: false,
+    isOffscreenCanvasSupported: false, useSystemFonts: true
+  });
+  try { return { document: await task.promise, destroy: () => task.destroy() }; }
+  catch (error) { await task.destroy().catch(() => undefined); throw error; }
+};
 
+const extractPdfText = async (input: Buffer): Promise<string> => {
+  const resource = await openPdfDocument(input);
+  const pdf = resource.document;
   try {
-    const pdfDocumentOptions = {
-      data: new Uint8Array(input),
-      disableWorker: true,
-      isEvalSupported: false,
-      isOffscreenCanvasSupported: false,
-      useSystemFonts: true
-    } as unknown as Parameters<typeof getDocument>[0];
-    const loadingTask = getDocument(pdfDocumentOptions);
-    const pdf = await loadingTask.promise;
+    const pages: string[] = [];
+    for (let number = 1; number <= pdf.numPages; number++) {
+      const page = await pdf.getPage(number);
+      const content = await page.getTextContent();
+      pages.push(content.items.map(item => "str" in item ? item.str + (item.hasEOL ? "\n" : " ") : "").join(""));
+      page.cleanup();
+    }
+    return pages.join("\n\n");
+  } finally { await resource.destroy(); }
+};
+
+const ocrPdfBuffer = async (input: Buffer): Promise<ExtractedDocumentText> => {
+  const { createCanvas } = await loadCanvas();
+  const resource = await openPdfDocument(input);
+  let worker: Awaited<ReturnType<typeof createOcrWorker>> | undefined;
+  try {
+    const pdf = resource.document;
+    worker = await createOcrWorker();
     const pageCount = Math.min(pdf.numPages, maxOcrPdfPages);
     const pageTexts: string[] = [];
 
@@ -145,7 +163,6 @@ const ocrPdfBuffer = async (input: Buffer): Promise<ExtractedDocumentText> => {
       );
     }
 
-    await pdf.destroy();
     return {
       text: pageTexts.join("\n\n"),
       extraction: {
@@ -156,7 +173,8 @@ const ocrPdfBuffer = async (input: Buffer): Promise<ExtractedDocumentText> => {
       }
     };
   } finally {
-    await worker.terminate();
+    try { await resource.destroy(); }
+    finally { await worker?.terminate(); }
   }
 };
 
@@ -501,11 +519,10 @@ export const extractExamDocumentText = async (fileName: string, input: Buffer): 
   }
 
   if (lower.endsWith(".pdf")) {
-    const pdfParse = (await import("pdf-parse")).default;
-    const result = await pdfParse(input);
-    if (hasUsefulText(result.text)) {
+    const text = await extractPdfText(input);
+    if (hasUsefulText(text)) {
       return {
-        text: result.text,
+        text,
         extraction: { method: "pdf-text", usedOcr: false }
       };
     }
@@ -516,7 +533,7 @@ export const extractExamDocumentText = async (fileName: string, input: Buffer): 
     }
 
     return {
-      text: result.text,
+      text,
       extraction: { method: "pdf-text", usedOcr: false }
     };
   }

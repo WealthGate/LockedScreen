@@ -33,6 +33,7 @@ export interface LockedscreenApi {
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
   onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
+  onSessionSecurityHold: (callback: () => void) => () => void;
   onEmbeddedGoogleSignInBlocked: (callback: (payload: { url?: string }) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
@@ -66,8 +67,9 @@ export interface LockedscreenApi {
   syncPendingResults: () => Promise<AppStateSnapshot>;
   captureScreenshot: () => Promise<string | null>;
   openGoogleAppsScript: () => Promise<void>;
+  openClassroomSetupGuide: () => Promise<void>;
   beginSession: (request: SessionStartRequest) => Promise<AppStateSnapshot>;
-  endSession: (reason?: string) => Promise<AppStateSnapshot>;
+  endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot>;
   submitExam: (payload: {
     exam: Exam;
@@ -76,6 +78,7 @@ export interface LockedscreenApi {
   turnInStudentLms: (payload: {
     submissionId: string;
     packageId: string;
+    pin?: string;
   }) => Promise<{ state: StudentLmsTurnInState; submission: SubmissionResult; snapshot: AppStateSnapshot }>;
   setAssistKiosk: (enabled: boolean) => Promise<void>;
   setNavigationGuard: (guard: NavigationGuard | null) => Promise<void>;
@@ -103,6 +106,11 @@ const api: LockedscreenApi = {
     const listener = (_event: Electron.IpcRendererEvent, payload: { reason?: string }) => callback(payload);
     ipcRenderer.on("session:exitBlocked", listener);
     return () => ipcRenderer.removeListener("session:exitBlocked", listener);
+  },
+  onSessionSecurityHold: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("session:securityHold", listener);
+    return () => ipcRenderer.removeListener("session:securityHold", listener);
   },
   onEmbeddedGoogleSignInBlocked: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { url?: string }) => callback(payload);
@@ -138,8 +146,9 @@ const api: LockedscreenApi = {
   syncPendingResults: () => ipcRenderer.invoke("results:syncPending"),
   captureScreenshot: () => ipcRenderer.invoke("window:captureScreenshot"),
   openGoogleAppsScript: () => ipcRenderer.invoke("help:openGoogleAppsScript"),
+  openClassroomSetupGuide: () => ipcRenderer.invoke("classroom:openSetupGuide"),
   beginSession: (request) => ipcRenderer.invoke("session:begin", request),
-  endSession: (reason) => ipcRenderer.invoke("session:end", reason),
+  endSession: (reason, pin) => ipcRenderer.invoke("session:end", reason, pin),
   launchApprovedApplication: (payload) => ipcRenderer.invoke("applications:launch", payload),
   submitExam: (payload) => ipcRenderer.invoke("exam:submit", payload),
   turnInStudentLms: (payload) => ipcRenderer.invoke("studentLms:turnIn", payload),

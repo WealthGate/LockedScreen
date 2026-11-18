@@ -147,10 +147,56 @@ const assertPublishScopesConfigured = (settings: GoogleIntegrationSettings): voi
   );
 };
 
-const classroomPublishPermissionError = (): Error =>
-  new Error(
-    "Posting this package needs Google Classroom write permission and Google Drive file permission. In Google Cloud, make sure the OAuth consent screen includes classroom.coursework.students and drive.file, then sign out and reconnect the teacher Google account in Lockedscreen."
+type PublishStep = "Drive upload" | "Classroom draft creation" | "Drive package update" | "Classroom publication";
+
+const publishRequest = async (step: PublishStep, url: string, init: RequestInit): Promise<Record<string, unknown>> => {
+  const drive = step.startsWith("Drive");
+  const api = drive ? "Google Drive" : "Google Classroom";
+  const retryNote = step === "Drive upload" ? "" : " Check Drive and Classroom Classwork for the file or draft before retrying.";
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch {
+    throw new Error(`${step} failed: LockedScreen did not receive a response from ${api}. Check your network connection.${retryNote}`);
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return payload as Record<string, unknown>;
+  }
+
+  const error = payload?.error;
+  const details = [
+    error?.message,
+    ...(Array.isArray(error?.errors) ? error.errors.map((entry: { reason?: unknown } | null) => entry?.reason) : []),
+    ...(Array.isArray(error?.details) ? error.details.map((entry: { reason?: unknown } | null) => entry?.reason) : [])
+  ].filter((value): value is string => typeof value === "string").join(" ");
+  const knownReasons = [
+    [/AttachmentNotVisible/i, "AttachmentNotVisible", "Make sure the signed-in teacher can open the Drive attachment and share it with the class."],
+    [/CourseNotModifiable/i, "CourseNotModifiable", "Select an active class where the signed-in account is a teacher."],
+    [/SERVICE_DISABLED|accessNotConfigured/i, "SERVICE_DISABLED", `Ask the OAuth project owner to enable the ${api} API.`],
+    [/storageQuotaExceeded/i, "storageQuotaExceeded", "Free up space in the teacher's Google Drive or ask your school administrator about storage."]
+  ] as const;
+  const known = knownReasons.find(([pattern]) => pattern.test(details));
+  const googleStatus = typeof error?.status === "string" && /^[A-Z][A-Z_]{2,39}$/.test(error.status) ? error.status : "";
+  const code = [`HTTP ${response.status}`, googleStatus, known?.[1]].filter(Boolean).join(", ");
+  const advice = known?.[2] ?? (
+    response.ok ? "Google returned an unexpected response." :
+    response.status === 401 ? "Reconnect Google Classroom with your school account." :
+    response.status === 403 ? (drive
+      ? "Reconnect with Google Drive file access and check that your school allows the app to write to Drive."
+      : "Reconnect with Classroom assignment write access and check that the signed-in account teaches this class.") :
+    response.status === 404 ? (drive
+      ? "Check that the exam file still exists in Drive and belongs to the signed-in account."
+      : "Check that the class or draft still exists and is accessible to the signed-in teacher.") :
+    response.status === 400 ? (drive
+      ? "Check that the exam package can be exported locally. If the error repeats, report this code."
+      : "Check the assignment title, points, class status, and Drive attachment. If the error repeats, report this code.") :
+    response.status === 429 || response.status >= 500 ? "Wait a moment and try again." :
+    "Report this code if the error repeats."
   );
+  throw new Error(`${step} failed (${api}: ${code}). ${advice}${retryNote}`);
+};
 
 export class GoogleClassroomService implements GoogleClassroomApi {
   constructor(private readonly oauth: GoogleOAuthFlow) {}
@@ -275,11 +321,14 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       throw new Error("Select a Google Classroom class before posting the package.");
     }
 
-    const accessToken = await this.oauth.getAccessToken(connectionId, settings);
+    const accessToken = await this.oauth.getAccessToken(connectionId, settings).catch(() => {
+      throw new Error("Classroom authorization failed before uploading the package. Reconnect Google Classroom with your school account.");
+    });
     const boundary = `lockedscreen-${Date.now().toString(36)}`;
     const uploadBody = createPackageUploadBody(boundary, request.fileName, packageJsonForContext(request.packageJson, null));
 
-    const uploadResponse = await fetch(
+    let driveFile = await publishRequest(
+      "Drive upload",
       `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
       {
         method: "POST",
@@ -290,21 +339,10 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         body: uploadBody
       }
     );
-    let driveFile: Record<string, unknown>;
-    try {
-      driveFile = await readClassroomJson<Record<string, unknown>>(uploadResponse);
-    } catch (error) {
-      if ((error as ClassroomRequestError).status === 403) {
-        throw classroomPublishPermissionError();
-      }
-      throw error;
-    }
     const driveFileId = String(driveFile.id ?? "");
     if (!driveFileId) {
-      throw new Error("Google Drive did not return a file id for the exported package.");
+      throw new Error("Drive upload did not return a file ID. Check Google Drive for the exam file before retrying.");
     }
-    const downloadLink = driveDownloadLink(driveFileId, driveFile);
-
     const courseWorkBody: Record<string, unknown> = {
       title: request.title,
       description: request.description,
@@ -314,16 +352,9 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         {
           driveFile: {
             driveFile: {
-              id: driveFileId,
-              title: request.fileName
+              id: driveFileId
             },
             shareMode: "VIEW"
-          }
-        },
-        {
-          link: {
-            url: downloadLink,
-            title: `Download ${request.fileName}`
           }
         }
       ]
@@ -332,7 +363,8 @@ export class GoogleClassroomService implements GoogleClassroomApi {
       courseWorkBody.maxPoints = request.maxPoints;
     }
 
-    const courseWorkResponse = await fetch(
+    const createdCourseWork = await publishRequest(
+      "Classroom draft creation",
       `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork`,
       {
         method: "POST",
@@ -343,55 +375,53 @@ export class GoogleClassroomService implements GoogleClassroomApi {
         body: JSON.stringify(courseWorkBody)
       }
     );
-    try {
-      const createdCourseWork = await readClassroomJson<Record<string, unknown>>(courseWorkResponse);
-      const draftCourseWork = parseCourseWork(createdCourseWork, normalizedCourseId);
+    const draftCourseWork = parseCourseWork(createdCourseWork, normalizedCourseId);
+    if (!draftCourseWork.id) {
+      throw new Error("Classroom draft creation did not return an assignment ID. Check Classroom Classwork for the draft before retrying.");
+    }
 
-      if (typeof request.packageJson === "function") {
-        const updateBoundary = `lockedscreen-${Date.now().toString(36)}-final`;
-        const updateResponse = await fetch(
-          `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files/${encodeURIComponent(driveFileId)}?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
-          {
-            method: "PATCH",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": `multipart/related; boundary=${updateBoundary}`
-            },
-            body: createPackageUploadBody(
-              updateBoundary,
-              request.fileName,
-              packageJsonForContext(request.packageJson, draftCourseWork)
-            )
-          }
-        );
-        driveFile = await readClassroomJson<Record<string, unknown>>(updateResponse);
-      }
-
-      const publishResponse = await fetch(
-        `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork/${encodeURIComponent(draftCourseWork.id)}?updateMask=state`,
+    if (typeof request.packageJson === "function") {
+      const updateBoundary = `lockedscreen-${Date.now().toString(36)}-final`;
+      driveFile = await publishRequest(
+        "Drive package update",
+        `${googleClassroomDesktopOAuth.driveUploadBaseUrl}/files/${encodeURIComponent(driveFileId)}?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType`,
         {
           method: "PATCH",
           headers: {
             Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
+            "Content-Type": `multipart/related; boundary=${updateBoundary}`
           },
-          body: JSON.stringify({ state: "PUBLISHED" })
+          body: createPackageUploadBody(
+            updateBoundary,
+            request.fileName,
+            packageJsonForContext(request.packageJson, draftCourseWork)
+          )
         }
       );
-      const publishedCourseWork = await readClassroomJson<Record<string, unknown>>(publishResponse);
-
-      return {
-        courseWork: parseCourseWork(publishedCourseWork, normalizedCourseId),
-        driveFileId,
-        driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
-        driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined,
-        driveFileDownloadLink: driveDownloadLink(driveFileId, driveFile)
-      };
-    } catch (error) {
-      if ((error as ClassroomRequestError).status === 403) {
-        throw classroomPublishPermissionError();
-      }
-      throw error;
     }
+
+    const publishedCourseWork = await publishRequest(
+      "Classroom publication",
+      `${googleClassroomDesktopOAuth.classroomApiBaseUrl}/courses/${encodeURIComponent(normalizedCourseId)}/courseWork/${encodeURIComponent(draftCourseWork.id)}?updateMask=state`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ state: "PUBLISHED" })
+      }
+    );
+    if (String(publishedCourseWork.id ?? "") !== draftCourseWork.id || publishedCourseWork.state !== "PUBLISHED") {
+      throw new Error("Classroom publication could not be confirmed. Check Classwork for the assignment before retrying.");
+    }
+
+    return {
+      courseWork: parseCourseWork(publishedCourseWork, normalizedCourseId),
+      driveFileId,
+      driveFileName: typeof driveFile.name === "string" ? driveFile.name : request.fileName,
+      driveFileLink: typeof driveFile.webViewLink === "string" ? driveFile.webViewLink : undefined,
+      driveFileDownloadLink: driveDownloadLink(driveFileId, driveFile)
+    };
   }
 }
