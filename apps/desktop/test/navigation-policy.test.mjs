@@ -80,8 +80,24 @@ test('hosted navigation filters redirects, programmatic loads, popups and webvie
     main.handlers.get('will-attach-webview')({ preventDefault() { blocked = true; } }, preferences, { src: config.browserPolicy.startUrl });
     assert.equal(blocked, false);
     assert.equal(preferences.preload, undefined);
+    assert.equal(preferences.partition, 'persist:lockedscreen-link');
     for (const key of ['nodeIntegration', 'nodeIntegrationInSubFrames', 'allowRunningInsecureContent', 'webviewTag']) assert.equal(preferences[key], false);
     for (const key of ['contextIsolation', 'sandbox', 'webSecurity']) assert.equal(preferences[key], true);
+    await controller.endManagedSession(null, 'Switch practice fixture', audit);
+    const form = 'https://docs.google.com/forms/d/e/practice/viewform';
+    await controller.beginManagedSession(null, { examId: 'form', packageId: 'form-package', mode: 'link' }, {
+      ...config, browserPolicy: { ...config.browserPolicy, startUrl: form, allowedDomains: ['google.com', 'youtube.com'] }
+    }, audit);
+    const signIn = 'https://accounts.google.com/ServiceLogin?continue=' + encodeURIComponent(form);
+    assert.deepEqual(request(form), {});
+    assert.deepEqual(request(signIn), {}, 'Forms website sign-in must not be blanket-blocked');
+    assert.deepEqual(guest.handlers.get('popup')({ url: signIn }), { action: 'deny' });
+    assert.equal(guest.loaded.at(-1), signIn, 'approved sign-in opens only inside the same locked webview');
+    for (const url of ['https://www.google.com/search?q=answers', 'https://mail.google.com/',
+      'https://myaccount.google.com/', 'https://www.youtube.com/', 'https://docs.google.com/forms/d/e/other/viewform',
+      'https://accounts.google.com/ServiceLogin?continue=https://mail.google.com/']) {
+      assert.deepEqual(request(url), { cancel: true }, url);
+    }
     controller.holdManagedSession('Protection failure');
     assert.deepEqual(request(config.browserPolicy.startUrl), { cancel: true }, 'paused exams must not keep navigating');
   } finally {

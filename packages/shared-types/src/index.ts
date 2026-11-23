@@ -618,6 +618,8 @@ export interface NavigationGuard {
   mode: ExamMode;
 }
 
+export type HostedWebsiteAuthState = "signing-in" | "exam" | "blocked" | "provider-rejected";
+
 export interface ProtectedConfigPackageFile {
   format: "lockedscreen-config-package";
   version: 1 | 2;

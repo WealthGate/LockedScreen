@@ -86,9 +86,6 @@ const animation = {
   transition: { duration: 0.16 }
 };
 
-const hostedExamUserAgent =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
 const minExamZoom = 0.75;
 const maxExamZoom = 1.75;
 const examZoomStep = 0.1;
@@ -4779,7 +4776,7 @@ const SettingsPage = () => {
               Exported packages carry only public LMS app settings plus the class and assignment IDs. Teacher access tokens never leave the admin device.
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-              Student LMS sign-in completes before the exam starts. Submission saves the local record and attempts configured delivery without releasing lockdown. Google Forms website sign-in is separate and is not supported in the embedded exam browser.
+                Classroom authorization finishes before the exam starts. Website sign-in is separate and stays inside the locked exam browser on approved routes. The website may apply its own browser or school-account restrictions.
             </div>
             {packageDraft.studentLmsBinding.courseLabel ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
@@ -6733,7 +6730,8 @@ const LinkExamPage = () => {
   const [shellUnlockOpen, setShellUnlockOpen] = useState(false);
   const [hostedZoom, setHostedZoom] = useState(1);
   const [hostedSubmitDetected, setHostedSubmitDetected] = useState(false);
-  const [embeddedGoogleSignInBlocked, setEmbeddedGoogleSignInBlocked] = useState(false);
+  const [websiteAuthState, setWebsiteAuthState] = useState<"exam" | "signing-in" | "blocked" | "provider-rejected">("exam");
+  const websiteAuthPending = websiteAuthState !== "exam";
   const [confirmation, setConfirmation] = useState<"record" | "return" | "restart" | null>(null);
   const [hostedError, setHostedError] = useState<string | null>(null);
   const [navigating, setNavigating] = useState(false);
@@ -6799,9 +6797,7 @@ const LinkExamPage = () => {
 
 
   useEffect(() => {
-    return window.lockedscreenApi.onEmbeddedGoogleSignInBlocked(() => {
-      setEmbeddedGoogleSignInBlocked(true);
-    });
+    return window.lockedscreenApi.onHostedWebsiteAuthState(setWebsiteAuthState);
   }, []);
 
   useEffect(() => {
@@ -6816,7 +6812,7 @@ const LinkExamPage = () => {
     setTurningIn(false);
     setSubmissionResult(null);
     setHostedSubmitDetected(false);
-    setEmbeddedGoogleSignInBlocked(false);
+    setWebsiteAuthState("exam");
     setConfirmation(null);
     setHostedError(null);
     submissionBusyRef.current = false;
@@ -6910,11 +6906,11 @@ const LinkExamPage = () => {
     }
     setNavigating(true);
     setHostedError(null);
+    setWebsiteAuthState("exam");
     try {
       if (typeof webviewRef.current.loadURL === "function") await webviewRef.current.loadURL(startUrl);
       else webviewRef.current.src = startUrl;
       setHostedSubmitDetected(false);
-      setEmbeddedGoogleSignInBlocked(false);
     } catch (error) {
       setHostedError(error instanceof Error ? error.message : "The start page could not be loaded. Try again.");
     } finally { setNavigating(false); }
@@ -6927,7 +6923,7 @@ const LinkExamPage = () => {
   };
 
   const requestHostedCompletion = () => {
-    if (!submitted && !submitting && !expired && !embeddedGoogleSignInBlocked) setConfirmation("record");
+    if (!submitted && !submitting && !expired && !websiteAuthPending) setConfirmation("record");
   };
 
   const confirmHostedAction = () => {
@@ -7024,24 +7020,27 @@ const LinkExamPage = () => {
                 Restart form
               </Button>
             ) : null}
-            <Button onClick={requestHostedCompletion} disabled={submitting || submitted || expired || navigating || embeddedGoogleSignInBlocked}>
+            <Button onClick={requestHostedCompletion} disabled={submitting || submitted || expired || navigating || websiteAuthPending}>
               {submitting ? "Recording..." : "Record online submission"}
             </Button>
           </div>
         </div>
 
         {hostedError && !expired ? <div role="alert" className="border-b border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-950">{hostedError}</div> : null}
-        {embeddedGoogleSignInBlocked ? (
+        {websiteAuthPending ? (
           <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="flex min-w-0 gap-3">
                 <AlertTriangle className="mt-0.5 size-5 shrink-0" />
                 <div className="min-w-0 space-y-1 break-words text-sm">
-                  <p className="font-semibold">Google sign-in cannot open inside the locked exam browser.</p>
+                  <p className="font-semibold">{websiteAuthState === "signing-in" ? "Website sign-in in progress" : websiteAuthState === "provider-rejected" ? "Google did not complete website sign-in" : "Navigation blocked by the exam policy"}</p>
                   <p>
-                    This form needs a Google website session, which is separate from Classroom sign-in. Signed-in Google
-                    Forms, including forms limited to one response, are not supported in this embedded browser. Keep your
-                    teacher's response limit enabled. Ask the invigilator for a supported exam deployment; lockdown has not been released.
+                    {websiteAuthState === "signing-in"
+                      ? "Complete the website's sign-in here to return to your exam. This is separate from Classroom authorization."
+                      : websiteAuthState === "provider-rejected"
+                        ? "Google returned a sign-in rejection. Read Google's message below and ask the invigilator for help. LockedScreen will not bypass browser or school-account restrictions."
+                        : "The requested page or sign-in return address is outside this exam's approved route. Ask the invigilator to check the package's website settings."}
+                    {" "}Keep the teacher's response limit enabled. Lockdown remains active; the invigilator PIN is still required to exit.
                   </p>
                 </div>
               </div>
@@ -7057,7 +7056,6 @@ const LinkExamPage = () => {
           className={`min-h-0 flex-1 w-full ${webviewHidden ? "hidden" : ""}`}
           src={configPackage?.browserPolicy.startUrl ?? exam.linkConfig?.url}
           partition="persist:lockedscreen-link"
-          useragent={hostedExamUserAgent}
           allowpopups={true}
         />
       </div>

@@ -31,7 +31,7 @@ await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, executablePath: process.env.LOCKEDSCREEN_CHROME || undefined });
 try {
   for (const width of [1360, 390]) {
-    for (const scenario of ['normal', 'save-failure', 'expired', 'blocked', 'navigation-failure', 'delivery-failure']) {
+    for (const scenario of ['normal', 'save-failure', 'expired', 'blocked', 'navigation-failure', 'delivery-failure', 'website-sign-in', 'provider-rejected', 'return-sign-in']) {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
@@ -56,6 +56,7 @@ try {
           navigations++;
           if (scenario === 'navigation-failure' && navigations === 1) throw new Error('Simulated form navigation failure');
           currentUrl = url; events.push('navigate');
+          if (scenario === 'return-sign-in') { callbacks.auth?.('signing-in'); await new Promise(resolve => setTimeout(resolve, 100)); }
         };
         HTMLElement.prototype.getURL = () => currentUrl;
         HTMLElement.prototype.setZoomFactor = value => { window.testExam.zoom = value; };
@@ -63,10 +64,11 @@ try {
           route: `/link/${exam.id}?candidateName=Practice%20Student&candidateId=practice` };
         const snapshot = () => structuredClone(state);
         window.testExam = { events, zoom: 1, blocked: () => callbacks.blocked?.(),
+          authState: state => callbacks.auth?.(state),
           responsePage: () => { currentUrl = 'https://docs.google.com/forms/d/e/fictional/formResponse'; } };
         window.lockedscreenApi = new Proxy({
           getSnapshot: async () => snapshot(), getLaunchContext: async () => context, getUpdateState: async () => null,
-          onEmbeddedGoogleSignInBlocked: callback => { callbacks.blocked = callback; return () => {}; },
+          onHostedWebsiteAuthState: callback => { callbacks.auth = callback; callbacks.blocked = () => callback('blocked'); return () => {}; },
           beginSession: async request => { events.push('preauth', 'lock'); state.activeSession = { ...request, startedAt: new Date().toISOString() }; return snapshot(); },
           endSession: async (_reason, pin) => {
             if (pin !== '987654') throw new Error('Incorrect invigilator PIN. The exam remains locked.');
@@ -99,11 +101,36 @@ try {
       const started = Date.now();
       const record = page.getByRole('button', { name: 'Record online submission', exact: true });
       const view = page.locator('webview');
+      if (scenario === 'return-sign-in') {
+        await page.getByRole('button', { name: 'Return to start', exact: true }).click();
+        await page.getByRole('dialog').getByRole('button', { name: 'Return to start', exact: true }).click();
+        await page.getByText('Website sign-in in progress', { exact: true }).waitFor();
+        await page.waitForTimeout(250);
+        assert.equal(await record.isDisabled(), true, 'A resolved loadURL must not overwrite the redirected sign-in state');
+        await page.evaluate(() => window.testExam.authState('exam'));
+      }
+      if (scenario === 'website-sign-in' || scenario === 'provider-rejected') {
+        await page.evaluate(() => window.testExam.authState('signing-in'));
+        await page.getByText('Website sign-in in progress', { exact: true }).waitFor();
+        assert.equal(await view.isVisible(), true);
+        assert.equal(await record.isDisabled(), true);
+        assert.equal(await view.getAttribute('useragent'), null, 'No hard-coded Chrome masquerade');
+        if (scenario === 'provider-rejected') {
+          await page.evaluate(() => window.testExam.authState('provider-rejected'));
+          await page.getByText('Google did not complete website sign-in', { exact: true }).waitFor();
+          assert.equal(await record.isDisabled(), true);
+          assert.equal(await view.isVisible(), true);
+          await page.screenshot({ path: join(out, `provider-rejection-${width}.png`), fullPage: true });
+        }
+        await page.evaluate(() => window.testExam.authState('exam'));
+        await page.waitForFunction(() => !document.body.innerText.includes('Website sign-in in progress'));
+        assert.equal(await record.isDisabled(), false);
+      }
       if (scenario === 'blocked') {
         await page.evaluate(() => window.testExam.blocked());
-        await page.getByText('Google sign-in cannot open inside the locked exam browser.', { exact: true }).waitFor();
+        await page.getByText('Navigation blocked by the exam policy', { exact: true }).waitFor();
         assert.equal(await record.isDisabled(), true);
-        assert.match(await page.locator('body').innerText(), /Keep your teacher's response limit enabled/);
+        assert.match(await page.locator('body').innerText(), /Keep the teacher's response limit enabled/);
       } else if (scenario === 'expired') {
         await page.getByRole('heading', { name: 'Time expired', exact: true }).waitFor();
         await page.getByRole('alert').filter({ hasText: 'Simulated disk' }).waitFor();

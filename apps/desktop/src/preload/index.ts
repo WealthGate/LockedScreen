@@ -16,6 +16,7 @@ import type {
   LmsCourseWork,
   LmsStudent,
   NavigationGuard,
+  HostedWebsiteAuthState,
   ResultDestination,
   SecurityProfile,
   SessionStartRequest,
@@ -35,6 +36,7 @@ export interface LockedscreenApi {
   onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
   onSessionSecurityHold: (callback: () => void) => () => void;
   onEmbeddedGoogleSignInBlocked: (callback: (payload: { url?: string }) => void) => () => void;
+  onHostedWebsiteAuthState: (callback: (state: HostedWebsiteAuthState) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
   deleteExam: (examId: string) => Promise<AppStateSnapshot>;
@@ -116,6 +118,11 @@ const api: LockedscreenApi = {
     const listener = (_event: Electron.IpcRendererEvent, payload: { url?: string }) => callback(payload);
     ipcRenderer.on("session:embeddedGoogleSignInBlocked", listener);
     return () => ipcRenderer.removeListener("session:embeddedGoogleSignInBlocked", listener);
+  },
+  onHostedWebsiteAuthState: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: HostedWebsiteAuthState) => callback(state);
+    ipcRenderer.on("session:websiteAuthState", listener);
+    return () => ipcRenderer.removeListener("session:websiteAuthState", listener);
   },
   refreshSecurityOverview: () => ipcRenderer.invoke("security:refreshOverview"),
   saveExam: (exam) => ipcRenderer.invoke("exam:save", exam),

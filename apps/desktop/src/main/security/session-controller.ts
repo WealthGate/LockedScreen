@@ -3,8 +3,9 @@ import { spawn } from "node:child_process";
 
 import { BrowserWindow, clipboard, screen, session as electronSession, type Input, type WebContents } from "electron";
 
-import type { ExamConfigPackage, NavigationGuard, SessionStartRequest } from "@lockedscreen/shared-types";
+import type { ExamConfigPackage, NavigationGuard, SessionStartRequest, HostedWebsiteAuthState } from "@lockedscreen/shared-types";
 import { isSameSession } from "./session-policy";
+import { createWebsiteSignInPolicy, isWebsiteIdentityUrl } from "./website-sign-in";
 
 const hostedPartition = "persist:lockedscreen-link";
 
@@ -21,6 +22,8 @@ type SecurityEventRecorder = (category: string, severity: string, message: strin
 let activeSession: ActiveSessionState | null = null;
 let activePackage: ExamConfigPackage | null = null;
 let navigationGuard: NavigationGuard | null = null;
+let websiteSignIn: ReturnType<typeof createWebsiteSignInPolicy> | null = null;
+let websiteAuthState: HostedWebsiteAuthState = "exam";
 let exitCleanupPending = false;
 
 const isHostedGoogleFormsUrl = (target: URL): boolean => {
@@ -45,23 +48,11 @@ const isHostedGoogleFormsScoreUrl = (target: URL): boolean => {
   );
 };
 
-const isEmbeddedGoogleAccountSignInUrl = (target: URL): boolean => {
-  if (target.hostname !== "accounts.google.com") {
-    return false;
-  }
-
-  return (
-    target.pathname.includes("/signin") ||
-    target.pathname.includes("/ServiceLogin") ||
-    target.pathname.includes("/InteractiveLogin") ||
-    target.pathname.includes("/o/oauth2") ||
-    target.searchParams.has("continue")
-  );
-};
-
-const notifyEmbeddedGoogleSignInBlocked = (url: string): void => {
+const notifyWebsiteAuth = (state: HostedWebsiteAuthState): void => {
+  if (websiteAuthState === state) return;
+  websiteAuthState = state;
   for (const browserWindow of BrowserWindow.getAllWindows()) {
-    browserWindow.webContents.send("session:embeddedGoogleSignInBlocked", { url });
+    browserWindow.webContents.send("session:websiteAuthState", state);
   }
 };
 
@@ -86,7 +77,7 @@ const matchesUrlPrefix = (target: URL, prefix: string): boolean => {
   } catch { return false; }
 };
 
-const urlAllowedByPolicy = (guard: NavigationGuard | null, targetUrl: string): boolean => {
+const urlAllowedByPolicy = (guard: NavigationGuard | null, targetUrl: string, auth = websiteSignIn): boolean => {
   if (!guard) {
     return false;
   }
@@ -97,18 +88,12 @@ const urlAllowedByPolicy = (guard: NavigationGuard | null, targetUrl: string): b
     const domainAllowed = guard.allowedDomains.some(
       (domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)
     );
-    // Google account sign-in is intentionally not allowed inside the embedded exam browser.
-    // Google blocks embedded OAuth/user-agent sign-in, and opening a normal browser during
-    // a locked exam would weaken the secure session.
-    if (guard.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
-      return false;
-    }
+    if (isWebsiteIdentityUrl(target)) return activeSession?.mode === "link" && Boolean(auth?.allows(target));
+    const scopedForm = auth?.formNavigationAllowed(target);
+    if (scopedForm !== undefined) return scopedForm;
 
     // Asset requests do not need a top-level navigation exception. Never grant general
     // Google Search/account/storage browsing just to load Forms fonts or scripts.
-    // Google Forms posts the final response to docs.google.com/forms/.../formResponse, then may open
-    // docs.google.com/forms/.../viewscore so students can see grades released by the teacher.
-    // Both routes stay inside Google Forms and are allowed without opening the unrestricted browser.
     const googleFormsAllowed = guard.mode === "link" && isHostedGoogleFormsUrl(target);
     const googleFormsScoreAllowed = guard.mode === "link" && isHostedGoogleFormsScoreUrl(target);
     const prefixAllowed = guard.allowedPrefixes?.some((prefix) => matchesUrlPrefix(target, prefix)) ?? false;
@@ -136,12 +121,14 @@ export const configureHostedPartition = (recordSecurityEvent: SecurityEventRecor
   const targetSession = electronSession.fromPartition(hostedPartition);
   targetSession.webRequest.onBeforeRequest((details, callback) => {
     // Covers redirects and programmatic webview.src/loadURL changes as well as user navigation.
-    if (details.resourceType === "mainFrame" && (!activeSession || activeSession.securityHold || !urlAllowedByGuard(details.url))) {
-      try {
-        if (isEmbeddedGoogleAccountSignInUrl(new URL(details.url))) notifyEmbeddedGoogleSignInBlocked(details.url);
-      } catch { /* Malformed URLs are denied by the same guard. */ }
-      callback({ cancel: true });
-      return;
+    if (details.resourceType === "mainFrame") {
+      if (!activeSession || activeSession.securityHold || !urlAllowedByGuard(details.url)) {
+        if (activeSession?.mode === "link") notifyWebsiteAuth("blocked");
+        callback({ cancel: true });
+        return;
+      }
+      const state = websiteSignIn?.observe(details.url);
+      if (state) notifyWebsiteAuth(state);
     }
     callback({});
   });
@@ -196,6 +183,7 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
       return;
     }
     delete preferences.preload;
+    preferences.partition = hostedPartition;
     preferences.nodeIntegration = false;
     preferences.nodeIntegrationInSubFrames = false;
     preferences.contextIsolation = true;
@@ -206,27 +194,11 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
     preferences.webviewTag = false;
   });
   contents.setWindowOpenHandler(({ url }) => {
-    try {
-      const target = new URL(url);
-      if (activeSession?.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
-        notifyEmbeddedGoogleSignInBlocked(url);
-        void recordSecurityEvent(
-          "navigation",
-          "warning",
-          "Blocked Google sign-in inside the embedded exam browser.",
-          "Google requires account sign-in to happen in a supported browser outside Electron webviews."
-        );
-        return { action: "deny" };
-      }
-    } catch {
-      // Fall through to the normal guard for malformed popup URLs.
-    }
-
     if (contents.getType() === "webview" && urlAllowedByGuard(url)) {
       // Keep approved popups inside the locked exam webview instead of opening a normal browser window.
-      void contents.loadURL(url);
+      void contents.loadURL(url).catch(() => notifyWebsiteAuth("blocked"));
     } else {
-      void recordSecurityEvent("navigation", "warning", "Blocked hosted-exam popup to an unapproved URL.", url);
+      void recordSecurityEvent("navigation", "warning", "Blocked hosted-exam popup to an unapproved URL.");
     }
 
     return { action: "deny" };
@@ -248,27 +220,16 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
   });
 
   if (contents.getType() === "webview") {
+    contents.on("did-navigate", (_event, url) => {
+      if (!activeSession || activeSession.securityHold) return;
+      const state = websiteSignIn?.observe(url);
+      if (state) notifyWebsiteAuth(state);
+    });
     contents.on("will-navigate", (event, url) => {
-      try {
-        const target = new URL(url);
-        if (activeSession?.mode === "link" && isEmbeddedGoogleAccountSignInUrl(target)) {
-          event.preventDefault();
-          notifyEmbeddedGoogleSignInBlocked(url);
-          void recordSecurityEvent(
-            "navigation",
-            "warning",
-            "Blocked Google sign-in inside the embedded exam browser.",
-            "Google requires account sign-in to happen in a supported browser outside Electron webviews."
-          );
-          return;
-        }
-      } catch {
-        // Fall through to the normal guard for malformed navigation URLs.
-      }
-
-      if (!urlAllowedByGuard(url)) {
+      if (!activeSession || activeSession.securityHold || !urlAllowedByGuard(url)) {
         event.preventDefault();
-        void recordSecurityEvent("navigation", "warning", "Blocked navigation to an unapproved URL.", url);
+        notifyWebsiteAuth("blocked");
+        void recordSecurityEvent("navigation", "warning", "Blocked navigation outside the approved exam/sign-in policy.");
       }
     });
   }
@@ -434,12 +395,15 @@ export const beginManagedSession = async (
   };
   activePackage = configPackage;
   navigationGuard = packageNavigationGuard(configPackage, request.mode);
+  websiteSignIn = request.mode === "link" ? createWebsiteSignInPolicy(navigationGuard) : null;
+  websiteAuthState = "exam";
   try {
     await applyWindowState(browserWindow, configPackage);
   } catch (error) {
     activeSession = null;
     activePackage = null;
     navigationGuard = null;
+    websiteSignIn = null;
     await applyWindowState(browserWindow, null);
     throw error;
   }
@@ -460,6 +424,8 @@ export const endManagedSession = async (
   activeSession = null;
   activePackage = null;
   navigationGuard = null;
+  websiteSignIn = null;
+  websiteAuthState = "exam";
   exitCleanupPending = true;
   try { await applyWindowState(browserWindow, null); }
   finally { exitCleanupPending = false; }
