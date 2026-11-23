@@ -68,7 +68,7 @@ try {
           responsePage: () => { currentUrl = 'https://docs.google.com/forms/d/e/fictional/formResponse'; } };
         window.lockedscreenApi = new Proxy({
           getSnapshot: async () => snapshot(), getLaunchContext: async () => context, getUpdateState: async () => null,
-          onHostedWebsiteAuthState: callback => { callbacks.auth = callback; callbacks.blocked = () => callback('blocked'); return () => {}; },
+          onHostedWebsiteAuthState: callback => { callbacks.auth = callback; callbacks.blocked = () => callback('blocked', 'ROUTE-COOKIE-RETURN'); return () => {}; },
           beginSession: async request => { events.push('preauth', 'lock'); state.activeSession = { ...request, startedAt: new Date().toISOString() }; return snapshot(); },
           endSession: async (_reason, pin) => {
             if (pin !== '987654') throw new Error('Incorrect invigilator PIN. The exam remains locked.');
@@ -129,6 +129,7 @@ try {
       if (scenario === 'blocked') {
         await page.evaluate(() => window.testExam.blocked());
         await page.getByText('Navigation blocked by the exam policy', { exact: true }).waitFor();
+        await page.getByText(/Support code: ROUTE-COOKIE-RETURN/).waitFor();
         assert.equal(await record.isDisabled(), true);
         assert.match(await page.locator('body').innerText(), /Keep the teacher's response limit enabled/);
       } else if (scenario === 'expired') {

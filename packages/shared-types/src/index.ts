@@ -90,6 +90,8 @@ export interface MultipleChoiceQuestion {
   options: MultipleChoiceOption[];
   correctOptionId: string;
   flagged?: boolean;
+  listening?: { src: string; plays: number; speed: number };
+  spokenAnswer?: boolean;
 }
 
 export type Question = MultipleChoiceQuestion;
@@ -129,6 +131,8 @@ export interface ExamResponse {
 }
 
 export interface ExamSession {
+  spokenAnswers?: Record<string, string>;
+  linkedTimeout?: "attempted" | "not-attempted";
   examId: string;
   candidate: Candidate;
   startedAt: string;
@@ -138,6 +142,8 @@ export interface ExamSession {
 }
 
 export interface SubmissionResult {
+  spokenAnswers?: Record<string, string>;
+  linkedTimeout?: "attempted" | "not-attempted";
   id: string;
   examId: string;
   examTitle: string;

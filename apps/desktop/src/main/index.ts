@@ -183,6 +183,7 @@ const readInstalledRole = (): InstalledAppRole => {
 const installedRole = buildEdition === "selectable" ? readInstalledRole() : buildEdition;
 let sessionStarting = false;
 let activeSubmissionId: string | null = null;
+let speakingExamId: string | undefined;
 let submissionInFlight = false;
 const sessionStartBarrier = createSessionStartBarrier();
 const handleIpc = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void => {
@@ -411,6 +412,7 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
   return {
     ...snapshot,
     activeSession: getActiveSession() ?? undefined,
+    submissions: installedRole === "student" || getActiveSession() ? snapshot.submissions.map(({ spokenAnswers: _audio, ...rest }) => rest) : snapshot.submissions,
     settings: getActiveSession() ? { ...snapshot.settings, adminUnlockPin: "", invigilatorUnlockPin: "" } : snapshot.settings,
     installedRole,
     runtime: runtimeEnvironment,
@@ -596,6 +598,16 @@ const createWindow = async (): Promise<void> => {
   });
   Menu.setApplicationMenu(null);
 
+  const allowedMicrophone = (wc: Electron.WebContents | null, frame: boolean | undefined, url?: string) => {
+    const active = getActiveSession();
+    return Boolean(active?.mode === "app" && !active.securityHold && active.examId === speakingExamId && !activeSubmissionId &&
+      wc && wc === mainWindow?.webContents && frame === true && isAppUrl(url ?? "") && isAppUrl(wc.getURL()));
+  };
+  mainWindow.webContents.session.setPermissionCheckHandler((wc, permission, _origin, details) =>
+    permission === "media" && details.mediaType === "audio" && allowedMicrophone(wc, details.isMainFrame, details.requestingUrl));
+  mainWindow.webContents.session.setPermissionRequestHandler((wc, permission, callback, details) =>
+    callback(permission === "media" && "mediaTypes" in details && details.mediaTypes?.length === 1 &&
+      details.mediaTypes[0] === "audio" && allowedMicrophone(wc, details.isMainFrame, details.requestingUrl)));
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
   });
@@ -1330,6 +1342,7 @@ app.whenReady().then(async () => {
       await refreshProcessPolicyMonitor();
       monitorNativeSession();
       activeSubmissionId = null;
+      speakingExamId = exam.mode === "app" && exam.questions.some(q => q.spokenAnswer === true) ? exam.id : undefined;
       started = true;
       return withRuntime(storage.getSnapshot());
     } finally {

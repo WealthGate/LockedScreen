@@ -1,6 +1,6 @@
 # Lockedscreen Privacy Policy
 
-Effective date: November 18, 2026
+Effective date: November 23, 2026
 
 Lockedscreen is a Windows desktop application for secure exam delivery, classroom assignment setup, and optional learning-management-system integrations such as Google Classroom.
 
@@ -11,6 +11,7 @@ Depending on how a school configures the app, Lockedscreen may process:
 - Teacher or student account information returned by Google sign-in, such as name and email address.
 - Google Classroom class, coursework, roster, and assignment information needed to connect exams to a selected class or assignment.
 - Student exam information entered into the app, such as student name, candidate ID, class, answers, scores, submission time, and result sync status.
+- For app-based language questions, a teacher may include a listening clip or enable a spoken answer. The microphone starts only when the student chooses Record. Spoken answers are stored with the local result and attached to the assigned coursework when student LMS turn-in is enabled. Generic score-sync payloads do not include voice recordings. Linked websites are not granted microphone access.
 - Local app configuration, such as school settings, exam packages, allowed apps, exam start codes, and invigilator/admin settings.
 - Diagnostic information needed to check kiosk or lockdown readiness on the local Windows device.
 

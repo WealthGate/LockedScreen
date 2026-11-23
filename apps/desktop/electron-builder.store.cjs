@@ -8,6 +8,7 @@ module.exports = {
   win: { ...build.win, target: [{ target: 'appx', arch: ['x64'] }] },
   extraResources: [{ from: 'build/store-native', to: 'lockedscreen-security' }],
   appx: {
+    capabilities: ['microphone'],
     identityName: 'WealthGate.LockedScreen',
     publisher: 'CN=BCFD90EE-508A-4A52-BE8F-96555ACE47FA',
     publisherDisplayName: 'Wealth Gate',

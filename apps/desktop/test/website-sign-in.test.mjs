@@ -3,7 +3,7 @@ import test from 'node:test';
 import { build } from 'esbuild';
 
 const compiled = await build({ entryPoints: ['apps/desktop/src/main/security/website-sign-in.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
-const { createWebsiteSignInPolicy } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const { createWebsiteSignInPolicy, blockedWebsiteStep } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 const form = 'https://docs.google.com/forms/d/e/practice/viewform';
 const guard = { mode: 'link', startUrl: form, allowedDomains: ['docs.google.com'] };
 const login = (url = form) => new URL('https://accounts.google.com/v3/signin/identifier?continue=' + encodeURIComponent(url) + '&service=wise');
@@ -47,6 +47,32 @@ test('nested account redirects are validated to a bounded depth', () => {
   let nested = form;
   for (let i = 0; i < 7; i++) nested = login(nested).href;
   assert.equal(policy.allows(new URL(nested)), false);
+});
+
+test('post-password cookie relays require active Forms sign-in and a chain ending at the pinned Form', () => {
+  const policy = createWebsiteSignInPolicy(guard);
+  const relay = (hostPath, next) => new URL('https://' + hostPath + '?continue=' + encodeURIComponent(next));
+  const region = relay('accounts.google.dm/accounts/SetSID', form);
+  const youtube = relay('accounts.youtube.com/accounts/SetSID', region.href);
+  const docs = relay('docs.google.com/accounts/SetOSID', youtube.href);
+  assert.equal(policy.allows(docs), false);
+  assert.equal(policy.allows(login()), true);
+  for (const hop of [relay('accounts.google.com/CheckCookie', docs.href), docs, youtube, region]) {
+    assert.equal(policy.allows(hop), true);
+    assert.equal(policy.observe(hop.href), 'signing-in');
+  }
+  for (const denied of [new URL(docs.origin + docs.pathname), relay('docs.google.com/accounts/SetOSID', form.replace('practice', 'other')),
+    new URL(docs.href + '&continue=https://drive.google.com/'), relay('accounts.google.dm.evil.invalid/accounts/SetSID', form),
+    relay('docs.google.com:444/accounts/SetOSID', form), relay('accounts.google.dm/settings', form)]) {
+    assert.equal(policy.allows(denied), false);
+  }
+  assert.equal(policy.observe(form), 'exam');
+  assert.equal(policy.allows(region), false);
+  assert.equal(createWebsiteSignInPolicy({ ...guard, mode: 'app' }).allows(docs), false);
+  const nonForm = createWebsiteSignInPolicy({ ...guard, startUrl: 'https://assessment.example/start' });
+  assert.equal(nonForm.allows(login('https://assessment.example/start')), true);
+  assert.equal(nonForm.allows(relay('docs.google.com/accounts/SetOSID', 'https://assessment.example/start')), false);
+  assert.equal(blockedWebsiteStep(docs.href + '&code=private'), 'ROUTE-COOKIE-RETURN');
 });
 
 test('Forms navigation is pinned and broad legacy Google allowlists do not add browsing exceptions', () => {

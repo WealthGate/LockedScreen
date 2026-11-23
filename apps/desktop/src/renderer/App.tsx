@@ -66,6 +66,8 @@ import desktopPackage from "../../package.json";
 import { RichContent } from "./components/rich-content";
 import { RichContentEditor } from "./components/rich-content-editor";
 import { ExamConfirmation } from "./components/exam-confirmation";
+import { LanguageEditor, ListeningPlayer, SpeakingControl, useSpokenAnswers } from "./components/language-audio";
+import { attemptLinkedTimeout } from "./lib/linked-timeout";
 import { useLockedscreenStore } from "./lib/store";
 import { waitForSessionRelease } from "./lib/session-release";
 import { needsStudentLmsTurnIn } from "./lib/lms-turn-in";
@@ -1885,6 +1887,7 @@ const QuestionEditor = ({
           textareaClassName="min-h-[156px]"
           previewClassName="text-base"
         />
+        <LanguageEditor question={question} change={onChange}/>
         <div className="grid gap-3 md:grid-cols-2">
           {question.options.map((option) => (
             <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
@@ -2627,6 +2630,10 @@ const ResultsPage = () => {
                     ))}
                 </div>
               ) : null}
+              {Object.entries(result.spokenAnswers ?? {}).map(([id,src]) => <label className="mt-3 block" key={id}>
+                Spoken answer: question {(snapshot.exams.find(e => e.id === result.examId)?.questions.findIndex(q => q.id === id) ?? -1) + 1 || id}
+                <audio controls preload="none" className="max-w-full" src={src}/></label>)}
+              {result.linkedTimeout && <p>Time expired. {result.linkedTimeout === "attempted" ? "Provider submission was requested; verify receipt with the provider." : "Only the local session record was submitted; verify answers with the provider."}</p>}
               {result.studentLmsTurnIn?.lastError ? (
                 <div className="mt-3 break-words rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   {providerLabel(result.studentLmsTurnIn.provider)}: {result.studentLmsTurnIn.lastError}
@@ -6427,12 +6434,18 @@ const StudentExamPage = () => {
     exam ? createSession(exam, launchCandidate) : null
   );
   const [currentIndex, setCurrentIndex] = useState(0);
+  const mic = useSpokenAnswers();
+  const [expired, setExpired] = useState(false);
+  const busy = useRef(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [turningIn, setTurningIn] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
   const sessionEndedRef = useRef(false);
   const locked = snapshot?.activeSession?.examId === examId;
+  useEffect(() => {
+    if (!locked || snapshot?.activeSession?.securityHold) void mic.finish();
+  }, [locked, snapshot?.activeSession?.securityHold]);
 
   const endCurrentSession = useCallback(
     async (reason: string, pin?: string): Promise<boolean> => {
@@ -6478,7 +6491,7 @@ const StudentExamPage = () => {
 
     sessionEndedRef.current = false;
     void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" }).then(started => {
-      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate));
+      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate, new Date(started.activeSession.startedAt)));
     });
   }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
 
@@ -6496,12 +6509,15 @@ const StudentExamPage = () => {
   }, [sessionExamId, location.search]);
 
   const finalize = async () => {
-    if (submitted || submitting || !session || !exam) {
+    if (submitted || busy.current || !session || !exam) {
       return;
     }
 
+    busy.current = true;
     setSubmitting(true);
-    const result = await submitExam(exam, session);
+    try {
+    const spokenAnswers = await mic.finish();
+    const result = await submitExam(exam, { ...session, spokenAnswers });
     if (!result) {
       setSubmitting(false);
       return;
@@ -6511,28 +6527,21 @@ const StudentExamPage = () => {
     setSubmitted(true);
     setSubmitting(false);
     if (configPackage?.externalDeliveryMode !== "lockdown-only" && configPackage?.studentLmsBinding.enabled) await handleStudentTurnIn(result.id);
-
+    } finally { busy.current = false; setSubmitting(false); }
   };
 
   useEffect(() => {
-    if (!session || submitted || !locked) {
+    if (!session || submitted || expired || !locked) {
       return;
     }
 
-    const timer = window.setInterval(() => {
-      if (getRemainingSeconds(session) === 0) {
-        window.clearInterval(timer);
-        if (configPackage?.sessionPolicy.timeoutAction === "restart" && exam) {
-          setSession(createSession(exam, session.candidate));
-          setCurrentIndex(0);
-          return;
-        }
+    const timer = window.setTimeout(() => {
+        setExpired(true);
         void finalize();
-      }
-    }, 1000);
+    }, Math.max(0, Date.parse(session.endsAt) - Date.now()));
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
+  }, [exam, session, submitted, expired, locked]);
 
   if (!exam || !session) {
     return null;
@@ -6586,8 +6595,9 @@ const StudentExamPage = () => {
             }}
           />
         </div>
-      ) : question ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(11rem,0.24fr)_minmax(0,0.76fr)]">
+      ) : expired ? <Card><CardTitle>Time expired</CardTitle><p>{error || (submitting ? "Saving your answers..." : "Your answers are locked.")}</p>
+        <Button disabled={submitting} onClick={() => void finalize()}>Retry submission</Button></Card> : question ? (
+        <fieldset disabled={submitting} className="grid gap-4 lg:grid-cols-[minmax(11rem,0.24fr)_minmax(0,0.76fr)]">
           <Card className="space-y-3 p-4">
             <Badge className="bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-100">Question map</Badge>
             <div className="grid grid-cols-5 gap-1.5">
@@ -6597,6 +6607,7 @@ const StudentExamPage = () => {
                 return (
                   <button
                     key={candidate.id}
+                    disabled={mic.state !== "idle"}
                     className={`rounded-xl px-2.5 py-2 text-sm font-semibold transition ${
                       index === currentIndex
                         ? "bg-slate-950 text-white dark:bg-white dark:text-slate-950"
@@ -6624,6 +6635,9 @@ const StudentExamPage = () => {
               </div>
               <Badge className="bg-slate-900 text-white">{question.points} pt</Badge>
             </div>
+            {question.listening && <ListeningPlayer key={question.id} clip={question.listening}
+              attemptKey={JSON.stringify([sessionExamId, snapshot?.activeSession?.startedAt, question.id])}/>}
+            {question.spokenAnswer && <SpeakingControl id={question.id} mic={mic}/>}
 
             <div className="grid gap-2.5">
               {question.options.map((option) => (
@@ -6662,7 +6676,7 @@ const StudentExamPage = () => {
                   variant="secondary"
                   className="px-3 py-2"
                   onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))}
-                  disabled={currentIndex === 0}
+                  disabled={currentIndex === 0 || mic.state !== "idle"}
                 >
                   <ArrowLeft className="size-4" />
                   Previous
@@ -6688,7 +6702,7 @@ const StudentExamPage = () => {
                 <Button
                   className="px-3 py-2"
                   onClick={() => setCurrentIndex((value) => Math.min(exam.questions.length - 1, value + 1))}
-                  disabled={currentIndex === exam.questions.length - 1}
+                  disabled={currentIndex === exam.questions.length - 1 || mic.state !== "idle"}
                 >
                   Next
                   <ArrowRight className="size-4" />
@@ -6699,7 +6713,7 @@ const StudentExamPage = () => {
               </div>
             </div>
           </Card>
-        </div>
+        </fieldset>
       ) : null}
     </StudentShell>
   );
@@ -6732,10 +6746,12 @@ const LinkExamPage = () => {
   const [hostedSubmitDetected, setHostedSubmitDetected] = useState(false);
   const [websiteAuthState, setWebsiteAuthState] = useState<"exam" | "signing-in" | "blocked" | "provider-rejected">("exam");
   const websiteAuthPending = websiteAuthState !== "exam";
+  const [blockedStep, setBlockedStep] = useState<string>();
   const [confirmation, setConfirmation] = useState<"record" | "return" | "restart" | null>(null);
   const [hostedError, setHostedError] = useState<string | null>(null);
   const [navigating, setNavigating] = useState(false);
   const submissionBusyRef = useRef(false);
+  const timeoutOutcome = useRef<ExamSession["linkedTimeout"]>(undefined);
   const webviewRef = useRef<any>(null);
   const sessionEndedRef = useRef(false);
   const locked = snapshot?.activeSession?.examId === examId;
@@ -6790,14 +6806,17 @@ const LinkExamPage = () => {
 
     sessionEndedRef.current = false;
     void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" }).then(started => {
-      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate));
+      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate, new Date(started.activeSession.startedAt)));
     });
 
   }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
 
 
   useEffect(() => {
-    return window.lockedscreenApi.onHostedWebsiteAuthState(setWebsiteAuthState);
+    return window.lockedscreenApi.onHostedWebsiteAuthState((state, step) => {
+      setWebsiteAuthState(state);
+      setBlockedStep(state === "blocked" ? step : undefined);
+    });
   }, []);
 
   useEffect(() => {
@@ -6852,27 +6871,20 @@ const LinkExamPage = () => {
   }, [expired, hostedZoom, submitted]);
 
   useEffect(() => {
-    if (!session || submitted || !locked) {
+    if (!session || submitted || expired || !locked) {
       return;
     }
 
-    const timer = window.setInterval(() => {
-      if (getRemainingSeconds(session) <= 0) {
-        window.clearInterval(timer);
-        if (configPackage?.sessionPolicy.timeoutAction === "restart" && exam) {
-          setSession(createSession(exam, session.candidate));
-          returnToStart();
-          return;
-        }
+    const timer = window.setTimeout(() => {
         setExpired(true);
-        void finalize();
-      }
-    }, 1000);
+        setConfirmation(null);
+        void finalize(true);
+    }, Math.max(0, Date.parse(session.endsAt) - Date.now()));
 
     return () => window.clearInterval(timer);
-  }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
+  }, [exam, session, submitted, expired, locked]);
 
-  const finalize = async () => {
+  const finalize = async (atDeadline = false) => {
     if (submitted || submissionBusyRef.current || !exam || !session) {
       return;
     }
@@ -6882,7 +6894,8 @@ const LinkExamPage = () => {
     setConfirmation(null);
     setHostedError(null);
     try {
-      const result = await submitExam(exam, session);
+      if (atDeadline && !timeoutOutcome.current) timeoutOutcome.current = await attemptLinkedTimeout(webviewRef.current, configPackage?.browserPolicy.startUrl ?? exam.linkConfig?.url ?? "");
+      const result = await submitExam(exam, { ...session, linkedTimeout: timeoutOutcome.current });
       if (!result) {
         setHostedError(useLockedscreenStore.getState().error ?? "The local session record could not be saved. Try again; the exam remains locked.");
         return;
@@ -6973,6 +6986,7 @@ const LinkExamPage = () => {
                 <p className="max-w-lg text-sm text-slate-300">
                   The local session record is saved. The form provider keeps your exam answers and grade. Wait for the invigilator before leaving this screen.
                 </p>
+                {timeoutOutcome.current && <p>{timeoutOutcome.current === "attempted" ? "Time expired. A submission was requested on the form; provider acceptance is not verified." : "Time expired. LockedScreen could not request provider submission. Ask the invigilator to check the provider."}</p>}
                 {submissionResult ? <p className="max-w-lg break-all text-xs text-slate-300">Record ID: {submissionResult.id}</p> : null}
               </div>
               <StudentLmsTurnInPanel
@@ -7039,7 +7053,8 @@ const LinkExamPage = () => {
                       ? "Complete the website's sign-in here to return to your exam. This is separate from Classroom authorization."
                       : websiteAuthState === "provider-rejected"
                         ? "Google returned a sign-in rejection. Read Google's message below and ask the invigilator for help. LockedScreen will not bypass browser or school-account restrictions."
-                        : "The requested page or sign-in return address is outside this exam's approved route. Ask the invigilator to check the package's website settings."}
+                        : "This page is not on the approved exam route. If you finished signing in, choose Return to form. If this repeats, give the invigilator the support code."}
+                    {websiteAuthState === "blocked" && blockedStep ? ` Support code: ${blockedStep}.` : null}
                     {" "}Keep the teacher's response limit enabled. Lockdown remains active; the invigilator PIN is still required to exit.
                   </p>
                 </div>

@@ -109,6 +109,17 @@ test('prepared student authorization sends while locked without opening Google, 
   assert.deepEqual(globalThis.studentTurnInTest.events, []);
 });
 
+test('only opted-in spoken answers are uploaded as audio attachments with the Classroom report', async () => {
+  const state = scenario();
+  await turnInSubmissionToLms(null,config,{...exam,questions:[{id:'q',prompt:'Speak',options:[],spokenAnswer:true}]},
+    {...saved,spokenAnswers:{q:'data:audio/webm;base64,YXVkaW8=',other:'data:audio/webm;base64,Yg=='}},
+    {studentAccessToken:'fictional',allowInteractiveSignIn:false});
+  const uploads = state.requests.filter(r=>r.url.includes('/upload/drive/'));
+  assert.equal(uploads.length,2);
+  assert.match(Buffer.from(uploads[1].body).toString(),/spoken-answer-1.webm/);
+  assert.equal(JSON.parse(state.requests.find(r=>r.url.endsWith(':modifyAttachments')).body).addAttachments.length,2);
+});
+
 test('expired teacher authorization is a retryable grade failure, not a student submission failure', async () => {
   scenario();
   const result = await turnInSubmissionToLms(null, config, exam, saved, { teacherAccessTokenError: 'Reconnect the teacher account, then retry grade sync.' });

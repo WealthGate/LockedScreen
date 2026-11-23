@@ -5,7 +5,7 @@ import { BrowserWindow, clipboard, screen, session as electronSession, type Inpu
 
 import type { ExamConfigPackage, NavigationGuard, SessionStartRequest, HostedWebsiteAuthState } from "@lockedscreen/shared-types";
 import { isSameSession } from "./session-policy";
-import { createWebsiteSignInPolicy, isWebsiteIdentityUrl } from "./website-sign-in";
+import { blockedWebsiteStep, createWebsiteSignInPolicy, isWebsiteIdentityUrl } from "./website-sign-in";
 
 const hostedPartition = "persist:lockedscreen-link";
 
@@ -48,11 +48,11 @@ const isHostedGoogleFormsScoreUrl = (target: URL): boolean => {
   );
 };
 
-const notifyWebsiteAuth = (state: HostedWebsiteAuthState): void => {
-  if (websiteAuthState === state) return;
+const notifyWebsiteAuth = (state: HostedWebsiteAuthState, step?: string): void => {
+  if (websiteAuthState === state && !step) return;
   websiteAuthState = state;
   for (const browserWindow of BrowserWindow.getAllWindows()) {
-    browserWindow.webContents.send("session:websiteAuthState", state);
+    browserWindow.webContents.send("session:websiteAuthState", state, step);
   }
 };
 
@@ -123,7 +123,7 @@ export const configureHostedPartition = (recordSecurityEvent: SecurityEventRecor
     // Covers redirects and programmatic webview.src/loadURL changes as well as user navigation.
     if (details.resourceType === "mainFrame") {
       if (!activeSession || activeSession.securityHold || !urlAllowedByGuard(details.url)) {
-        if (activeSession?.mode === "link") notifyWebsiteAuth("blocked");
+        if (activeSession?.mode === "link") notifyWebsiteAuth("blocked", activeSession.securityHold ? "SESSION-HOLD" : blockedWebsiteStep(details.url));
         callback({ cancel: true });
         return;
       }
@@ -133,6 +133,7 @@ export const configureHostedPartition = (recordSecurityEvent: SecurityEventRecor
     callback({});
   });
   targetSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  targetSession.setPermissionCheckHandler(() => false);
   targetSession.on("will-download", (event) => {
     event.preventDefault();
     void recordSecurityEvent("navigation", "warning", "Blocked hosted-exam download attempt.");
@@ -228,7 +229,7 @@ export const configureWebContents = (contents: WebContents, recordSecurityEvent:
     contents.on("will-navigate", (event, url) => {
       if (!activeSession || activeSession.securityHold || !urlAllowedByGuard(url)) {
         event.preventDefault();
-        notifyWebsiteAuth("blocked");
+        notifyWebsiteAuth("blocked", activeSession?.securityHold ? "SESSION-HOLD" : blockedWebsiteStep(url));
         void recordSecurityEvent("navigation", "warning", "Blocked navigation outside the approved exam/sign-in policy.");
       }
     });

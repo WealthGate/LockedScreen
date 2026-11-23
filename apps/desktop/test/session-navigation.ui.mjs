@@ -27,10 +27,11 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const version = JSON.parse(await readFile('apps/desktop/package.json', 'utf8')).version;
 const out = resolve(`tmp/acceptance-${version}-ui`);
 await mkdir(out, { recursive: true });
-const browser = await chromium.launch({ headless: true, executablePath: process.env.LOCKEDSCREEN_CHROME || undefined });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.LOCKEDSCREEN_CHROME || undefined,
+  args: ['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream'] });
 try {
   for (const width of [1360, 390]) {
-   for (const scenario of ['hold', 'lms', 'cancel']) {
+   for (const scenario of ['hold', 'lms', 'cancel', 'language']) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -47,6 +48,12 @@ try {
       if (scenario !== 'hold') {
         const practice = state.exams.find(item => item.id === exam.id);
         practice.questions = [practice.questions[0]];
+        if (scenario === 'language') {
+          practice.durationMinutes = 0.13;
+          practice.questions[0].spokenAnswer = true;
+          practice.questions[0].listening = { plays: 1, speed: 0.75,
+            src: 'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA==' };
+        }
         const config = state.configPackages.find(item => item.examId === exam.id);
         config.externalDeliveryMode = 'integrations';
         config.studentLmsBinding = { ...config.studentLmsBinding, enabled: true, provider: 'google-classroom',
@@ -76,6 +83,7 @@ try {
           return snapshot();
         },
         submitExam: async ({ exam, session }) => {
+          window.testExam.savedAudio = Object.values(session.spokenAnswers ?? {})[0];
           events.push('submit');
           const result = { id: 'practice-submission', examId: exam.id, examTitle: exam.title,
             candidateName: 'Practice Student', candidateId: 'test-candidate', score: 1, totalPoints: 1, percentage: 100,
@@ -112,6 +120,20 @@ try {
     await unlock.waitFor();
     await page.getByText('What is the chemical symbol for sodium?', { exact: true }).waitFor();
     await page.getByText('Na', { exact: true }).click();
+    if (scenario === 'language') {
+      await page.getByRole('button',{name:'Play clip'}).click();
+      await page.getByText('0 plays left').waitFor();
+      assert.equal(await page.locator('audio').first().evaluate(el=>el.playbackRate),0.75);
+      await page.getByRole('button',{name:'Record answer'}).click();
+      await page.getByRole('button',{name:'Stop recording'}).waitFor();
+      await page.getByText('Your grade',{exact:true}).waitFor();
+      assert.match(await page.evaluate(()=>window.testExam.savedAudio),/^data:audio\/webm;base64,.{100}/);
+      assert.deepEqual(await page.evaluate(()=>window.testExam.events),['google-sign-in','lock','submit','turn-in']);
+      assert.deepEqual(errors,[]);
+      await page.close();
+      console.log('PASS: listening speed/limit and deadline submission with an in-progress synthetic microphone answer');
+      continue;
+    }
     if (scenario === 'lms') {
       assert.deepEqual(await page.evaluate(() => window.testExam.events), ['google-sign-in', 'lock']);
       await page.getByRole('button', { name: 'Submit exam', exact: true }).click();

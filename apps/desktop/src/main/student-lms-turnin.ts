@@ -548,7 +548,8 @@ const turnInGoogleClassroom = async (
   artifact: SubmissionArtifact,
   submission: SubmissionResult,
   options: TurnInOptions = {},
-  gradeManagedExternally = false
+  gradeManagedExternally = false,
+  recordings: SubmissionArtifact[] = []
 ): Promise<StudentLmsTurnInState> => {
   const baseUrl = `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}`;
   const submissionList = await fetchJson<{ studentSubmissions?: Array<Record<string, unknown>> }>(
@@ -577,6 +578,8 @@ const turnInGoogleClassroom = async (
   }
 
   const uploadedFile = await uploadGoogleArtifact(accessToken, artifact);
+  const attachmentIds = [uploadedFile.id];
+  for (const recording of recordings) attachmentIds.push((await uploadGoogleArtifact(accessToken, recording)).id);
   await fetchJson<Record<string, unknown>>(
     `${baseUrl}/studentSubmissions/${encodeURIComponent(studentSubmission.id)}:modifyAttachments`,
     {
@@ -586,13 +589,7 @@ const turnInGoogleClassroom = async (
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        addAttachments: [
-          {
-            driveFile: {
-              id: uploadedFile.id
-            }
-          }
-        ]
+        addAttachments: attachmentIds.map(id => ({ driveFile: { id } }))
       })
     },
     "Unable to attach the Lockedscreen submission to Google Classroom."
@@ -653,7 +650,8 @@ const uploadMicrosoftArtifact = async (
 const turnInMicrosoft365 = async (
   binding: StudentLmsBinding,
   accessToken: string,
-  artifact: SubmissionArtifact
+  artifact: SubmissionArtifact,
+  recordings: SubmissionArtifact[]
 ): Promise<StudentLmsTurnInState> => {
   const baseUrl = `https://graph.microsoft.com/v1.0/education/classes/${encodeURIComponent(binding.courseId)}/assignments/${encodeURIComponent(binding.assignmentId)}`;
   const submissionList = await fetchJson<{ value?: Array<Record<string, unknown>> }>(
@@ -690,7 +688,10 @@ const turnInMicrosoft365 = async (
     throw new Error("Microsoft 365 did not return a submission resources folder.");
   }
 
-  const uploadedFile = await uploadMicrosoftArtifact(accessToken, folder.resourcesFolderUrl, artifact);
+  let reportUrl: string | undefined;
+  for (const file of [artifact, ...recordings]) {
+  const uploadedFile = await uploadMicrosoftArtifact(accessToken, folder.resourcesFolderUrl, file);
+  if (file === artifact) reportUrl = uploadedFile.webUrl;
   await fetchJson<Record<string, unknown>>(
     `${baseUrl}/submissions/${encodeURIComponent(submission.id)}/resources`,
     {
@@ -702,13 +703,14 @@ const turnInMicrosoft365 = async (
       body: JSON.stringify({
         resource: {
           "@odata.type": "#microsoft.graph.educationFileResource",
-          displayName: artifact.fileName,
+          displayName: file.fileName,
           fileUrl: `https://graph.microsoft.com/v1.0/drives/${uploadedFile.driveId}/items/${uploadedFile.itemId}`
         }
       })
     },
     "Unable to attach the Lockedscreen submission to Microsoft 365."
   );
+  }
   await fetchJson<Record<string, unknown>>(
     `${baseUrl}/submissions/${encodeURIComponent(submission.id)}/submit`,
     {
@@ -723,7 +725,7 @@ const turnInMicrosoft365 = async (
     status: "success",
     lastAttemptAt: new Date().toISOString(),
     submittedAt: new Date().toISOString(),
-    externalReference: uploadedFile.webUrl ?? `${binding.courseId}/${binding.assignmentId}/${submission.id}`
+    externalReference: reportUrl ?? `${binding.courseId}/${binding.assignmentId}/${submission.id}`
   };
 };
 
@@ -747,10 +749,17 @@ export const turnInSubmissionToLms = async (
     ? null : (await signInStudent(binding, parentWindow)).accessToken);
   if (!accessToken) throw new Error("Student sign-in must finish before the exam starts. The result is saved; lockdown has not been released.");
   const artifact = await buildSubmissionArtifact(parentWindow, exam, submission);
+  const recordings: SubmissionArtifact[] = [];
+  if (exam.mode === "app") exam.questions.forEach((q,index) => {
+    const src = submission.spokenAnswers?.[q.id];
+    if (q.spokenAnswer && src?.startsWith("data:audio/webm;base64,")) recordings.push({
+      fileName: `spoken-answer-${index + 1}.webm`, mimeType: "audio/webm", content: Buffer.from(src.slice(src.indexOf(",")+1),"base64")
+    });
+  });
 
   if (binding.provider === "google-classroom") {
-    return turnInGoogleClassroom(binding, accessToken, artifact, submission, options, exam.mode === "link");
+    return turnInGoogleClassroom(binding, accessToken, artifact, submission, options, exam.mode === "link", recordings);
   }
 
-  return turnInMicrosoft365(binding, accessToken, artifact);
+  return turnInMicrosoft365(binding, accessToken, artifact, recordings);
 };

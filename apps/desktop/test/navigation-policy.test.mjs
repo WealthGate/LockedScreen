@@ -17,6 +17,7 @@ test('hosted navigation filters redirects, programmatic loads, popups and webvie
         export const session = { fromPartition: () => ({
           webRequest: { onBeforeRequest: callback => { state.request = callback; } },
           setPermissionRequestHandler: callback => { state.permission = callback; },
+          setPermissionCheckHandler: callback => { state.checkPermission = callback; },
           on() {}
         }) };
       ` }));
@@ -38,6 +39,7 @@ test('hosted navigation filters redirects, programmatic loads, popups and webvie
   };
   const main = contents('window'); const guest = contents('webview');
   controller.configureHostedPartition(audit);
+  assert.equal(state.checkPermission(null, 'media'), false);
   controller.configureWebContents(main, audit);
   controller.configureWebContents(guest, audit);
   const request = (url, resourceType = 'mainFrame') => {
@@ -93,6 +95,10 @@ test('hosted navigation filters redirects, programmatic loads, popups and webvie
     assert.deepEqual(request(signIn), {}, 'Forms website sign-in must not be blanket-blocked');
     assert.deepEqual(guest.handlers.get('popup')({ url: signIn }), { action: 'deny' });
     assert.equal(guest.loaded.at(-1), signIn, 'approved sign-in opens only inside the same locked webview');
+    const cookieHop = 'https://docs.google.com/accounts/SetOSID?continue=' + encodeURIComponent(form);
+    assert.deepEqual(request(cookieHop), {}, 'post-password Forms cookie handoff');
+    assert.deepEqual(request(form), {}, 'return to the same exam');
+    assert.deepEqual(request(cookieHop), { cancel: true }, 'cookie handoff closes on return to the exam');
     for (const url of ['https://www.google.com/search?q=answers', 'https://mail.google.com/',
       'https://myaccount.google.com/', 'https://www.youtube.com/', 'https://docs.google.com/forms/d/e/other/viewform',
       'https://accounts.google.com/ServiceLogin?continue=https://mail.google.com/']) {
