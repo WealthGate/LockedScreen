@@ -60,6 +60,20 @@ const scenario = (options = {}) => {
   return state;
 };
 
+test('linked forms turn in a session report without reading or overwriting provider grades', async () => {
+  for (const submissionState of ['CREATED', 'TURNED_IN', 'RETURNED']) {
+    const state = scenario({ submissionState });
+    const result = await turnInSubmissionToLms(null, config, { ...exam, mode: 'link' }, saved,
+      { studentAccessToken: 'prepared-student', allowInteractiveSignIn: false, teacherAccessToken: 'fictional-teacher' });
+    assert.equal(result.status, 'success');
+    assert.equal(result.gradeSyncStatus, 'skipped');
+    assert.match(result.gradeSyncError, /form provider/);
+    assert.equal(result.gradeValue, undefined);
+    assert.equal(state.requests.some(request => request.method === 'PATCH' || request.url.endsWith('/courseWork/assignment')), false);
+    assert.deepEqual(state.events, []);
+  }
+});
+
 test('post-release student turn-in attaches the report and grades using teacher authority and assignment points', async () => {
   const state = scenario();
   const result = await turnInSubmissionToLms(null, config, exam, saved, { teacherAccessToken: 'fictional-teacher-token' });

@@ -65,9 +65,11 @@ import { Badge, Button, Card, CardDescription, CardTitle, Input, Textarea } from
 import desktopPackage from "../../package.json";
 import { RichContent } from "./components/rich-content";
 import { RichContentEditor } from "./components/rich-content-editor";
+import { ExamConfirmation } from "./components/exam-confirmation";
 import { useLockedscreenStore } from "./lib/store";
 import { waitForSessionRelease } from "./lib/session-release";
 import { needsStudentLmsTurnIn } from "./lib/lms-turn-in";
+import { isHostedFormCompletionUrl, hostedSubmissionNotice } from "./lib/hosted-exam";
 
 const teacherNavItems = [
   { to: "/teacher", label: "Dashboard", icon: LayoutDashboard },
@@ -97,19 +99,6 @@ const initialUpdateState: AppUpdateState = {
 
 const clampExamZoom = (value: number) =>
   Math.min(maxExamZoom, Math.max(minExamZoom, Math.round(value * 100) / 100));
-
-const isHostedFormCompletionUrl = (candidateUrl: string) => {
-  try {
-    const parsed = new URL(candidateUrl);
-    return (
-      parsed.hostname === "docs.google.com" &&
-      parsed.pathname.includes("/forms/") &&
-      (parsed.pathname.includes("/formResponse") || parsed.searchParams.has("submit") || parsed.search.includes("form_confirm"))
-    );
-  } catch {
-    return false;
-  }
-};
 
 const blankAppearance = (): ExamAppearance => ({
   theme: "system",
@@ -2589,11 +2578,11 @@ const ResultsPage = () => {
                 </div>
                 <div>
                   <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Score</span>
-                  <span>{result.score}/{result.totalPoints}</span>
+                  <span>{snapshot.exams.find(exam => exam.id === result.examId)?.mode === "link" ? "Form provider" : `${result.score}/${result.totalPoints}`}</span>
                 </div>
                 <div>
                   <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Percent</span>
-                  <span>{result.percentage}%</span>
+                  <span>{snapshot.exams.find(exam => exam.id === result.examId)?.mode === "link" ? "Not available" : `${result.percentage}%`}</span>
                 </div>
                 <div className="min-w-0">
                   <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 xl:hidden">Submitted</span>
@@ -4790,7 +4779,7 @@ const SettingsPage = () => {
               Exported packages carry only public LMS app settings plus the class and assignment IDs. Teacher access tokens never leave the admin device.
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-              The student signs in only after Lockedscreen has already recorded the local submission. LMS delivery is additive and can be retried from the post-submit screen.
+              Student LMS sign-in completes before the exam starts. Submission saves the local record and attempts configured delivery without releasing lockdown. Google Forms website sign-in is separate and is not supported in the embedded exam browser.
             </div>
             {packageDraft.studentLmsBinding.courseLabel ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
@@ -6331,12 +6320,14 @@ const StudentLmsTurnInPanel = ({
   configPackage,
   submission,
   turningIn,
-  onTurnIn
+  onTurnIn,
+  gradeManagedExternally = false
 }: {
   configPackage: ExamConfigPackage | null;
   submission: SubmissionResult | null;
   turningIn: boolean;
   onTurnIn: (pin?: string) => void;
+  gradeManagedExternally?: boolean;
 }) => {
   const binding = configPackage?.studentLmsBinding;
   if (!binding?.enabled || !submission) {
@@ -6351,7 +6342,9 @@ const StudentLmsTurnInPanel = ({
   const providerName = providerLabel(binding.provider);
   const gradeValue = typeof state?.gradeValue === "number" ? `${state.gradeValue} points` : null;
   const completionMessage =
-    binding.provider === "google-classroom" && state?.gradeSyncStatus === "success"
+    gradeManagedExternally
+      ? `Your session report was turned in to ${providerName}. The form provider manages the exam answers and grade.`
+      : binding.provider === "google-classroom" && state?.gradeSyncStatus === "success"
       ? `Your exam was turned in to Google Classroom and your grade was synced successfully${gradeValue ? `: ${gradeValue}` : ""}.`
       : binding.provider === "google-classroom" && state?.gradeSyncStatus === "failed"
         ? "Your exam and performance report were turned in to Google Classroom. Automatic grade sync needs teacher attention."
@@ -6387,7 +6380,7 @@ const StudentLmsTurnInPanel = ({
       ) : null}
       {status === "success" ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-950">
-          <div className="font-semibold">Submission confirmed</div>
+          <div className="font-semibold">{gradeManagedExternally ? "Session report delivered" : "Submission confirmed"}</div>
           <div className="mt-1">{completionMessage}</div>
           {state?.submittedAt ? <div className="mt-1 text-xs">Completed {new Date(state.submittedAt).toLocaleString()}</div> : null}
         </div>
@@ -6408,7 +6401,7 @@ const StudentLmsTurnInPanel = ({
               : state.gradeSyncStatus === "failed"
                 ? "Grade sync needs teacher attention"
                 : state.gradeSyncStatus === "skipped"
-                  ? "Grade sync is waiting for the teacher connection"
+                  ? gradeManagedExternally ? "Grade managed by the form provider" : "Grade sync is waiting for the teacher connection"
                   : "Grade sync is pending"}
           </div>
           {gradeValue ? <div className="mt-1">Classroom grade: {gradeValue}</div> : null}
@@ -6741,6 +6734,10 @@ const LinkExamPage = () => {
   const [hostedZoom, setHostedZoom] = useState(1);
   const [hostedSubmitDetected, setHostedSubmitDetected] = useState(false);
   const [embeddedGoogleSignInBlocked, setEmbeddedGoogleSignInBlocked] = useState(false);
+  const [confirmation, setConfirmation] = useState<"record" | "return" | "restart" | null>(null);
+  const [hostedError, setHostedError] = useState<string | null>(null);
+  const [navigating, setNavigating] = useState(false);
+  const submissionBusyRef = useRef(false);
   const webviewRef = useRef<any>(null);
   const sessionEndedRef = useRef(false);
   const locked = snapshot?.activeSession?.examId === examId;
@@ -6820,7 +6817,22 @@ const LinkExamPage = () => {
     setSubmissionResult(null);
     setHostedSubmitDetected(false);
     setEmbeddedGoogleSignInBlocked(false);
+    setConfirmation(null);
+    setHostedError(null);
+    submissionBusyRef.current = false;
   }, [sessionExamId, location.search]);
+
+  useEffect(() => {
+    const view = webviewRef.current;
+    if (!view) return;
+    const failed = (event: { isMainFrame?: boolean; errorCode?: number; errorDescription?: string }) => {
+      if (event.isMainFrame !== false && event.errorCode !== -3) setHostedError(`The form could not load. ${event.errorDescription ?? "Check the connection and retry the start page."}`);
+    };
+    const loaded = () => setHostedError(null);
+    view.addEventListener("did-fail-load", failed);
+    view.addEventListener("did-finish-load", loaded);
+    return () => { view.removeEventListener("did-fail-load", failed); view.removeEventListener("did-finish-load", loaded); };
+  }, [locked]);
 
   useEffect(() => {
     if (submitted || expired) {
@@ -6865,56 +6877,71 @@ const LinkExamPage = () => {
   }, [configPackage?.sessionPolicy.timeoutAction, exam, session, submitted, locked]);
 
   const finalize = async () => {
-    if (submitted || submitting || !exam || !session) {
+    if (submitted || submissionBusyRef.current || !exam || !session) {
       return;
     }
 
+    submissionBusyRef.current = true;
     setSubmitting(true);
-    const result = await submitExam(exam, session);
-    if (!result) {
+    setConfirmation(null);
+    setHostedError(null);
+    try {
+      const result = await submitExam(exam, session);
+      if (!result) {
+        setHostedError(useLockedscreenStore.getState().error ?? "The local session record could not be saved. Try again; the exam remains locked.");
+        return;
+      }
+      setSubmissionResult(result);
+      setSubmitted(true);
+      if (configPackage?.externalDeliveryMode !== "lockdown-only" && configPackage?.studentLmsBinding.enabled) await handleStudentTurnIn(result.id);
+    } catch (error) {
+      setHostedError(error instanceof Error ? error.message : "The session record could not be saved. Try again.");
+    } finally {
+      submissionBusyRef.current = false;
       setSubmitting(false);
-      return;
     }
-
-    setSubmissionResult(result);
-    setSubmitted(true);
-    setSubmitting(false);
-    if (configPackage?.externalDeliveryMode !== "lockdown-only" && configPackage?.studentLmsBinding.enabled) await handleStudentTurnIn(result.id);
-
   };
 
-  const returnToStart = () => {
+  const returnToStart = async () => {
     const startUrl = configPackage?.browserPolicy.startUrl ?? exam?.linkConfig?.url;
     if (!startUrl || !webviewRef.current) {
+      setHostedError("The form start page is not available. Ask the invigilator for help.");
       return;
     }
+    setNavigating(true);
+    setHostedError(null);
+    try {
+      if (typeof webviewRef.current.loadURL === "function") await webviewRef.current.loadURL(startUrl);
+      else webviewRef.current.src = startUrl;
+      setHostedSubmitDetected(false);
+      setEmbeddedGoogleSignInBlocked(false);
+    } catch (error) {
+      setHostedError(error instanceof Error ? error.message : "The start page could not be loaded. Try again.");
+    } finally { setNavigating(false); }
+  };
 
-    if (configPackage?.browserPolicy.protectedBackToStart && !window.confirm("Return to the configured start page?")) {
-      return;
-    }
-
-    webviewRef.current.src = startUrl;
-    setHostedSubmitDetected(false);
-    setEmbeddedGoogleSignInBlocked(false);
+  const requestReturn = (action: "return" | "restart") => {
+    if (submitted || submitting || navigating || expired) return;
+    if (configPackage?.browserPolicy.protectedBackToStart || action === "restart") setConfirmation(action);
+    else void returnToStart();
   };
 
   const requestHostedCompletion = () => {
-    const confirmed = window.confirm(
-      hostedSubmitDetected
-        ? "Google Forms appears to have accepted the response. Record the local Lockedscreen submission now?"
-        : "Record the local Lockedscreen submission now? Use this only after the online form has been submitted."
-    );
+    if (!submitted && !submitting && !expired && !embeddedGoogleSignInBlocked) setConfirmation("record");
+  };
 
-    if (confirmed) {
-      void finalize();
-    }
+  const confirmHostedAction = () => {
+    const action = confirmation;
+    setConfirmation(null);
+    if (action === "record") void finalize();
+    else if (action) void returnToStart();
   };
 
   if (!exam || !session) {
     return null;
   }
 
-  const webviewHidden = submitted || expired || shellUnlockOpen;
+  const webviewHidden = submitted || expired || shellUnlockOpen || Boolean(confirmation);
   if (!locked && !submitted && !sessionEndedRef.current) {
     return <ExamStartupStatus error={error} onBack={() => navigate("/student", { replace: true })} />;
   }
@@ -6934,21 +6961,29 @@ const LinkExamPage = () => {
       onZoomChange={setHostedZoom}
       scaleContent={false}
     >
+      {confirmation ? <ExamConfirmation
+        title={confirmation === "record" ? "Record online submission?" : confirmation === "restart" ? "Restart the form page?" : "Return to the start page?"}
+        confirmLabel={confirmation === "record" ? "Save session record" : confirmation === "restart" ? "Restart form" : "Return to start"}
+        onConfirm={confirmHostedAction} onCancel={() => setConfirmation(null)}>
+        <p>{confirmation === "record" ? hostedSubmissionNotice : "Unsaved changes on the form may be lost. The exam timer will continue, and the form provider's response limit will not change."}</p>
+      </ExamConfirmation> : null}
       <div className="relative flex h-[calc(100dvh-7rem)] min-h-[32rem] flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white sm:h-[calc(100dvh-8.5rem)] sm:rounded-[28px]">
         {submitted ? (
-          <div className="absolute inset-0 z-10 flex items-start justify-center overflow-y-auto bg-slate-950/90 p-3 sm:p-8">
+          <div className="absolute inset-0 z-10 flex items-start justify-center overflow-y-auto bg-slate-950 p-3 sm:p-8">
             <div className="my-auto w-full max-w-xl space-y-4 text-center text-white">
               <div className="flex flex-col items-center justify-center gap-4">
                 <ShieldCheck className="size-12 text-emerald-300" />
-                <h2 className="text-2xl font-semibold sm:text-3xl">Submission recorded</h2>
+                <h2 className="text-2xl font-semibold sm:text-3xl">Session record saved</h2>
                 <p className="max-w-lg text-sm text-slate-300">
-                  Lockedscreen saved the local submission first. Wait for the invigilator before leaving this screen.
+                  The local session record is saved. The form provider keeps your exam answers and grade. Wait for the invigilator before leaving this screen.
                 </p>
+                {submissionResult ? <p className="max-w-lg break-all text-xs text-slate-300">Record ID: {submissionResult.id}</p> : null}
               </div>
               <StudentLmsTurnInPanel
                 configPackage={configPackage}
                 submission={submissionResult}
                 turningIn={turningIn}
+                gradeManagedExternally
                 onTurnIn={(pin) => {
                   if (!submissionResult) {
                     return;
@@ -6956,16 +6991,18 @@ const LinkExamPage = () => {
                   void handleStudentTurnIn(submissionResult.id, pin);
                 }}
               />
+              {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
             </div>
           </div>
         ) : expired ? (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 overflow-y-auto bg-slate-950/90 p-3 text-center text-white sm:p-8">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 overflow-y-auto bg-slate-950 p-3 text-center text-white sm:p-8">
             <Clock3 className="size-12 text-amber-300" />
             <h2 className="text-2xl font-semibold sm:text-3xl">Time expired</h2>
             <p className="max-w-lg text-sm text-slate-300">
               This linked exam session has ended. Submit the session record and wait for the invigilator.
             </p>
-            <Button onClick={() => void finalize()}>End session</Button>
+            {hostedError ? <p role="alert" className="max-w-lg text-sm text-amber-200">{hostedError}</p> : null}
+            <Button disabled={submitting} onClick={() => void finalize()}>{submitting ? "Recording..." : "Save expired session record"}</Button>
           </div>
         ) : null}
 
@@ -6974,25 +7011,26 @@ const LinkExamPage = () => {
             <span className="break-words">
               Controlled hosted runtime. Navigation is limited to package-approved domains and URL rules.
             </span>
-            {hostedSubmitDetected ? <Badge className="bg-emerald-100 text-emerald-800">Online submission detected</Badge> : null}
+            {hostedSubmitDetected ? <Badge className="bg-emerald-100 text-emerald-800">Form response page reached</Badge> : null}
           </div>
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             {configPackage?.browserPolicy.showBackToStartButton ? (
-              <Button variant="secondary" onClick={returnToStart}>
+              <Button variant="secondary" disabled={submitted || submitting || navigating || expired} onClick={() => requestReturn("return")}>
                 Return to start
               </Button>
             ) : null}
             {configPackage?.sessionPolicy.restartInsteadOfQuit ? (
-              <Button variant="secondary" onClick={returnToStart}>
-                Restart session
+              <Button variant="secondary" disabled={submitted || submitting || navigating || expired} onClick={() => requestReturn("restart")}>
+                Restart form
               </Button>
             ) : null}
-            <Button onClick={requestHostedCompletion} disabled={submitting || submitted}>
-              {submitting ? "Recording..." : hostedSubmitDetected ? "Record detected submission" : "Record online submission"}
+            <Button onClick={requestHostedCompletion} disabled={submitting || submitted || expired || navigating || embeddedGoogleSignInBlocked}>
+              {submitting ? "Recording..." : "Record online submission"}
             </Button>
           </div>
         </div>
 
+        {hostedError && !expired ? <div role="alert" className="border-b border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-950">{hostedError}</div> : null}
         {embeddedGoogleSignInBlocked ? (
           <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -7001,13 +7039,13 @@ const LinkExamPage = () => {
                 <div className="min-w-0 space-y-1 break-words text-sm">
                   <p className="font-semibold">Google sign-in cannot open inside the locked exam browser.</p>
                   <p>
-                    This Google Form requires students to sign in. Google blocks account sign-in inside embedded secure
-                    browsers, even after app verification. Ask the teacher to turn off the form's sign-in requirement for
-                    Lockedscreen link exams, or use an app-based Lockedscreen exam/Classroom assignment instead.
+                    This form needs a Google website session, which is separate from Classroom sign-in. Signed-in Google
+                    Forms, including forms limited to one response, are not supported in this embedded browser. Keep your
+                    teacher's response limit enabled. Ask the invigilator for a supported exam deployment; lockdown has not been released.
                   </p>
                 </div>
               </div>
-              <Button variant="secondary" onClick={returnToStart}>
+              <Button variant="secondary" disabled={navigating || submitting || submitted || expired} onClick={() => requestReturn("return")}>
                 Return to form
               </Button>
             </div>

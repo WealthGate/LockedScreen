@@ -183,6 +183,7 @@ const readInstalledRole = (): InstalledAppRole => {
 const installedRole = buildEdition === "selectable" ? readInstalledRole() : buildEdition;
 let sessionStarting = false;
 let activeSubmissionId: string | null = null;
+let submissionInFlight = false;
 const sessionStartBarrier = createSessionStartBarrier();
 const handleIpc = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void => {
   ipcMain.handle(channel, (...args) => {
@@ -1462,58 +1463,69 @@ app.whenReady().then(async () => {
       throw new Error("Only the active exam can be submitted.");
     }
     if (current.securityHold) throw new Error(current.securityHold);
-    if (activeSubmissionId) throw new Error("This exam session has already been submitted.");
-    const trustedExam = (await storage.getSnapshot()).exams.find(exam => exam.id === current.examId);
-    if (!trustedExam) throw new Error("Active exam not found.");
-    const activePackageIsLockdownOnly = activePackage?.externalDeliveryMode === "lockdown-only";
-    const result = await storage.recordSubmission(trustedExam, payload.session, {
-      externalDeliveryMode: activePackage?.externalDeliveryMode,
-      packageId: activePackage?.id,
-      resultDestinations: activePackageIsLockdownOnly ? [] : undefined
-    });
-    activeSubmissionId = result.id;
-    let snapshot = await storage.getSnapshot();
+    if (submissionInFlight) throw new Error("The session record is being saved. Wait a moment and try again.");
+    submissionInFlight = true;
+    try {
+      if (activeSubmissionId) {
+        const saved = await storage.getSnapshot();
+        const result = saved.submissions.find(candidate => candidate.id === activeSubmissionId);
+        if (!result) throw new Error("The saved session record could not be found. Ask the invigilator for help.");
+        return { result, snapshot: await withRuntime(Promise.resolve(saved)) };
+      }
+      const trustedExam = (await storage.getSnapshot()).exams.find(exam => exam.id === current.examId);
+      if (!trustedExam) throw new Error("Active exam not found.");
+      const activePackageIsLockdownOnly = activePackage?.externalDeliveryMode === "lockdown-only";
+      const result = await storage.recordSubmission(trustedExam, payload.session, {
+        externalDeliveryMode: activePackage?.externalDeliveryMode,
+        packageId: activePackage?.id,
+        resultDestinations: activePackageIsLockdownOnly ? [] : undefined
+      });
+      activeSubmissionId = result.id;
+      let snapshot = await storage.getSnapshot();
 
-    if (!activePackageIsLockdownOnly && activePackage?.studentLmsBinding.enabled) {
-      const pendingTurnInState: StudentLmsTurnInState = {
-        provider: activePackage.studentLmsBinding.provider,
-        status: "pending",
-        lastAttemptAt: new Date().toISOString(),
-        gradeSyncStatus: activePackage.studentLmsBinding.provider === "google-classroom" ? "pending" : undefined
+      if (!activePackageIsLockdownOnly && activePackage?.studentLmsBinding.enabled) {
+        const pendingTurnInState: StudentLmsTurnInState = {
+          provider: activePackage.studentLmsBinding.provider,
+          status: "pending",
+          lastAttemptAt: new Date().toISOString(),
+          gradeSyncStatus: activePackage.studentLmsBinding.provider === "google-classroom" ? "pending" : undefined
+        };
+        snapshot = await storage.updateSubmissionStudentLmsTurnIn(result.id, pendingTurnInState);
+        result.studentLmsTurnIn = pendingTurnInState;
+      }
+
+      const packageAutoDestinations =
+        activePackageIsLockdownOnly
+          ? []
+          : activePackage?.resultDestinations.filter((destination) => destination.trigger === "auto-on-submit") ?? [];
+      for (const destination of packageAutoDestinations) {
+        const pendingSyncState = {
+          destinationId: destination.id,
+          destinationLabel: destination.label,
+          destinationType: destination.type,
+          status: destination.enabled ? "pending" : "disabled"
+        } as const;
+        snapshot = await storage.updateSubmissionSyncState(result.id, pendingSyncState);
+        result.syncStates = [
+          ...result.syncStates.filter((state) => state.destinationId !== destination.id),
+          pendingSyncState
+        ];
+      }
+
+      void syncSubmissionResultsInternal(result.id, {
+        autoOnly: true,
+        includeLocalDestinations: !activePackageIsLockdownOnly,
+        packageDestinations: packageAutoDestinations
+      }).catch(() => {
+        // Best-effort auto-sync must never block local submission completion.
+      });
+      return {
+        result,
+        snapshot: await withRuntime(Promise.resolve(snapshot))
       };
-      snapshot = await storage.updateSubmissionStudentLmsTurnIn(result.id, pendingTurnInState);
-      result.studentLmsTurnIn = pendingTurnInState;
+    } finally {
+      submissionInFlight = false;
     }
-
-    const packageAutoDestinations =
-      activePackageIsLockdownOnly
-        ? []
-        : activePackage?.resultDestinations.filter((destination) => destination.trigger === "auto-on-submit") ?? [];
-    for (const destination of packageAutoDestinations) {
-      const pendingSyncState = {
-        destinationId: destination.id,
-        destinationLabel: destination.label,
-        destinationType: destination.type,
-        status: destination.enabled ? "pending" : "disabled"
-      } as const;
-      snapshot = await storage.updateSubmissionSyncState(result.id, pendingSyncState);
-      result.syncStates = [
-        ...result.syncStates.filter((state) => state.destinationId !== destination.id),
-        pendingSyncState
-      ];
-    }
-
-    void syncSubmissionResultsInternal(result.id, {
-      autoOnly: true,
-      includeLocalDestinations: !activePackageIsLockdownOnly,
-      packageDestinations: packageAutoDestinations
-    }).catch(() => {
-      // Best-effort auto-sync must never block local submission completion.
-    });
-    return {
-      result,
-      snapshot: await withRuntime(Promise.resolve(snapshot))
-    };
   });
 
   handleIpc("studentLms:turnIn", async (_event, payload: unknown) => {

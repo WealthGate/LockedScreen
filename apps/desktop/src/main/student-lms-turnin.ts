@@ -494,8 +494,12 @@ const syncGoogleClassroomGrade = async (
   teacherAccessToken: string | undefined,
   studentSubmissionId: string,
   submission: SubmissionResult,
-  teacherAccessTokenError?: string
+  teacherAccessTokenError?: string,
+  gradeManagedExternally = false
 ): Promise<Pick<StudentLmsTurnInState, "gradeSyncStatus" | "gradeSyncedAt" | "gradeValue" | "gradeSyncError">> => {
+  if (gradeManagedExternally) {
+    return { gradeSyncStatus: "skipped", gradeSyncError: "The form provider manages this exam's answers and grade. No Classroom grade was changed by LockedScreen." };
+  }
   if (!teacherAccessToken) {
     return {
       gradeSyncStatus: teacherAccessTokenError ? "failed" : "skipped",
@@ -543,7 +547,8 @@ const turnInGoogleClassroom = async (
   accessToken: string,
   artifact: SubmissionArtifact,
   submission: SubmissionResult,
-  options: TurnInOptions = {}
+  options: TurnInOptions = {},
+  gradeManagedExternally = false
 ): Promise<StudentLmsTurnInState> => {
   const baseUrl = `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}`;
   const submissionList = await fetchJson<{ studentSubmissions?: Array<Record<string, unknown>> }>(
@@ -559,7 +564,7 @@ const turnInGoogleClassroom = async (
   }
 
   if (studentSubmission.state === "TURNED_IN" || studentSubmission.state === "RETURNED") {
-    const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission, options.teacherAccessTokenError);
+    const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission, options.teacherAccessTokenError, gradeManagedExternally);
     return {
       provider: "google-classroom",
       status: "success",
@@ -605,7 +610,7 @@ const turnInGoogleClassroom = async (
     "Unable to turn in the Google Classroom submission."
   );
 
-  const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission, options.teacherAccessTokenError);
+  const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission, options.teacherAccessTokenError, gradeManagedExternally);
 
   return {
     provider: "google-classroom",
@@ -744,7 +749,7 @@ export const turnInSubmissionToLms = async (
   const artifact = await buildSubmissionArtifact(parentWindow, exam, submission);
 
   if (binding.provider === "google-classroom") {
-    return turnInGoogleClassroom(binding, accessToken, artifact, submission, options);
+    return turnInGoogleClassroom(binding, accessToken, artifact, submission, options, exam.mode === "link");
   }
 
   return turnInMicrosoft365(binding, accessToken, artifact);

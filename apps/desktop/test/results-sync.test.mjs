@@ -6,6 +6,20 @@ const compiled = await build({ entryPoints: ['apps/desktop/src/main/results-sync
   platform: 'node', format: 'esm', write: false });
 const { syncSubmissionToDestination } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
+test('linked session records never send placeholder grades to any result destination', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('A linked record must not send numeric grades'); };
+  try {
+    for (const type of ['google-classroom-grade-sync', 'google-sheets', 'webhook']) {
+      const result = await syncSubmissionToDestination({ id: 'external', type, enabled: true, examIds: [],
+        endpointUrl: 'https://example.invalid/grades' }, { id: 'form', mode: 'link', className: '' },
+        { id: 'local-record', score: 0, totalPoints: 0, percentage: 0, responses: [] });
+      assert.equal(result.status, 'disabled');
+      assert.match(result.lastError, /not a scored result/);
+    }
+  } finally { globalThis.fetch = original; }
+});
+
 test('Classroom grade bridge receives the submission ID, never a Drive attachment URL', async () => {
   const original = globalThis.fetch;
   const bodies = [];

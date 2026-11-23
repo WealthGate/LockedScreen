@@ -351,6 +351,10 @@ export const syncSubmissionToDestination = async (
     return createDisabledSyncState(destination, "Destination does not match this exam or class.");
   }
 
+  if (exam.mode === "link") {
+    return createDisabledSyncState(destination, "The form provider manages this exam's answers and grade. A local session record is not a scored result.");
+  }
+
   if (!destination.endpointUrl.trim()) {
     return {
       destinationId: destination.id,

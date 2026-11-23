@@ -308,7 +308,7 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
       set({ error })
     );
     if (response) {
-      set({ snapshot: response.snapshot });
+      set({ snapshot: response.snapshot, error: null });
       return response.result;
     }
     return null;
