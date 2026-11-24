@@ -40,6 +40,9 @@ jobs:
       - name: Build role-selecting web setup
         shell: pwsh
         run: ./scripts/build-web-setup.ps1 -Test
+      - name: Build combined Microsoft Store package
+        shell: pwsh
+        run: ./scripts/build-store.ps1
       - name: Upload for supervised release validation
         uses: actions/upload-artifact@v4
         with:
@@ -51,3 +54,9 @@ jobs:
             apps/desktop/dist-editions/teacher/github/teacher.yml
             apps/desktop/dist-editions/web/LockedScreen-Setup-*.exe
             apps/desktop/dist-editions/web/latest.yml
+      - name: Upload Microsoft Store submission package
+        uses: actions/upload-artifact@v4
+        with:
+          name: LockedScreen-Microsoft-Store
+          path: apps/desktop/dist-store/*.appx
+          if-no-files-found: error

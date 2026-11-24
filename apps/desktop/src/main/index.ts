@@ -9,6 +9,7 @@ import { createPinVerifier } from "./security/invigilator-pin";
 import { StudentExamAuth, needsStudentSignIn } from "./student-exam-auth";
 import { assertSessionExitPin, assertSessionOperation, assertSessionPinConfigured, createSessionStartBarrier, isSameSession, unsafeProductionSwitch } from "./security/session-policy";
 
+import { isSharedMediaList } from "@lockedscreen/exam-engine";
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
   Candidate,
@@ -253,6 +254,7 @@ const isExam = (value: unknown): value is Exam =>
   typeof value.id === "string" &&
   typeof value.title === "string" &&
   Array.isArray(value.questions) &&
+  isSharedMediaList(value.sharedMedia) &&
   typeof value.mode === "string";
 
 const isSettings = (value: unknown): value is AppSettings =>

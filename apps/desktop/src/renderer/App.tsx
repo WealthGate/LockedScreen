@@ -68,6 +68,8 @@ import { RichContentEditor } from "./components/rich-content-editor";
 import { ExamConfirmation } from "./components/exam-confirmation";
 import { LanguageEditor, ListeningPlayer, SpeakingControl, useSpokenAnswers } from "./components/language-audio";
 import { attemptLinkedTimeout } from "./lib/linked-timeout";
+import { QuestionMedia } from "./components/question-media";
+import { SharedMediaEditor } from "./components/shared-media-editor";
 import { useLockedscreenStore } from "./lib/store";
 import { waitForSessionRelease } from "./lib/session-release";
 import { needsStudentLmsTurnIn } from "./lib/lms-turn-in";
@@ -1547,22 +1549,25 @@ const DashboardPage = () => {
 };
 
 const BuilderPage = () => {
-  const navigate = useNavigate();
   const { examId } = useParams();
+  return <ExamBuilder key={examId} examId={examId} />;
+};
+
+const ExamBuilder = ({ examId }: { examId?: string }) => {
+  const navigate = useNavigate();
   const { snapshot, saveExam } = useLockedscreenStore();
   const existing = snapshot?.exams.find((exam) => exam.id === examId);
   const [draft, setDraft] = useState<Exam>(() => existing ?? blankExam());
   const [pendingPrompt, setPendingPrompt] = useState(false);
-
-  useEffect(() => {
-    setDraft(existing ?? blankExam());
-  }, [existing, examId]);
+  const [saving, setSaving] = useState(false);
 
   const updateDraft = (patch: Partial<Exam>) => setDraft((current) => ({ ...current, ...patch }));
 
   const saveCurrent = async () => {
-    await saveExam({ ...draft, updatedAt: new Date().toISOString() });
-    navigate("/teacher");
+    setSaving(true);
+    const saved = await saveExam({ ...draft, updatedAt: new Date().toISOString() });
+    setSaving(false);
+    if (saved) navigate("/teacher");
   };
 
   return (
@@ -1574,13 +1579,13 @@ const BuilderPage = () => {
             Configure teacher settings, compose questions, and preview the student-facing environment.
           </p>
         </div>
-        <Button className="self-start" disabled={pendingPrompt} title={pendingPrompt ? "Use or discard the recorded prompt before saving." : undefined} onClick={() => void saveCurrent()}>
+        <Button className="self-start" disabled={pendingPrompt || saving} title={pendingPrompt ? "Use or discard the recorded prompt before saving." : undefined} onClick={() => void saveCurrent()}>
           <Save className="size-4" />
-          Save exam
+          {saving ? "Saving…" : "Save exam"}
         </Button>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <fieldset disabled={saving} className="grid min-w-0 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             <LabelledField label="Exam title">
@@ -1739,7 +1744,7 @@ const BuilderPage = () => {
           {draft.mode === "app" ? <QuestionBuilder key={draft.id} draft={draft} setDraft={setDraft} onPendingPrompt={setPendingPrompt} /> : null}
           <ExamPreviewCard exam={draft} />
         </div>
-      </div>
+      </fieldset>
     </motion.div>
   );
 };
@@ -1771,6 +1776,8 @@ const QuestionBuilder = ({
         </Button>
       </div>
 
+      <SharedMediaEditor exam={draft} onChange={sharedMedia => setDraft(current => ({ ...current, sharedMedia }))} />
+
       <div className="space-y-4">
         {draft.questions.map((question, index) => (
           <QuestionEditor
@@ -1788,7 +1795,10 @@ const QuestionBuilder = ({
             onDelete={() =>
               setDraft((current) => ({
                 ...current,
-                questions: current.questions.filter((candidate) => candidate.id !== question.id)
+                questions: current.questions.filter((candidate) => candidate.id !== question.id),
+                sharedMedia: current.sharedMedia?.map(media => ({
+                  ...media, questionIds: media.questionIds.filter(id => id !== question.id)
+                })).filter(media => media.questionIds.length > 0)
               }))
             }
             onMove={(direction) => {
@@ -1835,7 +1845,10 @@ const QuestionBuilder = ({
                     ...current.questions.slice(0, index + 1),
                     duplicated,
                     ...current.questions.slice(index + 1)
-                  ]
+                  ],
+                  sharedMedia: current.sharedMedia?.map(media => media.questionIds.includes(question.id)
+                    ? { ...media, questionIds: [...media.questionIds, duplicated.id] }
+                    : media)
                 };
               })
             }
@@ -1938,6 +1951,7 @@ const ImportPage = () => {
   const [reviewQuestions, setReviewQuestions] = useState<ImportedQuestionDraft[]>([]);
   const [templateSavedPath, setTemplateSavedPath] = useState<string | null>(null);
   const [importPending, setImportPending] = useState(false);
+  const [savingImport, setSavingImport] = useState(false);
 
   useEffect(() => {
     const nextReview = hydrateImportReview(activeImport);
@@ -1980,7 +1994,7 @@ const ImportPage = () => {
     }
 
     const importedQuestions: Question[] = reviewQuestions.map((question) => ({
-      id: question.id,
+      id: crypto.randomUUID(),
       type: "multiple-choice",
       prompt: question.prompt.trim(),
       points: question.points,
@@ -1988,8 +2002,10 @@ const ImportPage = () => {
       correctOptionId: question.selectedCorrectOptionId ?? ""
     }));
 
+    const exam = targetExamId === "new" ? blankExam("app") : snapshot?.exams.find(item => item.id === targetExamId);
+    if (!exam) return;
+
     if (targetExamId === "new") {
-      const exam = blankExam("app");
       exam.title = reviewMetadata.title.trim() || "Imported exam";
       exam.subject = reviewMetadata.subject.trim();
       exam.className = reviewMetadata.className.trim();
@@ -2000,19 +2016,12 @@ const ImportPage = () => {
         ...exam.branding,
         schoolName: reviewMetadata.schoolName.trim()
       };
-      exam.questions = importedQuestions;
-      await saveExam(exam);
-      navigate(`/teacher/builder/${exam.id}`);
-      return;
     }
 
-    const target = snapshot?.exams.find((exam) => exam.id === targetExamId);
-    if (!target) {
-      return;
-    }
-
-    await saveExam({ ...target, questions: [...target.questions, ...importedQuestions] });
-    navigate(`/teacher/builder/${target.id}`);
+    setSavingImport(true);
+    const saved = await saveExam({ ...exam, questions: [...exam.questions, ...importedQuestions] });
+    setSavingImport(false);
+    if (saved) navigate(`/teacher/builder/${exam.id}`);
   };
 
   return (
@@ -2096,7 +2105,7 @@ B
       </Card>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={() => void handleImportQuestions()} disabled={importPending}>
+        <Button onClick={() => void handleImportQuestions()} disabled={importPending || savingImport}>
           <FileInput className="size-4" />
           {importPending ? "Importing..." : "Choose import file"}
         </Button>
@@ -2114,8 +2123,8 @@ B
               </option>
             ))}
         </select>
-        <Button variant="secondary" onClick={() => void applyImport()} disabled={!canApplyImport}>
-          {unresolvedAnswerCount > 0 ? `Select ${unresolvedAnswerCount} answer${unresolvedAnswerCount === 1 ? "" : "s"}` : "Save import"}
+        <Button variant="secondary" onClick={() => void applyImport()} disabled={!canApplyImport || importPending || savingImport}>
+          {savingImport ? "Saving…" : unresolvedAnswerCount > 0 ? `Select ${unresolvedAnswerCount} answer${unresolvedAnswerCount === 1 ? "" : "s"}` : "Save import"}
         </Button>
       </div>
 
@@ -6648,6 +6657,7 @@ const StudentExamPage = () => {
               attemptKey={JSON.stringify([sessionExamId, snapshot?.activeSession?.startedAt, question.id])}/>}
             {question.spokenAnswer && <SpeakingControl id={question.id} mic={mic}/>}
 
+            <QuestionMedia exam={exam} questionId={question.id} />
             <div className="grid gap-2.5">
               {question.options.map((option) => (
                 <button
@@ -7495,55 +7505,64 @@ const StudentShell = ({
   );
 };
 
-const ExamPreviewCard = ({ exam }: { exam: Exam }) => (
-  <Card
-    className="overflow-hidden"
-    style={{
-      borderTop: `6px solid ${exam.branding.accentColor}`
-    }}
-  >
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <CardTitle>Student preview</CardTitle>
-          <CardDescription>Shows the calm presentation, exam instructions, and navigation density.</CardDescription>
-        </div>
-        <Badge>{exam.appearance.theme}</Badge>
-      </div>
-
-      <div className="rounded-[24px] bg-slate-950 p-4 text-white sm:rounded-[28px] sm:p-5">
+const ExamPreviewCard = ({ exam }: { exam: Exam }) => {
+  const [selectedId, setSelectedId] = useState("");
+  const question = exam.questions.find(item => item.id === selectedId) ?? exam.questions[0];
+  return (
+    <Card
+      className="overflow-hidden"
+      style={{
+        borderTop: `6px solid ${exam.branding.accentColor}`
+      }}
+    >
+      <div className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="break-words text-sm uppercase tracking-[0.2em] text-slate-400">{exam.branding.schoolName || "School name"}</div>
-            <div className="mt-2 break-words text-xl font-semibold sm:text-2xl">{exam.title || "Exam title"}</div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              <Badge className="bg-white/10 text-white">{exam.subject || "Subject"}</Badge>
-              <Badge className="bg-white/10 text-white">{exam.className || "Class"}</Badge>
-              {exam.form ? <Badge className="bg-white/10 text-white">Form {exam.form}</Badge> : null}
-            </div>
+            <CardTitle>Student preview</CardTitle>
+            <CardDescription>Shows the calm presentation, exam instructions, and navigation density.</CardDescription>
           </div>
-          <div className="shrink-0 rounded-2xl bg-white/10 px-4 py-2 text-sm">{exam.durationMinutes} mins</div>
+          <Badge>{exam.appearance.theme}</Badge>
         </div>
-        <div className="mt-5 min-w-0 rounded-[20px] bg-white px-4 py-4 text-slate-900 dark:bg-slate-800 dark:text-slate-100 sm:rounded-[24px] sm:px-5">
-          {exam.mode === "app" ? (
-            <>
-              <div className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">Question card</div>
-              <RichContent
-                content={exam.questions[0]?.prompt || "The first question preview appears here."}
-                className="text-base leading-7 text-slate-900 dark:text-slate-100"
-              />
-            </>
-          ) : (
-            <div className="space-y-2">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Embedded link session</div>
-              <div className="break-all text-sm text-slate-900 dark:text-slate-100">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
+
+        <div className="rounded-[24px] bg-slate-950 p-4 text-white sm:rounded-[28px] sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="break-words text-sm uppercase tracking-[0.2em] text-slate-400">{exam.branding.schoolName || "School name"}</div>
+              <div className="mt-2 break-words text-xl font-semibold sm:text-2xl">{exam.title || "Exam title"}</div>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <Badge className="bg-white/10 text-white">{exam.subject || "Subject"}</Badge>
+                <Badge className="bg-white/10 text-white">{exam.className || "Class"}</Badge>
+                {exam.form ? <Badge className="bg-white/10 text-white">Form {exam.form}</Badge> : null}
+              </div>
             </div>
-          )}
+            <div className="shrink-0 rounded-2xl bg-white/10 px-4 py-2 text-sm">{exam.durationMinutes} mins</div>
+          </div>
+          <div className="mt-5 min-w-0 rounded-[20px] bg-white px-4 py-4 text-slate-900 dark:bg-slate-800 dark:text-slate-100 sm:rounded-[24px] sm:px-5">
+            {exam.mode === "app" ? (
+              <>
+                {question && <label className="mb-3 block text-sm font-semibold">Preview question
+                  <select value={question.id} onChange={event => setSelectedId(event.target.value)} className={selectClassName}>
+                    {exam.questions.map((item, index) => <option key={item.id} value={item.id}>Question {index + 1}</option>)}
+                  </select>
+                </label>}
+                <RichContent
+                  content={question?.prompt || "The question preview appears here."}
+                  className="text-base leading-7 text-slate-900 dark:text-slate-100"
+                />
+                <QuestionMedia exam={exam} questionId={question?.id} />
+              </>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Embedded link session</div>
+                <div className="break-all text-sm text-slate-900 dark:text-slate-100">{exam.linkConfig?.url || "External exam URL will appear here."}</div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  </Card>
-);
+    </Card>
+  );
+};
 
 const StatCard = ({ label, value }: { label: string; value: string }) => (
   <div className="min-w-0 rounded-[24px] bg-slate-50 p-4 dark:bg-slate-800/80">

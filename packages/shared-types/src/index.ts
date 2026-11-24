@@ -96,6 +96,13 @@ export interface MultipleChoiceQuestion {
 
 export type Question = MultipleChoiceQuestion;
 
+export interface SharedExamMedia {
+  id: string;
+  name: string;
+  dataUrl: string;
+  questionIds: string[];
+}
+
 export interface LinkExamConfig {
   url: string;
   allowedDomains: string[];
@@ -113,6 +120,7 @@ export interface Exam {
   branding: SchoolBranding;
   appearance: ExamAppearance;
   questions: Question[];
+  sharedMedia?: SharedExamMedia[];
   linkConfig?: LinkExamConfig;
   createdAt: string;
   updatedAt: string;

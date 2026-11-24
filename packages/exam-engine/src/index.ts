@@ -6,6 +6,8 @@ import type {
   SubmissionResult
 } from "@lockedscreen/shared-types";
 
+export * from "./shared-media";
+
 const addMinutes = (input: Date, minutes: number): Date => {
   return new Date(input.getTime() + minutes * 60000);
 };
