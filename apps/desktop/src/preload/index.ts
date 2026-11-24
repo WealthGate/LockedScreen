@@ -39,6 +39,7 @@ export interface LockedscreenApi {
   onHostedWebsiteAuthState: (callback: (state: HostedWebsiteAuthState, step?: string) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
+  preparePromptMic: () => Promise<void>;
   deleteExam: (examId: string) => Promise<AppStateSnapshot>;
   hideExamForStudent: (payload: { examId: string; candidateId: string }) => Promise<AppStateSnapshot>;
   saveSettings: (settings: AppSettings) => Promise<AppStateSnapshot>;
@@ -126,6 +127,7 @@ const api: LockedscreenApi = {
   },
   refreshSecurityOverview: () => ipcRenderer.invoke("security:refreshOverview"),
   saveExam: (exam) => ipcRenderer.invoke("exam:save", exam),
+  preparePromptMic: () => ipcRenderer.invoke("exam:preparePromptMic"),
   deleteExam: (examId) => ipcRenderer.invoke("exam:delete", examId),
   hideExamForStudent: (payload) => ipcRenderer.invoke("exam:hideForStudent", payload),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),

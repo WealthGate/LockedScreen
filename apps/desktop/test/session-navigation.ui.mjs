@@ -31,7 +31,7 @@ const browser = await chromium.launch({ headless: true, executablePath: process.
   args: ['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream'] });
 try {
   for (const width of [1360, 390]) {
-   for (const scenario of ['hold', 'lms', 'cancel', 'language']) {
+   for (const scenario of ['teacher-prompt', 'hold', 'lms', 'cancel', 'language']) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -41,7 +41,7 @@ try {
       state.runtime = { platform: 'win32', nativeLockdown: { lockdownCapable: true }, canOnlyUseTestingMode: false };
       const callbacks = {};
       const context = { installedRole: 'teacher', nativeHosted: false, packageImport: null,
-        route: `/session/${exam.id}?candidateName=Practice%20Student&candidateId=test-candidate` };
+        route: scenario === 'teacher-prompt' ? `/teacher/builder/${exam.id}` : `/session/${exam.id}?candidateName=Practice%20Student&candidateId=test-candidate` };
       const snapshot = () => structuredClone(state);
       const events = [];
       let turnInAttempts = 0;
@@ -65,6 +65,8 @@ try {
         pause() { state.activeSession.securityHold = 'Simulated protection failure'; callbacks.hold?.(); }
       };
       window.lockedscreenApi = new Proxy({
+        preparePromptMic: async () => {events.push('teacher-mic');},
+        saveExam: async exam => {window.testExam.savedExam = exam; return snapshot();},
         getSnapshot: async () => snapshot(), getLaunchContext: async () => context, getUpdateState: async () => null,
         onLaunchContextChanged: callback => { callbacks.launch = callback; return () => {}; },
         onSessionSecurityHold: callback => { callbacks.hold = callback; return () => {}; },
@@ -106,6 +108,34 @@ try {
       }, { get: (target, key) => target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null) });
     }, { fixture, exam, scenario });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    if (scenario === 'teacher-prompt') {
+      const group = page.getByRole('group',{name:'Language audio'}).first();
+      await group.locator('input[type=file]').setInputFiles({name:'original.wav',mimeType:'audio/wav',buffer:Buffer.from('test')});
+      await group.getByLabel('Plays per attempt').selectOption('3');
+      await group.getByLabel('Playback speed').selectOption('0.75');
+      const original = await group.getByLabel('Preview listening clip').getAttribute('src');
+      const take = async () => {
+        await group.getByRole('button',{name:'Record prompt',exact:true}).click();
+        await group.getByRole('button',{name:'Stop recording'}).waitFor();
+        await page.waitForTimeout(350);
+        await group.getByRole('button',{name:'Stop recording'}).click();
+        await group.getByLabel('Preview recorded prompt').waitFor();
+        assert(await page.getByRole('button',{name:'Save exam',exact:true}).isDisabled());
+      };
+      await take();
+      await group.getByRole('button',{name:'Discard recording'}).click();
+      assert.equal(await group.getByLabel('Preview listening clip').getAttribute('src'), original);
+      await take();
+      await group.getByRole('button',{name:'Use recording'}).click();
+      await page.getByRole('button',{name:'Save exam',exact:true}).click();
+      const saved=await page.evaluate(()=>window.testExam.savedExam.questions[0].listening);
+      assert.match(saved.src,/^data:audio\/webm;base64,.{100}/);
+      assert.equal(saved.plays,3); assert.equal(saved.speed,0.75);
+      assert.deepEqual(await page.evaluate(()=>window.testExam.events),['teacher-mic','teacher-mic']);
+      assert.deepEqual(errors,[]); await page.close();
+      console.log('PASS: teacher upload, record, preview, discard, accept and save with retained playback rules.');
+      continue;
+    }
     if (scenario === 'cancel') {
       await page.getByRole('heading', { name: 'Exam could not start', exact: true }).waitFor();
       assert.equal(await page.getByText('What is the chemical symbol for sodium?', { exact: true }).count(), 0);

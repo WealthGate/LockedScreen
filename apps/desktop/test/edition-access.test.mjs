@@ -14,7 +14,7 @@ test('Student edition denies teacher operations and unknown future endpoints', a
   assert.equal(buildEdition, 'student');
   for (const channel of ['exam:save', 'exam:delete', 'settings:save', 'security:save',
     'configPackage:export', 'configPackage:save', 'configPackage:publishToClassroom',
-    'results:exportCsv', 'lmsConnection:connect', 'future:admin']) {
+    'results:exportCsv', 'lmsConnection:connect', 'exam:preparePromptMic', 'future:admin']) {
     assert.throws(() => assertRoleAccess('student', channel), /Teacher edition/);
   }
   for (const channel of ['configPackage:import', 'session:begin', 'session:launchAlternateDesktop',
@@ -25,7 +25,7 @@ test('Student edition denies teacher operations and unknown future endpoints', a
 
 test('Teacher retains authoring and can take examinations', async () => {
   const { assertRoleAccess } = await load('teacher');
-  for (const channel of ['exam:save', 'configPackage:import', 'session:begin', 'exam:submit']) {
+  for (const channel of ['exam:save', 'exam:preparePromptMic', 'configPackage:import', 'session:begin', 'exam:submit']) {
     assert.doesNotThrow(() => assertRoleAccess('teacher', channel));
   }
 });

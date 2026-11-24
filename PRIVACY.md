@@ -14,6 +14,7 @@ Depending on how a school configures the app, Lockedscreen may process:
 - For app-based language questions, a teacher may include a listening clip or enable a spoken answer. The microphone starts only when the student chooses Record. Spoken answers are stored with the local result and attached to the assigned coursework when student LMS turn-in is enabled. Generic score-sync payloads do not include voice recordings. Linked websites are not granted microphone access.
 - Local app configuration, such as school settings, exam packages, allowed apps, exam start codes, and invigilator/admin settings.
 - Diagnostic information needed to check kiosk or lockdown readiness on the local Windows device.
+- Teachers can also record their own listening prompts. A prompt is recorded only on request. Choosing **Use recording** and saving the exam stores the audio with that question; exporting or sharing the exam distributes the prompt to its recipients.
 
 ## How information is used
 

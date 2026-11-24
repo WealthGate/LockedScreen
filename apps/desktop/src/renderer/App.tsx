@@ -1552,6 +1552,7 @@ const BuilderPage = () => {
   const { snapshot, saveExam } = useLockedscreenStore();
   const existing = snapshot?.exams.find((exam) => exam.id === examId);
   const [draft, setDraft] = useState<Exam>(() => existing ?? blankExam());
+  const [pendingPrompt, setPendingPrompt] = useState(false);
 
   useEffect(() => {
     setDraft(existing ?? blankExam());
@@ -1573,7 +1574,7 @@ const BuilderPage = () => {
             Configure teacher settings, compose questions, and preview the student-facing environment.
           </p>
         </div>
-        <Button className="self-start" onClick={() => void saveCurrent()}>
+        <Button className="self-start" disabled={pendingPrompt} title={pendingPrompt ? "Use or discard the recorded prompt before saving." : undefined} onClick={() => void saveCurrent()}>
           <Save className="size-4" />
           Save exam
         </Button>
@@ -1735,7 +1736,7 @@ const BuilderPage = () => {
         </Card>
 
         <div className="space-y-6">
-          {draft.mode === "app" ? <QuestionBuilder draft={draft} setDraft={setDraft} /> : null}
+          {draft.mode === "app" ? <QuestionBuilder key={draft.id} draft={draft} setDraft={setDraft} onPendingPrompt={setPendingPrompt} /> : null}
           <ExamPreviewCard exam={draft} />
         </div>
       </div>
@@ -1745,12 +1746,17 @@ const BuilderPage = () => {
 
 const QuestionBuilder = ({
   draft,
-  setDraft
+  setDraft,
+  onPendingPrompt
 }: {
   draft: Exam;
   setDraft: Dispatch<SetStateAction<Exam>>;
+  onPendingPrompt: (value: boolean) => void;
 }) => {
   const addQuestion = () => setDraft((current) => ({ ...current, questions: [...current.questions, blankQuestion()] }));
+  const promptMic = useSpokenAnswers("teacher");
+  const pendingPrompt = promptMic.state !== "idle" || Object.keys(promptMic.answers.current).length > 0;
+  useEffect(() => { onPendingPrompt(pendingPrompt); return () => onPendingPrompt(false); }, [pendingPrompt, onPendingPrompt]);
 
   return (
     <Card className="space-y-5">
@@ -1768,6 +1774,7 @@ const QuestionBuilder = ({
       <div className="space-y-4">
         {draft.questions.map((question, index) => (
           <QuestionEditor
+            promptMic={promptMic}
             key={question.id}
             question={question}
             index={index}
@@ -1840,6 +1847,7 @@ const QuestionBuilder = ({
 };
 
 const QuestionEditor = ({
+  promptMic,
   question,
   index,
   total,
@@ -1848,6 +1856,7 @@ const QuestionEditor = ({
   onMove,
   onDuplicate
 }: {
+  promptMic: ReturnType<typeof useSpokenAnswers>;
   question: Question;
   index: number;
   total: number;
@@ -1873,7 +1882,7 @@ const QuestionEditor = ({
           <Button variant="secondary" onClick={onDuplicate}>
             Duplicate
           </Button>
-          <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" onClick={onDelete}>
+          <Button variant="ghost" className="text-rose-700 hover:bg-rose-100" disabled={promptMic.state !== "idle" && promptMic.questionId === question.id} onClick={() => { promptMic.discard(question.id); onDelete(); }}>
             Delete
           </Button>
         </div>
@@ -1887,7 +1896,7 @@ const QuestionEditor = ({
           textareaClassName="min-h-[156px]"
           previewClassName="text-base"
         />
-        <LanguageEditor question={question} change={onChange}/>
+        <LanguageEditor question={question} change={onChange} mic={promptMic}/>
         <div className="grid gap-3 md:grid-cols-2">
           {question.options.map((option) => (
             <div key={option.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">

@@ -16,7 +16,7 @@ ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 1200, 480); ctx.fillStyle = 'black';
 ctx.fillText('PRACTICE SCIENCE EXAM', 50, 100); ctx.fillText('THE SYMBOL FOR SODIUM IS Na', 50, 180);
 const typed = join(directory, 'typed.pdf'), scanned = join(directory, 'scanned.pdf');
 await writeFile(typed, makePdf()); await writeFile(scanned, makePdf(canvas.toBuffer('image/jpeg')));
-const application = await _electron.launch({ executablePath: require('electron'), args: [resolve('apps/desktop/test/electron-smoke-harness.cjs')],
+const application = await _electron.launch({ executablePath: require('electron'), args: ['--use-fake-device-for-media-stream', resolve('apps/desktop/test/electron-smoke-harness.cjs')],
   cwd: process.cwd(), env: { ...process.env, LOCKEDSCREEN_SMOKE_PROFILE: join(directory, 'profile'), LOCKEDSCREEN_SMOKE_ARCHIVE: archive }, timeout: 60000 });
 try {
   const window = await application.firstWindow();
@@ -29,6 +29,18 @@ try {
   if (snapshot.installedRole === 'student') {
     assert.match(await window.evaluate(() => window.lockedscreenApi.saveExam({}).then(() => 'unexpected success', error => error.message)), /Teacher edition/);
   } else {
+    await window.evaluate(async () => {
+      const capture = async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        try { return stream.getAudioTracks().length; }
+        finally { stream.getTracks().forEach(track => track.stop()); }
+      };
+      const initial = await capture().then(() => 'granted', error => error.name);
+      if (initial !== 'NotAllowedError') throw new Error('Unexpected unarmed teacher microphone result: ' + initial);
+      await window.lockedscreenApi.preparePromptMic();
+      if (await capture() !== 1) throw new Error('Expected exactly one synthetic audio track');
+    });
+    console.log('PASS: archived teacher window denies unarmed microphone and allows explicitly requested audio.');
     for (const [file, expected] of [[typed, 'pdf-text'], [scanned, 'pdf-ocr']]) {
       await application.evaluate((_electron, path) => { globalThis.lockedscreenSmokeImportFile = path; }, file);
       const preview = await window.evaluate(() => window.lockedscreenApi.importQuestions());

@@ -184,6 +184,7 @@ const installedRole = buildEdition === "selectable" ? readInstalledRole() : buil
 let sessionStarting = false;
 let activeSubmissionId: string | null = null;
 let speakingExamId: string | undefined;
+let teacherPromptMicUntil = 0;
 let submissionInFlight = false;
 const sessionStartBarrier = createSessionStartBarrier();
 const handleIpc = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void => {
@@ -600,8 +601,9 @@ const createWindow = async (): Promise<void> => {
 
   const allowedMicrophone = (wc: Electron.WebContents | null, frame: boolean | undefined, url?: string) => {
     const active = getActiveSession();
-    return Boolean(active?.mode === "app" && !active.securityHold && active.examId === speakingExamId && !activeSubmissionId &&
-      wc && wc === mainWindow?.webContents && frame === true && isAppUrl(url ?? "") && isAppUrl(wc.getURL()));
+    if (!wc || wc !== mainWindow?.webContents || frame !== true || !isAppUrl(url ?? "") || !isAppUrl(wc.getURL())) return false;
+    if (active) return active.mode === "app" && !active.securityHold && active.examId === speakingExamId && !activeSubmissionId;
+    return installedRole === "teacher" && !sessionStarting && !launchedByNativeHost && !hasAlternateDesktopHost() && Date.now() < teacherPromptMicUntil;
   };
   mainWindow.webContents.session.setPermissionCheckHandler((wc, permission, _origin, details) =>
     permission === "media" && details.mediaType === "audio" && allowedMicrophone(wc, details.isMainFrame, details.requestingUrl));
@@ -737,6 +739,10 @@ app.whenReady().then(async () => {
     return withRuntime(storage.getSnapshot());
   });
 
+  handleIpc("exam:preparePromptMic", () => {
+    if (launchedByNativeHost) throw new Error("Teacher recording is unavailable in an exam window.");
+    teacherPromptMicUntil = Date.now() + 15000;
+  });
   handleIpc("exam:save", async (_event, exam: unknown) => {
     if (!isExam(exam)) {
       throw new Error("Invalid exam payload.");
@@ -1288,6 +1294,7 @@ app.whenReady().then(async () => {
   });
 
   handleIpc("session:begin", async (_event, request: unknown) => {
+    teacherPromptMicUntil = 0;
     if (!isSessionStartRequest(request)) {
       throw new Error("Invalid session start request.");
     }
