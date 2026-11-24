@@ -77,7 +77,8 @@ test("privacy disclosure is public, uses the current source and does not change 
   assert.match(response.headers.get("content-type"), /text\/html/);
   assert.equal(response.headers.get("set-cookie"), null);
   const html = await response.text();
-  assert.match(html, /November 18, 2026/);
+  assert.match(html, /November 23, 2026/);
+  assert.match(html, /Generic score-sync payloads do not include voice recordings/);
   assert.match(html, /Publisher-managed Google connection service/);
   assert.match(html, /Cloudflare D1/);
   assert.match(html, /expire after 30 days/);
