@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
@@ -15,6 +15,26 @@ test('patched document engine imports typed PDF, DOCX, image OCR and scanned PDF
     const outfile = join(directory, 'parser.mjs');
     await build({ entryPoints: ['packages/parser/src/index.ts'], bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile, logLevel: 'silent' });
     const { extractExamDocumentText, parseExamDocument } = await import(pathToFileURL(outfile));
+    await t.test('downloadable passage template and mixed reading groups retain text, order and answer keys', async () => {
+      const template = await readFile('docs/templates/doc-friendly-question-template.txt', 'utf8');
+      const standalone = 'Question:\nWhich colour?\nA. Blue\nB. Red\nANS: A';
+      const tagged = '[QUESTION]\nWhat returned?\n[OPTION]\nA. Light\n[OPTION]\nB. Rain\n[ANSWER]\nB\n[/QUESTION]';
+      const text = template + '\n' + standalone + '\n[PASSAGE]\nRain\n1. A numbered paragraph.\n\nB. A second paragraph.\n[QUESTIONS]\n' + tagged + '\n[/PASSAGE]';
+      const preview = parseExamDocument('reading.txt', text);
+      assert.deepEqual(preview.issues, []);
+      assert.equal(preview.questions.length, 4);
+      assert.equal(preview.questions[2].prompt,'Which colour?');
+      assert.equal(preview.passages.length, 2);
+      assert.deepEqual(preview.passages[0].questionIds, preview.questions.slice(0,2).map(q=>q.id));
+      assert.deepEqual(preview.passages[1].questionIds, [preview.questions[3].id]);
+      assert.equal(preview.passages[1].text,'1. A numbered paragraph.\n\nB. A second paragraph.');
+      assert.equal(preview.metadata.title,'Reading comprehension');
+      assert.ok(preview.questions.every(q=>q.selectedCorrectOptionId));
+      assert.equal(parseExamDocument('old.txt', standalone).passages, undefined);
+      for (const bad of [template.replace('[/PASSAGE]', ''), template.replace('[QUESTIONS]',''), '[PASSAGE]\nTitle\n[QUESTIONS]\n'+standalone+'\n[/PASSAGE]', text.replace('[/QUESTION]', '')]) {
+        assert.ok(parseExamDocument('broken.txt',bad).issues.some(i=>i.severity==='error'));
+      }
+    });
     await t.test('typed PDF retains questions and the answer key', async () => {
       const result = await extractExamDocumentText('practice.pdf', makePdf());
       assert.equal(result.extraction.method, 'pdf-text');

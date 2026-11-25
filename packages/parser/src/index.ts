@@ -13,12 +13,13 @@ import type {
   ImportedQuestionDraft,
   MultipleChoiceOption,
   ParseIssue,
+  ReadingPassage,
   Question
 } from "@lockedscreen/shared-types";
 
 const execFileAsync = promisify(execFile);
 const questionLinePattern = /^(?:(?:question|ques|q)\s*)?(\d+)[\.\)\:\-]\s*(.+)$/i;
-const explicitQuestionPattern = /^question\s*[:\-]\s*(.+)$/i;
+const explicitQuestionPattern = /^question\s*[:\-]\s*(.*)$/i;
 const optionLinePattern = /^\(?([A-H])\)?[\.\)\:\-]\s*(.+)$/i;
 const answerLinePattern = /^(?:ans(?:wer)?|correct\s*answer)\s*[:\-]\s*([A-H])\b/i;
 const separatorPattern = /^(?:[_\-=]{3,}|\*{3,})$/;
@@ -267,8 +268,14 @@ const buildImportedQuestion = (
   };
 };
 
-const parseTaggedQuestions = (text: string, issues: ParseIssue[]): ImportedQuestionDraft[] =>
-  (text.match(/\[QUESTION\][\s\S]*?\[\/QUESTION\]/gi) ?? [])
+const parseTaggedQuestions = (text: string, issues: ParseIssue[]): ImportedQuestionDraft[] => {
+  const markers = text.match(/\[\/?QUESTION\]/gi) ?? [];
+  if (markers.length % 2 !== 0 || markers.some((marker, i) =>
+    marker.toUpperCase() !== (i % 2 === 0 ? "[QUESTION]" : "[/QUESTION]"))) {
+    issues.push({ severity: "error", message: "Each [QUESTION] needs its own closing [/QUESTION] before the next question." });
+    return [];
+  }
+  return (text.match(/\[QUESTION\][\s\S]*?\[\/QUESTION\]/gi) ?? [])
     .map((block) => {
       const promptMatch = block
         .replace(/\[QUESTION\]/i, "")
@@ -288,6 +295,7 @@ const parseTaggedQuestions = (text: string, issues: ParseIssue[]): ImportedQuest
       return buildImportedQuestion(promptMatch, options, answerLabel, issues);
     })
     .filter((question): question is ImportedQuestionDraft => question !== null);
+};
 
 const looksLikeQuestionStart = (line: string): boolean =>
   questionLinePattern.test(line) || explicitQuestionPattern.test(line);
@@ -461,10 +469,31 @@ const extractMetadata = (text: string, issues: ParseIssue[]): ImportedExamMetada
 export const parseExamDocument = (fileName: string, text: string): ImportPreview => {
   const issues: ParseIssue[] = [];
   const normalizedText = normalizeText(text);
-  const metadata = extractMetadata(normalizedText, issues);
-  const questions = normalizedText.match(/\[QUESTION\]/i)
-    ? parseTaggedQuestions(normalizedText, issues)
-    : parseLineQuestions(normalizedText, issues);
+  const parts = normalizedText.split(/^[ \t]*\[(PASSAGE|QUESTIONS|\/PASSAGE)\][ \t]*$/gim);
+  const metadata = extractMetadata(parts[0] ?? "", issues);
+  const questions: ImportedQuestionDraft[] = [];
+  const passages: ReadingPassage[] = [];
+  const parseQuestions = (section: string) => /\[QUESTION\]/i.test(section)
+    ? parseTaggedQuestions(section, issues) : parseLineQuestions(section, issues);
+  // Each group is followed by ordinary question text, possibly empty.
+  questions.push(...parseQuestions(parts[0] ?? ""));
+  for (let i = 1; i < parts.length; i += 6) {
+    if (parts[i]?.toUpperCase() !== "PASSAGE" || parts[i + 2]?.toUpperCase() !== "QUESTIONS" ||
+        parts[i + 4]?.toUpperCase() !== "/PASSAGE") {
+      issues.push({ severity: "error", message: "Check the passage markers. Use [PASSAGE], [QUESTIONS] and [/PASSAGE] on separate lines, in that order." });
+      break;
+    }
+    const [title, ...paragraphs] = (parts[i + 1] ?? "").trim().split("\n");
+    const body = paragraphs.join("\n").trim();
+    const group = parseQuestions(parts[i + 3] ?? "");
+    if (!title?.trim() || !body || !group.length) {
+      issues.push({ severity: "error", message: "Each passage needs a title, passage text on the following lines and at least one question." });
+    } else {
+      passages.push({ id: crypto.randomUUID(), title: title.trim(), text: body, questionIds: group.map(q => q.id) });
+      questions.push(...group);
+    }
+    questions.push(...parseQuestions(parts[i + 5] ?? ""));
+  }
 
   if (questions.length === 0) {
     issues.push({
@@ -485,6 +514,7 @@ export const parseExamDocument = (fileName: string, text: string): ImportPreview
     sourceFileName: fileName.split(/[\\/]/).pop() ?? fileName,
     metadata,
     questions,
+    ...(parts.length > 1 ? { passages } : {}),
     issues,
     sourceText: normalizedText
   };

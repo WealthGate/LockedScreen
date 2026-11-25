@@ -8,6 +8,7 @@ import { build } from "esbuild";
 const bundle = await build({
   stdin: { contents: [
     'export * from "./packages/exam-engine/src/shared-media";',
+    'export * from "./packages/exam-engine/src/reading-passages";',
     'export * from "./apps/desktop/src/renderer/lib/question-ranges";',
     'export * from "./apps/desktop/src/main/security/package-crypto";',
     'export {createStorageService} from "./packages/storage/src/index";'
@@ -15,7 +16,7 @@ const bundle = await build({
   bundle: true, platform: "node", format: "esm", write: false,
   alias: { "@lockedscreen/storage": "./packages/storage/src/index.ts", "@lockedscreen/exam-engine": "./packages/exam-engine/src/index.ts" }
 });
-const { parseQuestionRange, formatQuestionRange, isSharedMediaList, createStorageService, protectConfigPackage, unprotectConfigPackage } =
+const { parseQuestionRange, formatQuestionRange, isSharedMediaList, isReadingPassageList, importPassages, removeQuestionAssignment, duplicateQuestionAssignment, createStorageService, protectConfigPackage, unprotectConfigPackage } =
   await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].contents).toString("base64"));
 
 test("assigns ranges inclusively by question ID and describes the current order", () => {
@@ -41,7 +42,7 @@ test("accepts legacy exams and only embedded supported media with unique file ID
   }
 });
 
-test("shared attachments survive teacher save, protected export and student reopen", async () => {
+test("shared passages and attachments survive teacher save, protected export and student reopen", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lockedscreen-media-"));
   try {
     const teacher = createStorageService(join(dir, "teacher"));
@@ -51,7 +52,8 @@ test("shared attachments survive teacher save, protected export and student reop
     const sharedMedia = ["audio/wav", "image/png", "video/webm"].map((mime, index) => ({
       id: String(index), name: mime, questionIds, dataUrl: "data:" + mime + ";base64,AQID"
     }));
-    await teacher.saveExam({ ...exam, sharedMedia });
+    const passages = [{ id: "reading", title: "Harbour", text: "Low tide.\n\nHigh tide.", questionIds }];
+    await teacher.saveExam({ ...exam, sharedMedia, passages });
     const reopened = await createStorageService(join(dir, "teacher")).getSnapshot();
     const saved = reopened.exams.find(item => item.id === exam.id);
     const config = reopened.configPackages.find(item => item.examId === exam.id);
@@ -61,8 +63,27 @@ test("shared attachments survive teacher save, protected export and student reop
     await student.importExamBundle(opened.exam, opened.configPackage);
     const imported = (await createStorageService(join(dir, "student")).getSnapshot()).exams.find(item => item.id === exam.id);
     assert.deepEqual(imported.sharedMedia, sharedMedia);
+    assert.deepEqual(imported.passages, passages);
     assert.deepEqual(imported.questions, exam.questions);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("new imports, duplicates and deletions keep passages on the intended questions", () => {
+  const p = { id: "p", title: "Title", text: "First paragraph\n\nSecond paragraph.", questionIds: ["q2"] };
+  const questions = [{ id: "q1" }, { id: "q2" }];
+  assert.equal(isReadingPassageList(undefined, questions), true);
+  assert.equal(isReadingPassageList([p], questions), true);
+  for (const bad of [[p, p], [{ ...p, text: " " }], [{ ...p, questionIds: [] }], [{ ...p, questionIds: ["missing"] }], [null]]) {
+    assert.equal(isReadingPassageList(bad, questions), false);
+  }
+  const copied = duplicateQuestionAssignment([p], "q2", "q3");
+  assert.deepEqual(copied[0].questionIds, ["q2","q3"]);
+  assert.deepEqual(removeQuestionAssignment(copied, "q2")[0].questionIds, ["q3"]);
+  assert.deepEqual(removeQuestionAssignment([p], "q2"), []);
+  const mapped = importPassages([p], new Map([["q2","fresh"]]));
+  assert.notEqual(mapped[0].id,p.id);
+  assert.deepEqual(mapped[0].questionIds,["fresh"]);
+  assert.throws(() => importPassages([p], new Map()));
 });

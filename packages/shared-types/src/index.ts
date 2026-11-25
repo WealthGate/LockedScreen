@@ -103,6 +103,13 @@ export interface SharedExamMedia {
   questionIds: string[];
 }
 
+export interface ReadingPassage {
+  id: string;
+  title: string;
+  text: string;
+  questionIds: string[];
+}
+
 export interface LinkExamConfig {
   url: string;
   allowedDomains: string[];
@@ -121,6 +128,7 @@ export interface Exam {
   appearance: ExamAppearance;
   questions: Question[];
   sharedMedia?: SharedExamMedia[];
+  passages?: ReadingPassage[];
   linkConfig?: LinkExamConfig;
   createdAt: string;
   updatedAt: string;
@@ -620,6 +628,7 @@ export interface ImportPreview {
   sourceFileName: string;
   metadata: ImportedExamMetadata;
   questions: ImportedQuestionDraft[];
+  passages?: ReadingPassage[];
   issues: ParseIssue[];
   sourceText: string;
   extraction?: ImportExtractionInfo;

@@ -7,6 +7,7 @@ import type {
 } from "@lockedscreen/shared-types";
 
 export * from "./shared-media";
+export * from "./reading-passages";
 
 const addMinutes = (input: Date, minutes: number): Date => {
   return new Date(input.getTime() + minutes * 60000);

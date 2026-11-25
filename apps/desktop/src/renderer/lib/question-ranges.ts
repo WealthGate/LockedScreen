@@ -15,7 +15,7 @@ export function parseQuestionRange(input: string, questions: Question[]): string
   return [...selected];
 }
 
-export function formatQuestionRange(questionIds: string[], questions: Question[]): string {
+export function formatQuestionRange(questionIds: string[], questions: Pick<Question, "id">[]): string {
   const selected = new Set(questionIds);
   const ranges: string[] = [];
   for (let index = 0; index < questions.length; index++) {

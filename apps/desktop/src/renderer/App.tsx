@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { MemoryRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { calculateCompletion, createSession, getRemainingSeconds, updateResponse } from "@lockedscreen/exam-engine";
+import { calculateCompletion, createSession, duplicateQuestionAssignment, getRemainingSeconds, importPassages, removeQuestionAssignment, updateResponse } from "@lockedscreen/exam-engine";
 import { publisherGoogleConnection, usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
 import type {
   Candidate,
@@ -70,6 +70,8 @@ import { LanguageEditor, ListeningPlayer, SpeakingControl, useSpokenAnswers } fr
 import { attemptLinkedTimeout } from "./lib/linked-timeout";
 import { QuestionMedia } from "./components/question-media";
 import { SharedMediaEditor } from "./components/shared-media-editor";
+import { PassageEditor, PassageText, QuestionPassages } from "./components/reading-passages";
+import { formatQuestionRange } from "./lib/question-ranges";
 import { useLockedscreenStore } from "./lib/store";
 import { waitForSessionRelease } from "./lib/session-release";
 import { needsStudentLmsTurnIn } from "./lib/lms-turn-in";
@@ -1777,6 +1779,8 @@ const QuestionBuilder = ({
       </div>
 
       <SharedMediaEditor exam={draft} onChange={sharedMedia => setDraft(current => ({ ...current, sharedMedia }))} />
+      <PassageEditor exam={draft} makeQuestion={blankQuestion} onChange={(passages, added) =>
+        setDraft(current => ({ ...current, passages, questions: [...current.questions, ...added] }))} />
 
       <div className="space-y-4">
         {draft.questions.map((question, index) => (
@@ -1796,9 +1800,8 @@ const QuestionBuilder = ({
               setDraft((current) => ({
                 ...current,
                 questions: current.questions.filter((candidate) => candidate.id !== question.id),
-                sharedMedia: current.sharedMedia?.map(media => ({
-                  ...media, questionIds: media.questionIds.filter(id => id !== question.id)
-                })).filter(media => media.questionIds.length > 0)
+                sharedMedia: removeQuestionAssignment(current.sharedMedia, question.id),
+                passages: removeQuestionAssignment(current.passages, question.id)
               }))
             }
             onMove={(direction) => {
@@ -1846,9 +1849,8 @@ const QuestionBuilder = ({
                     duplicated,
                     ...current.questions.slice(index + 1)
                   ],
-                  sharedMedia: current.sharedMedia?.map(media => media.questionIds.includes(question.id)
-                    ? { ...media, questionIds: [...media.questionIds, duplicated.id] }
-                    : media)
+                  sharedMedia: duplicateQuestionAssignment(current.sharedMedia, question.id, duplicated.id),
+                  passages: duplicateQuestionAssignment(current.passages, question.id, duplicated.id)
                 };
               })
             }
@@ -1960,7 +1962,8 @@ const ImportPage = () => {
   }, [activeImport]);
 
   const unresolvedAnswerCount = reviewQuestions.filter((question) => !question.selectedCorrectOptionId).length;
-  const canApplyImport = Boolean(reviewMetadata && reviewQuestions.length > 0 && unresolvedAnswerCount === 0);
+  const passageImportError = activeImport?.passages !== undefined && activeImport.issues.some(issue => issue.severity === "error");
+  const canApplyImport = Boolean(reviewMetadata && reviewQuestions.length > 0 && unresolvedAnswerCount === 0 && !passageImportError);
 
   const updateMetadata = (patch: Partial<ImportedExamMetadata>) => {
     setReviewMetadata((current) => (current ? { ...current, ...patch } : current));
@@ -1989,12 +1992,13 @@ const ImportPage = () => {
   };
 
   const applyImport = async () => {
-    if (!reviewMetadata || reviewQuestions.length === 0 || unresolvedAnswerCount > 0) {
+    if (!reviewMetadata || !canApplyImport) {
       return;
     }
 
+    const newIds = new Map(reviewQuestions.map(q => [q.id, crypto.randomUUID()]));
     const importedQuestions: Question[] = reviewQuestions.map((question) => ({
-      id: crypto.randomUUID(),
+      id: newIds.get(question.id)!,
       type: "multiple-choice",
       prompt: question.prompt.trim(),
       points: question.points,
@@ -2019,7 +2023,10 @@ const ImportPage = () => {
     }
 
     setSavingImport(true);
-    const saved = await saveExam({ ...exam, questions: [...exam.questions, ...importedQuestions] });
+    const saved = await saveExam({
+      ...exam, questions: [...exam.questions, ...importedQuestions],
+      passages: [...(exam.passages ?? []), ...importPassages(activeImport?.passages, newIds)]
+    });
     setSavingImport(false);
     if (saved) navigate(`/teacher/builder/${exam.id}`);
   };
@@ -2039,6 +2046,8 @@ const ImportPage = () => {
             <CardTitle>Teacher import format guide</CardTitle>
             <CardDescription>
               The importer reads document text, uses OCR for scans, and keeps supported HTML and LaTeX notation for review.
+              For a reading passage, use the downloadable template. Put the title and text after [PASSAGE],
+              its questions after [QUESTIONS], and [/PASSAGE] after the last answer.
             </CardDescription>
           </div>
           <Button variant="secondary" onClick={() => void handleExportTemplate()}>
@@ -2245,6 +2254,7 @@ B
                     </div>
                   ))
                 )}
+                {passageImportError && <p role="alert">Correct the document and import it again to keep each passage with the right questions.</p>}
                 {unresolvedAnswerCount > 0 ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     Select the correct option for every imported question before saving this exam.
@@ -2265,12 +2275,16 @@ B
               <div className="flex flex-wrap gap-2">
                 <Badge>{reviewQuestions.length} items</Badge>
                 <Badge className={unresolvedAnswerCount > 0 ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}>
-                  {unresolvedAnswerCount > 0 ? `${unresolvedAnswerCount} pending answers` : "Ready to save"}
+                  {passageImportError ? "Check import errors" : unresolvedAnswerCount > 0 ? `${unresolvedAnswerCount} pending answers` : "Ready to save"}
                 </Badge>
               </div>
             </div>
 
             <div className="space-y-4">
+              {activeImport.passages?.map(passage => <div key={passage.id}>
+                <Badge>Questions {formatQuestionRange(passage.questionIds, reviewQuestions)}</Badge>
+                <PassageText passage={passage} />
+              </div>)}
               {reviewQuestions.map((question, index) => (
                 <ImportedQuestionReviewCard
                   key={question.id}
@@ -6649,6 +6663,7 @@ const StudentExamPage = () => {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <Badge>Question {currentIndex + 1}</Badge>
+                <QuestionPassages exam={exam} questionId={question.id} />
                 <RichContent content={question.prompt} className="mt-3 text-lg leading-7 text-slate-900 dark:text-slate-50" />
               </div>
               <Badge className="bg-slate-900 text-white">{question.points} pt</Badge>
@@ -7545,6 +7560,7 @@ const ExamPreviewCard = ({ exam }: { exam: Exam }) => {
                     {exam.questions.map((item, index) => <option key={item.id} value={item.id}>Question {index + 1}</option>)}
                   </select>
                 </label>}
+                <QuestionPassages exam={exam} questionId={question?.id} />
                 <RichContent
                   content={question?.prompt || "The question preview appears here."}
                   className="text-base leading-7 text-slate-900 dark:text-slate-100"

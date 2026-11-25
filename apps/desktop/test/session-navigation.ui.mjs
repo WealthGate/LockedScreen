@@ -4,6 +4,7 @@ import { readFile, mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { resolve, join, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 const require = createRequire(import.meta.url);
@@ -27,21 +28,25 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const version = JSON.parse(await readFile('apps/desktop/package.json', 'utf8')).version;
 const out = resolve(`tmp/acceptance-${version}-ui`);
 await mkdir(out, { recursive: true });
+const parserFile = join(out, 'reading-import.mjs');
+await build({ entryPoints: ['packages/parser/src/index.ts'], bundle: true, packages: 'external', platform: 'node', format: 'esm', outfile: parserFile });
+const { parseExamDocument } = await import(pathToFileURL(parserFile));
+const readingImport = parseExamDocument('reading.txt', await readFile('docs/templates/doc-friendly-question-template.txt', 'utf8'));
 const browser = await chromium.launch({ headless: true, executablePath: process.env.LOCKEDSCREEN_CHROME || undefined,
   args: ['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream'] });
 try {
   for (const width of [1360, 390]) {
-   for (const scenario of ['teacher-prompt', 'hold', 'lms', 'cancel', 'language']) {
+   for (const scenario of ['reading', 'teacher-prompt', 'hold', 'lms', 'cancel', 'language']) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.addInitScript(({ fixture, exam, scenario }) => {
+    await page.addInitScript(({ fixture, exam, scenario, readingImport }) => {
       let state = structuredClone(fixture);
       state.installedRole = 'teacher';
       state.runtime = { platform: 'win32', nativeLockdown: { lockdownCapable: true }, canOnlyUseTestingMode: false };
       const callbacks = {};
       const context = { installedRole: 'teacher', nativeHosted: false, packageImport: null,
-        route: scenario === 'teacher-prompt' ? `/teacher/builder/${exam.id}` : `/session/${exam.id}?candidateName=Practice%20Student&candidateId=test-candidate` };
+        route: scenario === 'reading' ? '/teacher/import' : scenario === 'teacher-prompt' ? `/teacher/builder/${exam.id}` : `/session/${exam.id}?candidateName=Practice%20Student&candidateId=test-candidate` };
       const snapshot = () => structuredClone(state);
       const events = [];
       let turnInAttempts = 0;
@@ -66,7 +71,12 @@ try {
       };
       window.lockedscreenApi = new Proxy({
         preparePromptMic: async () => {events.push('teacher-mic');},
-        saveExam: async exam => {window.testExam.savedExam = exam; return snapshot();},
+        importQuestions: async () => readingImport,
+        saveExam: async exam => {
+          window.testExam.savedExam = exam;
+          state.exams = [exam, ...state.exams.filter(item => item.id !== exam.id)];
+          return snapshot();
+        },
         getSnapshot: async () => snapshot(), getLaunchContext: async () => context, getUpdateState: async () => null,
         onLaunchContextChanged: callback => { callbacks.launch = callback; return () => {}; },
         onSessionSecurityHold: callback => { callbacks.hold = callback; return () => {}; },
@@ -106,8 +116,48 @@ try {
           return { state: structuredClone(result.studentLmsTurnIn), submission: structuredClone(result), snapshot: snapshot() };
         }
       }, { get: (target, key) => target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null) });
-    }, { fixture, exam, scenario });
+    }, { fixture, exam, scenario, readingImport });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    if (scenario === 'reading') {
+      await page.getByRole('button',{name:'Choose import file'}).click();
+      await page.getByRole('article',{name:'The tide notebook'}).waitFor();
+      await page.locator('select').filter({has:page.locator('option[value="new"]')}).selectOption(exam.id);
+      await page.getByRole('button',{name:'Save import',exact:true}).click();
+      const section = page.getByRole('region',{name:'Comprehension passages',exact:true});
+      await section.getByText('Questions 2–3').waitFor();
+      await section.getByRole('button',{name:'Create passage'}).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.getByLabel('Passage title').fill('Observation notes');
+      await dialog.getByLabel('Passage text').fill('A second passage.\n\nLiteral <test> text.');
+      await dialog.getByLabel('Add new questions').check();
+      await dialog.getByLabel('Number of questions').fill('2');
+      await dialog.getByRole('button',{name:'Save passage'}).click();
+      await section.getByText('Questions 4–5').waitFor();
+      await section.getByRole('button',{name:'Edit passage'}).last().click();
+      await dialog.getByLabel('Questions',{exact:false}).fill('1, 5');
+      await dialog.getByRole('button',{name:'Save passage'}).click();
+      await section.getByText('Questions 1, 5').waitFor();
+      await page.getByRole('button',{name:'Save exam',exact:true}).click();
+      await page.getByRole('button',{name:'New exam',exact:true}).waitFor();
+      await page.evaluate(id=>window.testExam.switchView('/session/'+id+'?candidateName=Practice%20Student'),exam.id);
+      await page.getByRole('article',{name:'Observation notes'}).waitFor();
+      await page.getByRole('button',{name:'Next',exact:true}).click();
+      const text = page.getByRole('article',{name:'The tide notebook'});
+      await text.waitFor();
+      await page.getByText('The height of the water',{exact:true}).click();
+      await page.getByRole('button',{name:'Next',exact:true}).click();
+      await page.getByText('Why did the notebook help her uncle?',{exact:true}).waitFor();
+      assert.equal(await text.isVisible(),true);
+      await page.getByRole('button',{name:'Next',exact:true}).click();
+      assert.equal(await page.getByRole('article').count(),0);
+      await page.getByRole('button',{name:'2',exact:true}).click();
+      await text.waitFor();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth+1),true);
+      await page.screenshot({path:join(out,`reading-passage-${width}.png`)});
+      assert.deepEqual(errors,[]); await page.close();
+      console.log(`PASS: ${width}px template import, append, author, edit, save and student reading navigation.`);
+      continue;
+    }
     if (scenario === 'teacher-prompt') {
       const group = page.getByRole('group',{name:'Language audio'}).first();
       await group.locator('input[type=file]').setInputFiles({name:'original.wav',mimeType:'audio/wav',buffer:Buffer.from('test')});

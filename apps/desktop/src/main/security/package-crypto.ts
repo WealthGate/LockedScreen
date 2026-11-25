@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
-import { isSharedMediaList } from "@lockedscreen/exam-engine";
+import { isReadingPassageList, isSharedMediaList } from "@lockedscreen/exam-engine";
 
 import type { Exam, ExamConfigPackage, ProtectedConfigPackageFile } from "@lockedscreen/shared-types";
 import { calculateConfigPackageChecksum, withStampedIntegrity } from "@lockedscreen/storage";
@@ -35,6 +35,7 @@ const isExam = (value: unknown): value is Exam =>
   typeof value.title === "string" &&
   Array.isArray(value.questions) &&
   isSharedMediaList(value.sharedMedia) &&
+  isReadingPassageList(value.passages, value.questions) &&
   typeof value.mode === "string";
 
 interface ProtectedConfigPackageBundle {

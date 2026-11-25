@@ -9,7 +9,7 @@ import { createPinVerifier } from "./security/invigilator-pin";
 import { StudentExamAuth, needsStudentSignIn } from "./student-exam-auth";
 import { assertSessionExitPin, assertSessionOperation, assertSessionPinConfigured, createSessionStartBarrier, isSameSession, unsafeProductionSwitch } from "./security/session-policy";
 
-import { isSharedMediaList } from "@lockedscreen/exam-engine";
+import { isReadingPassageList, isSharedMediaList } from "@lockedscreen/exam-engine";
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
   Candidate,
@@ -58,63 +58,7 @@ import {
   verifyHostedNativeSession
 } from "./security/native-security";
 
-const questionAuthoringTemplate = `LOCKEDSCREEN Question Authoring Template
-
-Use either format below. Keep one answer option per line. Scanned PDFs and image files can be imported with OCR, but clean typed text is faster and more accurate.
-
-Classic format:
-
-Q1. <Type the question prompt here>
-A. <Option A>
-B. <Option B>
-C. <Option C>
-D. <Option D>
-ANS: <Single option key such as A, B, C, or D>
-
-Tagged format:
-
-[QUESTION]
-<Type the question prompt here>
-[OPTION]
-A. <Option A>
-[OPTION]
-B. <Option B>
-[OPTION]
-C. <Option C>
-[OPTION]
-D. <Option D>
-[ANSWER]
-<Single option key such as A, B, C, or D>
-[/QUESTION]
-
-Formatting examples:
-
-- Superscript and subscript: x<sup>2</sup>, H<sub>2</sub>O
-- Inline math: \\(x^2 + y^2 = z^2\\)
-- Fractions: \\(\\frac{3}{4}\\) or $$\\frac{a+b}{c}$$
-- Division: \\(12 \\div 3 = 4\\)
-- Images: use Add image in the app editor. Embedded images are stored as <img src="data:image/png;base64,..." alt="Diagram" />.
-
-Header fields the app can detect:
-
-Title: <Exam title>
-Subject: <Subject>
-Class: <Class or grade>
-Form: <Form>
-Teacher: <Teacher name>
-School: <School name>
-Duration: <Example: 1 hour 30 minutes>
-Instructions: <Student instructions>
-
-Notes:
-- Use plain option keys such as A, B, C, and D.
-- Keep the answer line exact and unambiguous.
-- Do not add explanations on the ANS: or [ANSWER] line.
-- Wrap LaTeX math with \\(...\\) for inline expressions or $$...$$ for display equations.
-- Remove Word bullets or smart numbering if they change the option keys.
-- Save as .docx, .pdf, or .txt before import when possible.
-- For scans, use a straight, high-contrast image or PDF page.
-`;
+import questionAuthoringTemplate from "../../../../docs/templates/doc-friendly-question-template.txt?raw";
 import { automaticPackagePassword, isProtectedPackageFile, protectConfigPackage, unprotectConfigPackage } from "./security/package-crypto";
 import {
   beginManagedSession,
@@ -255,6 +199,7 @@ const isExam = (value: unknown): value is Exam =>
   typeof value.title === "string" &&
   Array.isArray(value.questions) &&
   isSharedMediaList(value.sharedMedia) &&
+  isReadingPassageList(value.passages, value.questions) &&
   typeof value.mode === "string";
 
 const isSettings = (value: unknown): value is AppSettings =>
