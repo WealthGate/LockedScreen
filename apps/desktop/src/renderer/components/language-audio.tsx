@@ -37,7 +37,7 @@ export function LanguageEditor({ question, change, mic }: { question: Question; 
         } catch (err) { setError(String(err)); }
       }} /></label>
     <div className="flex flex-wrap items-center gap-3">
-      {capturing ? <Button variant="danger" onClick={() => void mic.finish()}><Square size={16}/>
+      {capturing ? <Button data-recording-control variant="danger" onClick={() => void mic.finish()}><Square size={16}/>
         {mic.state === "asking" ? "Cancel microphone request" : "Stop recording"}</Button> :
         <Button variant="secondary" disabled={mic.state !== "idle"} onClick={() => void mic.start(question.id)}><Mic size={16}/>
           {draft ? "Record prompt again" : "Record prompt"}</Button>}

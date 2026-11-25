@@ -327,12 +327,25 @@ const normalizeSubmission = (submission: SubmissionResult, destinations: ResultD
   };
 };
 
+const hostedExamUrl = (input?: string): URL | undefined => {
+  const value = input?.trim();
+  if (!value || /\s/.test(value)) return;
+  const address = /^[\w-]+(?:\.[\w-]+)+(?::\d+)?(?:[/?#]|$)/.test(value) ? `https://${value}` : value;
+  try {
+    const url = new URL(address);
+    if (url.protocol === "https:" && !url.username && !url.password) return url;
+  } catch {
+    // An unfinished address in a legacy draft has no usable start rule.
+  }
+};
+
 export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
   const now = new Date().toISOString();
   const securityMode = "full-kiosk";
   const allowedDomains =
     exam.mode === "link" ? exam.linkConfig?.allowedDomains ?? [] : [];
   const startUrl = exam.mode === "link" ? exam.linkConfig?.url : undefined;
+  const origin = hostedExamUrl(startUrl)?.origin;
   const config: ExamConfigPackage = {
     id: randomUUID(),
     examId: exam.id,
@@ -357,12 +370,12 @@ export const createConfigPackageFromExam = (exam: Exam): ExamConfigPackage => {
       preserveQueryParameters: true,
       startUrl,
       allowedDomains,
-      urlRules: startUrl
+      urlRules: origin
         ? [
             {
               id: randomUUID(),
               label: "Primary exam origin",
-              pattern: new URL(startUrl).origin,
+              pattern: origin,
               kind: "prefix",
               role: "start",
               allowSubdomains: false
@@ -785,16 +798,7 @@ class JsonStorageService implements StorageService {
   }
 
   private async replaceFile(sourcePath: string, destinationPath: string): Promise<void> {
-    try {
-      await withFileOperationRetry(() => rename(sourcePath, destinationPath));
-    } catch (error) {
-      if (!isTransientFileSystemError(error)) {
-        throw error;
-      }
-
-      await withFileOperationRetry(() => rm(destinationPath, { force: true }));
-      await withFileOperationRetry(() => rename(sourcePath, destinationPath));
-    }
+    await withFileOperationRetry(() => rename(sourcePath, destinationPath));
   }
 
   private async preserveCorruptContent(content: string): Promise<void> {
@@ -809,47 +813,24 @@ class JsonStorageService implements StorageService {
     }
   }
 
-  private async ensureStore(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-
+  private async readIfPresent(path: string): Promise<string | undefined> {
     try {
-      await this.readFileWithRetry(this.filePath);
-      return;
+      return await this.readFileWithRetry(path);
     } catch (error) {
-      if (!isFileSystemError(error) || error.code !== "ENOENT") {
-        return;
-      }
+      if (isFileSystemError(error) && error.code === "ENOENT") return undefined;
+      throw new Error("LockedScreen could not read your workspace. Check file access and try again.", { cause: error });
     }
-
-    try {
-      const backupContent = await this.readFileWithRetry(this.backupPath);
-      const backupSnapshot = this.parse(backupContent, true);
-      if (backupSnapshot) {
-        await this.write(backupSnapshot, false);
-        return;
-      }
-    } catch (error) {
-      if (!isFileSystemError(error) || error.code !== "ENOENT") {
-        // A missing or temporarily inaccessible backup must not block first launch.
-      }
-    }
-
-    await this.write(seedState(), false);
   }
 
   private async read(): Promise<AppStateSnapshot> {
-    await this.ensureStore();
-    let content = "";
-
-    try {
-      content = await this.readFileWithRetry(this.filePath);
-      const parsed = this.parse(content);
-      if (parsed) {
-        return parsed;
-      }
-    } catch {
-      // The backup below remains readable when security software temporarily locks the live file.
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const content = await this.readIfPresent(this.filePath);
+    if (content === undefined) {
+      const backup = await this.readIfPresent(this.backupPath);
+      return this.write((backup && this.parse(backup, true)) || seedState(), false);
     }
+    const parsed = this.parse(content);
+    if (parsed) return parsed;
 
     const recoveredPrimary = this.parse(content, true);
     if (recoveredPrimary) {
@@ -857,29 +838,25 @@ class JsonStorageService implements StorageService {
       recoveredPrimary.securityLogs.unshift(
         logEntry("application", "warning", "Recovered application data after an interrupted local storage write.")
       );
-      return this.write(recoveredPrimary, false).catch(() => recoveredPrimary);
+      return this.write(recoveredPrimary, false);
     }
 
     await this.preserveCorruptContent(content);
 
-    try {
-      const backupContent = await this.readFileWithRetry(this.backupPath);
-      const backupSnapshot = this.parse(backupContent, true);
-      if (backupSnapshot) {
-        backupSnapshot.securityLogs.unshift(
-          logEntry("application", "warning", "Restored application data from the automatic local backup.")
-        );
-        return this.write(backupSnapshot, false).catch(() => backupSnapshot);
-      }
-    } catch {
-      // The final seeded state below keeps startup usable even when no backup survives.
+    const backupContent = await this.readIfPresent(this.backupPath);
+    const backupSnapshot = backupContent && this.parse(backupContent, true);
+    if (backupSnapshot) {
+      backupSnapshot.securityLogs.unshift(
+        logEntry("application", "warning", "Restored application data from the automatic local backup.")
+      );
+      return this.write(backupSnapshot, false);
     }
 
     const resetSnapshot = seedState();
     resetSnapshot.securityLogs.unshift(
       logEntry("application", "error", "Local application data was unreadable and was reset; a diagnostic copy was preserved.")
     );
-    return this.write(resetSnapshot, false).catch(() => resetSnapshot);
+    return this.write(resetSnapshot, false);
   }
 
   private async write(snapshot: AppStateSnapshot, createBackup = true): Promise<AppStateSnapshot> {
@@ -887,9 +864,8 @@ class JsonStorageService implements StorageService {
     const serialized = JSON.stringify(hydrated, null, 2);
     const tempPath = `${this.filePath}.${process.pid}-${randomUUID()}.tmp`;
 
-    await writeFile(tempPath, serialized, { encoding: "utf-8", flush: true });
-
     try {
+      await writeFile(tempPath, serialized, { encoding: "utf-8", flush: true });
       if (!this.parse(await this.readFileWithRetry(tempPath))) {
         throw new Error("Refusing to replace application storage with invalid data.");
       }
@@ -931,7 +907,37 @@ class JsonStorageService implements StorageService {
       updatedAt: new Date().toISOString()
     };
 
+    if (nextExam.mode === "link" && nextExam.linkConfig?.url.trim()) {
+      const url = hostedExamUrl(nextExam.linkConfig.url);
+      if (!url) throw new Error("Enter a valid HTTPS exam URL, or leave the URL blank to save a draft.");
+      nextExam.linkConfig = { ...nextExam.linkConfig, url: url.href };
+    }
+
     if (existing >= 0) {
+      const previous = snapshot.exams[existing];
+      if (previous?.mode === "link" && nextExam.mode === "link" && nextExam.linkConfig) {
+        const oldUrl = previous.linkConfig?.url;
+        const oldDomains = previous.linkConfig?.allowedDomains ?? [];
+        snapshot.configPackages = snapshot.configPackages.map(config => {
+          if (config.examId !== exam.id || config.status === "archived") return config;
+          const policy = config.browserPolicy;
+          const link = nextExam.linkConfig!;
+          const changeUrl = oldUrl !== link.url && policy.startUrl === oldUrl;
+          const changeDomains = JSON.stringify(policy.allowedDomains) === JSON.stringify(oldDomains) &&
+            JSON.stringify(oldDomains) !== JSON.stringify(link.allowedDomains);
+          if (!changeUrl && !changeDomains) return config;
+          const oldOrigin = hostedExamUrl(oldUrl)?.origin;
+          const newOrigin = hostedExamUrl(link.url)?.origin;
+          const urlRules = changeUrl ? policy.urlRules.flatMap(rule => {
+            if (rule.role !== "start" || rule.kind !== "prefix" || rule.label !== "Primary exam origin" || rule.pattern !== oldOrigin) return [rule];
+            return newOrigin ? [{ ...rule, pattern: newOrigin }] : [];
+          }) : policy.urlRules;
+          return withStampedIntegrity({ ...config, updatedAt: nextExam.updatedAt, browserPolicy: {
+            ...policy, urlRules, startUrl: changeUrl ? link.url : policy.startUrl,
+            allowedDomains: changeDomains ? link.allowedDomains : policy.allowedDomains
+          } });
+        });
+      }
       snapshot.exams[existing] = nextExam;
     } else {
       snapshot.exams.unshift(nextExam);

@@ -1560,16 +1560,36 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
   const { snapshot, saveExam } = useLockedscreenStore();
   const existing = snapshot?.exams.find((exam) => exam.id === examId);
   const [draft, setDraft] = useState<Exam>(() => existing ?? blankExam());
-  const [pendingPrompt, setPendingPrompt] = useState(false);
+  const promptMic = useSpokenAnswers("teacher");
+  const [saveError, setSaveError] = useState("");
+  const activeRecording = draft.mode === "app" && promptMic.state !== "idle";
+  const recordedQuestions = draft.questions.filter(question => promptMic.answers.current[question.id]);
+  const [domainText, setDomainText] = useState(() => existing?.linkConfig?.allowedDomains.join("\n") ?? "");
   const [saving, setSaving] = useState(false);
 
   const updateDraft = (patch: Partial<Exam>) => setDraft((current) => ({ ...current, ...patch }));
 
   const saveCurrent = async () => {
+    if (activeRecording) {
+      document.getElementById(`question-${promptMic.questionId}`)?.scrollIntoView({ block: "start" });
+      document.getElementById(`question-${promptMic.questionId}`)?.querySelector<HTMLButtonElement>("[data-recording-control]")?.focus();
+      return;
+    }
     setSaving(true);
-    const saved = await saveExam({ ...draft, updatedAt: new Date().toISOString() });
-    setSaving(false);
-    if (saved) navigate("/teacher");
+    setSaveError("");
+    try {
+      const questions = draft.mode === "app" && recordedQuestions.length ? draft.questions.map(question => {
+        const src = promptMic.answers.current[question.id];
+        return src ? { ...question, listening: { plays: 2, speed: 1, ...question.listening, src } } : question;
+      }) : draft.questions;
+      const saved = await saveExam({ ...draft, questions, updatedAt: new Date().toISOString() });
+      if (saved) navigate("/teacher");
+      else setSaveError(useLockedscreenStore.getState().error ?? "Save failed. Your draft is still open. Try again.");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Save failed. Your draft is still open. Try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1581,10 +1601,14 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
             Configure teacher settings, compose questions, and preview the student-facing environment.
           </p>
         </div>
-        <Button className="self-start" disabled={pendingPrompt || saving} title={pendingPrompt ? "Use or discard the recorded prompt before saving." : undefined} onClick={() => void saveCurrent()}>
-          <Save className="size-4" />
-          {saving ? "Saving…" : "Save exam"}
-        </Button>
+        <div className="space-y-2 sm:max-w-sm">
+          <Button disabled={saving} onClick={() => void saveCurrent()}>
+            <Save className="size-4" /> {saving ? "Saving…" : "Save exam"}
+          </Button>
+          {activeRecording ? <p role="status">Finish the microphone request or recording for question {draft.questions.findIndex(q => q.id === promptMic.questionId) + 1}. Select Save exam to go there.</p> :
+            draft.mode === "app" && recordedQuestions.length > 0 && <p role="status">Save exam will include the recorded audio for question(s) {recordedQuestions.map(q => draft.questions.indexOf(q) + 1).join(", ")}. You can review or discard it in Language audio first.</p>}
+          {saveError && <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">{saveError}</p>}
+        </div>
       </div>
 
       <fieldset disabled={saving} className="grid min-w-0 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -1597,6 +1621,7 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
               <select
                 className={selectClassName}
                 value={draft.mode}
+                disabled={activeRecording || recordedQuestions.length > 0}
                 onChange={(event) =>
                   updateDraft({
                     mode: event.target.value === "link" ? "link" : "app",
@@ -1724,8 +1749,9 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
                 <Textarea
                   className="min-h-[96px]"
                   placeholder={"docs.google.com\nclassroom.google.com"}
-                  value={(draft.linkConfig?.allowedDomains ?? []).join("\n")}
-                  onChange={(event) =>
+                  value={domainText}
+                  onChange={(event) => {
+                    setDomainText(event.target.value);
                     updateDraft({
                       linkConfig: {
                         url: draft.linkConfig?.url ?? "",
@@ -1734,8 +1760,8 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
                           .map((domain) => domain.trim())
                           .filter(Boolean)
                       }
-                    })
-                  }
+                    });
+                  }}
                 />
               </LabelledField>
             </div>
@@ -1743,7 +1769,7 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
         </Card>
 
         <div className="space-y-6">
-          {draft.mode === "app" ? <QuestionBuilder key={draft.id} draft={draft} setDraft={setDraft} onPendingPrompt={setPendingPrompt} /> : null}
+          {draft.mode === "app" ? <QuestionBuilder key={draft.id} draft={draft} setDraft={setDraft} promptMic={promptMic} /> : null}
           <ExamPreviewCard exam={draft} />
         </div>
       </fieldset>
@@ -1754,16 +1780,13 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
 const QuestionBuilder = ({
   draft,
   setDraft,
-  onPendingPrompt
+  promptMic
 }: {
   draft: Exam;
   setDraft: Dispatch<SetStateAction<Exam>>;
-  onPendingPrompt: (value: boolean) => void;
+  promptMic: ReturnType<typeof useSpokenAnswers>;
 }) => {
   const addQuestion = () => setDraft((current) => ({ ...current, questions: [...current.questions, blankQuestion()] }));
-  const promptMic = useSpokenAnswers("teacher");
-  const pendingPrompt = promptMic.state !== "idle" || Object.keys(promptMic.answers.current).length > 0;
-  useEffect(() => { onPendingPrompt(pendingPrompt); return () => onPendingPrompt(false); }, [pendingPrompt, onPendingPrompt]);
 
   return (
     <Card className="space-y-5">
@@ -1881,7 +1904,7 @@ const QuestionEditor = ({
   onDuplicate: () => void;
 }) => {
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+    <div id={`question-${question.id}`} className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Badge>Question {index + 1}</Badge>

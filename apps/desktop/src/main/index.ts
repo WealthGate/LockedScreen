@@ -677,7 +677,6 @@ app.whenReady().then(async () => {
     canInstall: () => !sessionStarting && !launchedByNativeHost && !hasAlternateDesktopHost() && !getActivePackage(),
     registerIpc: handleIpc
   });
-  await storage.getSnapshot();
 
   handleIpc("app:getSnapshot", async () => withRuntime(storage.getSnapshot()));
   handleIpc("app:getLaunchContext", async () => pendingLaunchContext);

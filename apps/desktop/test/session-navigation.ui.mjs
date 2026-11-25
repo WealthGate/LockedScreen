@@ -64,6 +64,12 @@ try {
         config.studentLmsBinding = { ...config.studentLmsBinding, enabled: true, provider: 'google-classroom',
           googleAuthMode: 'publisher-hosted', courseId: 'practice-course', assignmentId: 'practice-assignment' };
       }
+      if (scenario === 'teacher-prompt') {
+        const practice = state.exams.find(item => item.id === exam.id);
+        const question = practice.questions[0];
+        practice.questions = Array.from({ length: 42 }, (_, index) => ({ ...structuredClone(question),
+          id: "illustrated-" + index, prompt: '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cV3sAAAAASUVORK5CYII=" />' + index }));
+      }
       window.testExam = {
         events,
         switchView(route) { callbacks.launch?.({ ...context, route }); },
@@ -170,16 +176,17 @@ try {
         await page.waitForTimeout(350);
         await group.getByRole('button',{name:'Stop recording'}).click();
         await group.getByLabel('Preview recorded prompt').waitFor();
-        assert(await page.getByRole('button',{name:'Save exam',exact:true}).isDisabled());
+        assert(await page.getByRole('button',{name:'Save exam',exact:true}).isEnabled());
       };
       await take();
       await group.getByRole('button',{name:'Discard recording'}).click();
       assert.equal(await group.getByLabel('Preview listening clip').getAttribute('src'), original);
       await take();
-      await group.getByRole('button',{name:'Use recording'}).click();
+      await page.getByText(/Save exam will include the recorded audio/).waitFor();
       await page.getByRole('button',{name:'Save exam',exact:true}).click();
       const saved=await page.evaluate(()=>window.testExam.savedExam.questions[0].listening);
       assert.match(saved.src,/^data:audio\/webm;base64,.{100}/);
+      assert.equal(await page.evaluate(()=>window.testExam.savedExam.questions.length),42);
       assert.equal(saved.plays,3); assert.equal(saved.speed,0.75);
       assert.deepEqual(await page.evaluate(()=>window.testExam.events),['teacher-mic','teacher-mic']);
       assert.deepEqual(errors,[]); await page.close();

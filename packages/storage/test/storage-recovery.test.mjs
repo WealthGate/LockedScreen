@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rmdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -151,5 +151,44 @@ test("serializes simultaneous updates without dropping state", async () => {
     const statePath = join(dataDirectory, "lockedscreen-state.json");
     const content = await readFile(statePath, "utf-8");
     assert.doesNotThrow(() => JSON.parse(content));
+  });
+});
+
+
+test("saving a 42-question illustrated exam survives reopening and an inaccessible workspace", async () => {
+  await withDataDirectory(async dir => {
+    const storage = createStorageService(dir);
+    const initial = await storage.getSnapshot();
+    const exam = initial.exams.find(item => item.mode === "app");
+    const question = exam.questions[0];
+    const image = '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cV3sAAAAASUVORK5CYII=" />';
+    const questions = Array.from({ length: 42 }, (_, i) => ({ ...question, id: String(i + 1), prompt: image + " Question " + (i + 1) }));
+    await storage.saveExam({ ...exam, id: "illustrated", questions });
+    const file = join(dir, "lockedscreen-state.json");
+    const original = await readFile(file);
+    await rename(file, file + ".held");
+    await mkdir(file);
+    await assert.rejects(storage.saveExam({ ...exam, title: "Blocked write" }), /could not read your workspace/);
+    await rmdir(file);
+    await rename(file + ".held", file);
+    assert.deepEqual(await readFile(file), original);
+    assert.deepEqual((await createStorageService(dir).getSnapshot()).exams.find(item => item.id === "illustrated").questions, questions);
+  });
+});
+
+test("hosted exam addresses save, update their inherited policy and reject unusable links without losing the previous exam", async () => {
+  await withDataDirectory(async dir => {
+    const storage = createStorageService(dir);
+    const initial = await storage.getSnapshot();
+    const base = { ...initial.exams[0], id: "hosted", mode: "link" };
+    const save = url => storage.saveExam({ ...base, linkConfig: { url, allowedDomains: [] } });
+    const first = await save("forms.example.edu/quiz");
+    assert.equal(first.exams[0].linkConfig.url, "https://forms.example.edu/quiz");
+    const second = await save("https://school.example.edu/updated");
+    const policy = second.configPackages.find(item => item.examId === base.id).browserPolicy;
+    assert.equal(policy.startUrl, "https://school.example.edu/updated");
+    assert.equal(policy.urlRules[0].pattern, "https://school.example.edu");
+    await assert.rejects(save("unfinished address"), /valid HTTPS exam URL/);
+    assert.deepEqual((await createStorageService(dir).getSnapshot()).exams[0], second.exams[0]);
   });
 });
