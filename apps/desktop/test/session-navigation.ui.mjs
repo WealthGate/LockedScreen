@@ -165,6 +165,19 @@ try {
       continue;
     }
     if (scenario === 'teacher-prompt') {
+      const toolbar=page.getByRole('toolbar',{name:'Exam editing tools'});
+      await toolbar.getByRole('button',{name:'Go to bottom'}).click();
+      await toolbar.getByRole('button',{name:'Add question'}).click();
+      await toolbar.getByText('43 questions',{exact:true}).waitFor();
+      const added=page.locator('[id^="question-"]').last();
+      assert(await added.locator('textarea').first().evaluate(el=>el===document.activeElement));
+      await added.getByRole('button',{name:'Delete',exact:true}).click();
+      await toolbar.getByText('42 questions',{exact:true}).waitFor();
+      await toolbar.getByRole('button',{name:'Save here'}).click();
+      await toolbar.getByText(/Last saved/).waitFor();
+      await toolbar.getByRole('button',{name:'Go to top'}).click();
+      await page.getByLabel('Workspace theme').selectOption('forest');
+      assert(await page.locator('html').evaluate(el=>el.classList.contains('theme-forest')));
       const group = page.getByRole('group',{name:'Language audio'}).first();
       await group.locator('input[type=file]').setInputFiles({name:'original.wav',mimeType:'audio/wav',buffer:Buffer.from('test')});
       await group.getByLabel('Plays per attempt').selectOption('3');

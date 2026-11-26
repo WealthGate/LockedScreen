@@ -12,7 +12,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const isProtectedPackageFile = (value: unknown): value is ProtectedConfigPackageFile =>
   isRecord(value) &&
   value.format === "lockedscreen-config-package" &&
-  (value.version === 1 || value.version === 2) &&
+  (value.version === 1 || value.version === 2 || value.version === 3) &&
   typeof value.packageId === "string" &&
   typeof value.label === "string" &&
   typeof value.payload === "string" &&
@@ -67,6 +67,7 @@ export const protectConfigPackage = (
   const iv = randomBytes(12);
   const key = scryptSync(password, salt, 32);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
+  if (exam) cipher.setAAD(Buffer.from("LockedScreen graded exam v3"));
   const plaintext = exam
     ? JSON.stringify({
         kind: "package-bundle",
@@ -79,7 +80,7 @@ export const protectConfigPackage = (
 
   return {
     format: "lockedscreen-config-package",
-    version: exam ? 2 : 1,
+    version: exam ? 3 : 1,
     packageId: stamped.id,
     label: stamped.label,
     examTitle: exam?.title,
@@ -101,6 +102,7 @@ export const unprotectConfigPackage = (
 ): { configPackage: ExamConfigPackage; exam: Exam | null } => {
   const key = scryptSync(password, Buffer.from(candidate.salt, "base64"), 32);
   const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(candidate.iv, "base64"));
+  if (candidate.version === 3) decipher.setAAD(Buffer.from("LockedScreen graded exam v3"));
   decipher.setAuthTag(Buffer.from(candidate.authTag, "base64"));
   const payload = Buffer.concat([
     decipher.update(Buffer.from(candidate.payload, "base64")),

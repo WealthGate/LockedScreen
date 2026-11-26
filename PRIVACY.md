@@ -125,3 +125,9 @@ For project questions, contact the repository owner:
 
 https://github.com/WealthGate/LockedScreen
 
+
+## Online exam attempts
+
+When a student starts a graded exam, LockedScreen verifies their Google or connected Microsoft school account online and uses the returned name and email for the local exam record. Packages without an LMS connection request Google identity permissions. The attempt service checks the provider credential with the identity provider and stores hashed package, account and attempt identifiers, the start time and completion status to prevent another attempt on a different computer. These records persist so that reopening a downloaded package does not grant a new attempt. The attempt registry does not receive question answers, audio or grades.
+
+Answers, finished voice recordings, question position and the original deadline are saved in the student's Windows profile. An invigilator can authorize continuation there. For a linked exam, the external website controls its own response drafts. Teacher demonstrations use practice selections and do not register a student attempt.

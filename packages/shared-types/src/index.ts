@@ -1,4 +1,4 @@
-export type ThemePreference = "light" | "dark" | "system";
+export type ThemePreference = "light" | "dark" | "system" | "ocean" | "forest" | "plum";
 export type GoogleAuthMode = "publisher-hosted" | "school-desktop";
 export const publisherGoogleConnection = {
   clientId: "129421335486-b53jphtc37g3583b6d7oid2i0jmlejr1.apps.googleusercontent.com",
@@ -145,6 +145,8 @@ export interface ExamResponse {
   selectedOptionId?: string;
   flagged: boolean;
 }
+
+export interface AttemptProgress { session: ExamSession; questionIndex: number; }
 
 export interface ExamSession {
   spokenAnswers?: Record<string, string>;
@@ -452,6 +454,7 @@ export interface ExamConfigPackage {
 }
 
 export interface AppSettings {
+  allowDemonstrations?: boolean;
   adminUnlockPin: string;
   invigilatorUnlockPin: string;
   defaultTheme: ThemePreference;
@@ -567,6 +570,8 @@ export interface SecurityOverview {
 }
 
 export interface AppStateSnapshot {
+  attemptProgress?: AttemptProgress;
+  activeSubmission?: SubmissionResult;
   activeSession?: SessionStartRequest & { startedAt: string; securityHold?: string };
   installedRole?: InstalledAppRole;
   exams: Exam[];
@@ -645,7 +650,7 @@ export type HostedWebsiteAuthState = "signing-in" | "exam" | "blocked" | "provid
 
 export interface ProtectedConfigPackageFile {
   format: "lockedscreen-config-package";
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   packageId: string;
   label: string;
   examTitle?: string;
@@ -661,6 +666,7 @@ export interface ProtectedConfigPackageFile {
 }
 
 export interface SessionStartRequest {
+  candidate?: Candidate;
   examId: string;
   packageId: string;
   mode: ExamMode;

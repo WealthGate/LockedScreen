@@ -11,6 +11,7 @@ const compiled = await build({ entryPoints: ['apps/desktop/src/main/student-exam
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: args.path === 'electron' ? `
       import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
       const key = Buffer.alloc(32, 17);
+      export const shell = { openExternal: async()=>{} };
       export const safeStorage = {
         isEncryptionAvailable: () => globalThis.preExam.encryption,
         encryptString: text => { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv); const body = Buffer.concat([cipher.update(text), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), body]); },

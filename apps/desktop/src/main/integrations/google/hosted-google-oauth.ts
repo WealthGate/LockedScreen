@@ -29,11 +29,12 @@ const request = async (path: string, body: unknown, sessionToken?: string) => {
 export const beginHostedGoogleSignIn = async (
   role: "teacher" | "student",
   openBrowser: (url: string) => Promise<unknown>,
-  examSession = false
+  examSession = false,
+  identityOnly = false
 ): Promise<HostedResult> => {
   const verifier = randomBytes(32).toString("base64url");
   const codeChallenge = createHash("sha256").update(verifier).digest("base64url");
-  const { payload } = await request("/v1/google/sign-in", { role, codeChallenge, ...(role === "student" && examSession ? { examSession: true } : {}) });
+  const { payload } = await request("/v1/google/sign-in", { role, codeChallenge, identityOnly, ...(role === "student" && examSession ? { examSession: true } : {}) });
   if (typeof payload.flowId !== "string" || !tokenPattern.test(payload.flowId) ||
       payload.authorizeUrl !== `${origin}/oauth/google/start?flow=${payload.flowId}`) {
     throw new Error("The Google connection service returned an invalid sign-in address.");

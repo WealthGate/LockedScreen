@@ -39,7 +39,7 @@ test("legacy external Google release guard enforces PIN; the current locked flow
     const alternate = main.slice(main.indexOf('handleIpc("session:launchAlternateDesktop"'), main.indexOf('handleIpc("session:end"'));
     assert(alternate.indexOf('studentExamAuth.prepare(') < alternate.indexOf('await launchAlternateDesktopExamShell('));
     assert.match(alternate, /--lockedscreen-student-auth=\$\{studentAuthHandoff\}/);
-    assert.match(main, /if \(!getActiveSession\(\)\) void studentExamAuth.clear\(\)/);
+    assert.match(main, /if \(!getActiveSession\(\)\) \{ await attempts.close\(\); void studentExamAuth.clear\(\)/);
     assert.match(main, /handleIpc\("lmsConnection:connect"[\s\S]*?if \(getActiveSession\(\)\) throw/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

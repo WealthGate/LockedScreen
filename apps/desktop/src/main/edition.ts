@@ -10,7 +10,7 @@ export const storeProductId = typeof __LOCKEDSCREEN_STORE_PRODUCT_ID__ === "unde
 
 const studentChannels = new Set([
   "app:getSnapshot", "app:getLaunchContext", "security:refreshOverview",
-  "exam:hideForStudent", "configPackage:import",
+  "attempt:save", "attempt:authorize", "attempt:identify", "exam:hideForStudent", "configPackage:import",
   "session:begin", "session:launchAlternateDesktop", "session:end",
   "applications:launch", "exam:submit", "studentLms:turnIn",
   "window:setAssistKiosk", "window:setNavigationGuard", "shell:openExternal",

@@ -62,7 +62,7 @@ export function LanguageEditor({ question, change, mic }: { question: Question; 
 
 export function ListeningPlayer({ clip, attemptKey }: { clip: NonNullable<Question["listening"]>; attemptKey: string }) {
   const key = "exam-plays:" + attemptKey;
-  const readCount = () => {try { const n=Number(sessionStorage.getItem(key)); return Number.isInteger(n) && n >= 0 ? n : 10; } catch {return 10;}};
+  const readCount = () => {try { const n=Number(localStorage.getItem(key)); return Number.isInteger(n) && n >= 0 ? n : 10; } catch {return 10;}};
   const [used,setUsed] = useState(readCount);
   const player = useRef<HTMLAudioElement>(null);
   const active = useRef(false);
@@ -78,9 +78,9 @@ export function ListeningPlayer({ clip, attemptKey }: { clip: NonNullable<Questi
       el.playbackRate = speeds.includes(clip.speed) ? clip.speed : 1;
       const previous = readCount();
       if (previous >= limit) { end(); setUsed(previous); return; }
-      try { sessionStorage.setItem(key,String(previous+1)); } catch {end(); setError("The play count could not be saved."); return;}
+      try { localStorage.setItem(key,String(previous+1)); } catch {end(); setError("The play count could not be saved."); return;}
       setUsed(previous+1);
-      try { await el.play(); } catch { if (readCount() === previous+1) {sessionStorage.setItem(key,String(previous)); setUsed(previous);} end(); setError("Audio could not play."); }
+      try { await el.play(); } catch { if (readCount() === previous+1) {localStorage.setItem(key,String(previous)); setUsed(previous);} end(); setError("Audio could not play."); }
     }}><Play size={16}/> {playing ? "Playing" : "Play clip"}</Button>
     <span>{Math.max(0,limit-used)} plays left</span>{error && <span role="alert">{error}</span>}</div>;
 }
@@ -88,7 +88,7 @@ export function ListeningPlayer({ clip, attemptKey }: { clip: NonNullable<Questi
 export function useSpokenAnswers(mode: "student" | "teacher" = "student") {
   const teacher = mode === "teacher";
   const [questionId,setQuestionId] = useState<string>();
-  const [,refresh] = useState(0);
+  const [revision,refresh] = useState(0);
   const answers = useRef<Record<string,string>>(Object.create(null));
   const running = useRef<{ stop: () => void; done: Promise<void> } | null>(null);
   const generation = useRef(0);
@@ -133,13 +133,14 @@ export function useSpokenAnswers(mode: "student" | "teacher" = "student") {
           const src = await readAudio(blob);
           if (Object.entries(answers.current).reduce((n,[k,v]) => n+(k === id ? 0 : v.length),src.length)>16000000) throw Error();
           answers.current[id] = src;
+          refresh(n => n + 1);
         } catch { setError("This recording could not be saved. Try a shorter answer."); }
         finally { running.current=null; pending.current=false; setState("idle"); resolve(); }
       };
     } catch { stream?.getTracks().forEach(t=>t.stop()); if (ticket === generation.current) {pending.current=false; setState("idle"); setError(teacher ? "Microphone unavailable. Check Windows microphone access or upload an audio file." : "Microphone unavailable. Ask the invigilator to check Windows microphone access.");} }
   };
   const discard = (id: string) => { delete answers.current[id]; refresh(n => n+1); };
-  return {answers,state,error,start,finish,questionId,discard};
+  return {answers,revision,state,error,start,finish,questionId,discard};
 }
 
 export function SpeakingControl({ id, mic }: { id: string; mic: ReturnType<typeof useSpokenAnswers> }) {

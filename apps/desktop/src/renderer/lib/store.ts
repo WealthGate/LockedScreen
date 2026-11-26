@@ -47,11 +47,11 @@ interface LockedscreenStore {
   publishConfigPackageToClassroom: (payload: { packageId: string }) => Promise<GoogleClassroomPublishResult | null>;
   importConfigPackage: (payload?: { filePath?: string; password?: string }) => Promise<AppStateSnapshot | null>;
   importQuestions: () => Promise<ImportPreview | null>;
-  exportQuestionTemplate: () => Promise<string | null>;
+  exportQuestionTemplate: (kind?: "standalone" | "reading") => Promise<string | null>;
   exportResultsCsv: (examId?: string) => Promise<string | null>;
   syncSubmissionResults: (submissionId: string) => Promise<AppStateSnapshot | null>;
   syncPendingResults: () => Promise<AppStateSnapshot | null>;
-  beginSession: (payload: { examId: string; packageId: string; mode: Exam["mode"] }) => Promise<AppStateSnapshot | null>;
+  beginSession: (payload: { examId: string; packageId: string; candidate?: Candidate; mode: Exam["mode"] }) => Promise<AppStateSnapshot | null>;
   launchAlternateDesktopSession: (payload: { examId: string; candidate: Candidate }) => Promise<boolean>;
   endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot | null>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot | null>;
@@ -256,8 +256,8 @@ export const useLockedscreenStore = create<LockedscreenStore>((set) => ({
     set({ activeImport: preview ?? null });
     return preview;
   },
-  exportQuestionTemplate: async () =>
-    withGuard(() => window.lockedscreenApi.exportQuestionTemplate(), (error) => set({ error })),
+  exportQuestionTemplate: async kind =>
+    withGuard(() => window.lockedscreenApi.exportQuestionTemplate(kind), (error) => set({ error })),
   exportResultsCsv: async (examId) =>
     withGuard(() => window.lockedscreenApi.exportResultsCsv(examId), (error) => set({ error })),
   syncSubmissionResults: async (submissionId) => {

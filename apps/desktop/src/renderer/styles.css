@@ -125,3 +125,11 @@ canvas {
   overflow-y: hidden;
   padding: 0.25rem 0;
 }
+
+.theme-ocean { --surface:#edf8ff; --accent:#155e88; --tint:#cbeafb; }
+.theme-forest { --surface:#f0f8ec; --accent:#35663e; --tint:#d6ebc9; }
+.theme-plum { --surface:#fcf3ff; --accent:#734584; --tint:#eed9f8; }
+html[class^="theme-"] { background:linear-gradient(140deg,var(--tint),var(--surface)); }
+html[class^="theme-"] .bg-white { background-color:var(--surface); }
+html[class^="theme-"] .bg-slate-50 { background-color:var(--tint); }
+html[class^="theme-"] button.bg-slate-900 { background-color:var(--accent); }

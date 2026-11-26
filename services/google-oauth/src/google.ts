@@ -8,7 +8,7 @@ export interface GoogleTokens {
   expiresAt: string;
   profile?: { email: string; name?: string };
 }
-export interface AuthorizationData { verifier: string; nonce: string; examSession?: boolean }
+export interface AuthorizationData { identityOnly?: boolean; verifier: string; nonce: string; examSession?: boolean }
 export interface GoogleProvider {
   authorize(config: GoogleConfig, role: Role, state: string, auth: AuthorizationData): Promise<string>;
   exchange(config: GoogleConfig, callback: URL, state: string, auth: AuthorizationData, role: Role): Promise<GoogleTokens>;
@@ -38,7 +38,7 @@ export const googleProvider: GoogleProvider = {
     const url = new URL(server.authorization_endpoint!);
     url.search = new URLSearchParams({
       client_id: config.GOOGLE_CLIENT_ID, redirect_uri: config.GOOGLE_REDIRECT_URI,
-      response_type: "code", scope: scopesFor(role).join(" "), state, nonce: auth.nonce,
+      response_type: "code", scope: (auth.identityOnly ? ["openid","email","profile"] : scopesFor(role)).join(" "), state, nonce: auth.nonce,
       code_challenge: await oauth.calculatePKCECodeChallenge(auth.verifier), code_challenge_method: "S256",
       access_type: role === "teacher" || auth.examSession ? "offline" : "online",
       prompt: role === "teacher" || auth.examSession ? "consent select_account" : "select_account"
@@ -58,7 +58,7 @@ export const googleProvider: GoogleProvider = {
     const claims = oauth.getValidatedIdTokenClaims(tokens)!;
     if (claims.email_verified !== true || typeof claims.email !== "string") throw new Error("Unverified Google account.");
     const granted = new Set((tokens.scope ?? "").split(" "));
-    if (tokens.scope && scopesFor(role).some((scope) => !["openid", "email", "profile"].includes(scope) && !granted.has(scope))) {
+    if (!auth.identityOnly && tokens.scope && scopesFor(role).some((scope) => !["openid", "email", "profile"].includes(scope) && !granted.has(scope))) {
       throw new Error("Required Google permissions were not granted.");
     }
     return {

@@ -3,7 +3,7 @@ import { isPinVerifier, verifyInvigilatorPin } from "./invigilator-pin";
 
 const examChannels = new Set([
   "app:getSnapshot", "app:getLaunchContext", "updates:getState", "session:begin", "session:end",
-  "exam:submit", "studentLms:turnIn"
+  "attempt:save", "exam:submit", "studentLms:turnIn"
 ]);
 
 export const createSessionStartBarrier = () => {

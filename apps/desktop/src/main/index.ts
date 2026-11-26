@@ -9,6 +9,7 @@ import { createPinVerifier } from "./security/invigilator-pin";
 import { StudentExamAuth, needsStudentSignIn } from "./student-exam-auth";
 import { assertSessionExitPin, assertSessionOperation, assertSessionPinConfigured, createSessionStartBarrier, isSameSession, unsafeProductionSwitch } from "./security/session-policy";
 
+import { ExamAttempts } from "./exam-attempt";
 import { isReadingPassageList, isSharedMediaList } from "@lockedscreen/exam-engine";
 import { extractExamDocumentText, parseExamDocument } from "@lockedscreen/parser";
 import type {
@@ -58,6 +59,7 @@ import {
   verifyHostedNativeSession
 } from "./security/native-security";
 
+import standaloneTemplate from "../../../../docs/templates/standalone-question-template.txt?raw";
 import questionAuthoringTemplate from "../../../../docs/templates/doc-friendly-question-template.txt?raw";
 import { automaticPackagePassword, isProtectedPackageFile, protectConfigPackage, unprotectConfigPackage } from "./security/package-crypto";
 import {
@@ -86,6 +88,16 @@ if (buildEdition === "student") {
   app.setPath("userData", join(app.getPath("appData"), "@lockedscreen", "student"));
 }
 const storage = createStorageService(app.getPath("userData"));
+const attempts = new ExamAttempts(join(app.getPath("userData"), "exam-attempts"));
+let resumeApproval: {packageId: string; expires: number; extraMinutes:number} | undefined;
+function verifyResume(packageId:string) {
+  if (!resumeApproval || resumeApproval.packageId !== packageId || Date.now() > resumeApproval.expires) {
+    throw new Error("An attempt already exists. Ask the invigilator to enter the resume PIN on this computer.");
+  }
+  const minutes=resumeApproval.extraMinutes;
+  resumeApproval=undefined;
+  return minutes;
+}
 const oauthVault = new OAuthVault(join(app.getPath("userData"), "oauth-vault.json"));
 const studentExamAuth = new StudentExamAuth(join(app.getPath("userData"), "student-exam-handoff"));
 let runtimeEnvironment: RuntimeEnvironment;
@@ -267,6 +279,7 @@ const isSessionStartRequest = (value: unknown): value is SessionStartRequest =>
   isRecord(value) &&
   typeof value.examId === "string" &&
   typeof value.packageId === "string" &&
+  (value.candidate === undefined || isCandidate(value.candidate)) &&
   (value.mode === "app" || value.mode === "link");
 
 const isCandidate = (value: unknown): value is Candidate =>
@@ -360,6 +373,8 @@ const withRuntime = async (operation: Promise<AppStateSnapshot>): Promise<AppSta
   return {
     ...snapshot,
     activeSession: getActiveSession() ?? undefined,
+    activeSubmission: activeSubmissionId && getActiveSession() ? snapshot.submissions.find(s=>s.id===activeSubmissionId) : undefined,
+    attemptProgress: getActiveSession() ? attempts.progress : undefined,
     submissions: installedRole === "student" || getActiveSession() ? snapshot.submissions.map(({ spokenAnswers: _audio, ...rest }) => rest) : snapshot.submissions,
     settings: getActiveSession() ? { ...snapshot.settings, adminUnlockPin: "", invigilatorUnlockPin: "" } : snapshot.settings,
     installedRole,
@@ -1179,9 +1194,9 @@ app.whenReady().then(async () => {
     };
   });
 
-  handleIpc("import:exportQuestionTemplate", async () => {
+  handleIpc("import:exportQuestionTemplate", async (_event, kind?: string) => {
     const output = await dialog.showSaveDialog({
-      defaultPath: "lockedscreen-question-template.txt",
+      defaultPath: kind === "standalone" ? "standalone-question-template.txt" : "reading-question-template.txt",
       filters: [{ name: "Text file", extensions: ["txt"] }]
     });
 
@@ -1189,7 +1204,7 @@ app.whenReady().then(async () => {
       return null;
     }
 
-    await writeFile(output.filePath, questionAuthoringTemplate, "utf-8");
+    await writeFile(output.filePath, kind === "standalone" ? standaloneTemplate : questionAuthoringTemplate, "utf-8");
     return output.filePath;
   });
 
@@ -1239,6 +1254,25 @@ app.whenReady().then(async () => {
     return output.filePath;
   });
 
+  handleIpc("attempt:identify", async (_event,id:unknown) => {
+    const config=(await storage.getSnapshot()).configPackages.find(p=>p.id===id && p.status!=="archived");
+    if (!config) throw new Error("Select an active exam package.");
+    return studentExamAuth.identify(config,mainWindow);
+  });
+  handleIpc("attempt:authorize", async (_event,id:unknown,pin:unknown,minutes:unknown=0) => {
+    const snapshot=await storage.getSnapshot();
+    const config=snapshot.configPackages.find(p=>p.id===id);
+    if (!config) throw new Error("Select an exam package.");
+    assertSessionPinConfigured(config,snapshot.settings.invigilatorUnlockPin,installedRole!=="student");
+    assertSessionExitPin(config,pin,snapshot.settings.invigilatorUnlockPin);
+    if (typeof minutes!=="number" || !Number.isInteger(minutes) || minutes<0 || minutes>1440) throw new Error("Enter additional time between 0 and 1440 minutes.");
+    resumeApproval={packageId:config.id,expires:Date.now()+10*60000,extraMinutes:minutes};
+  });
+  handleIpc("attempt:save", async (_event,progress:unknown) => {
+    if (!getActiveSession() || activeSubmissionId || !isRecord(progress) || !isSession(progress.session) ||
+      typeof progress.questionIndex !== "number" || !Number.isSafeInteger(progress.questionIndex) || progress.questionIndex<0) throw new Error("No matching open attempt.");
+    await attempts.save({session:progress.session,questionIndex:progress.questionIndex});
+  });
   handleIpc("session:begin", async (_event, request: unknown) => {
     teacherPromptMicUntil = 0;
     if (!isSessionStartRequest(request)) {
@@ -1273,8 +1307,10 @@ app.whenReady().then(async () => {
       if (launchedByNativeHost) {
         await studentExamAuth.takeHandoff(getArgValue("--lockedscreen-student-auth="), configPackage);
       } else {
-        await studentExamAuth.prepare(configPackage, mainWindow);
+        if (!studentExamAuth.preparedFor(configPackage)) await studentExamAuth.prepare(configPackage, mainWindow);
+        studentExamAuth.setAttempt(await attempts.prepare(configPackage,exam,studentExamAuth.proof(configPackage),()=>verifyResume(configPackage.id),snapshot.submissions,request.candidate?.className ?? exam.className));
       }
+      await attempts.open(studentExamAuth.getAttempt());
       const needsNativeCompanion = !launchedByNativeHost;
 
       if (needsNativeCompanion) {
@@ -1338,7 +1374,8 @@ app.whenReady().then(async () => {
         return false;
       }
 
-      await studentExamAuth.prepare(configPackage, mainWindow);
+      if (!studentExamAuth.preparedFor(configPackage)) await studentExamAuth.prepare(configPackage, mainWindow);
+      studentExamAuth.setAttempt(await attempts.prepare(configPackage,exam,studentExamAuth.proof(configPackage),()=>verifyResume(configPackage.id),snapshot.submissions,payload.candidate.className ?? exam.className));
       studentAuthHandoff = await studentExamAuth.createHandoff();
       await launchAlternateDesktopExamShell(
         {
@@ -1398,7 +1435,7 @@ app.whenReady().then(async () => {
       return withRuntime(storage.getSnapshot());
     } finally {
       // Do not clear a student's authorization when a wrong PIN was rejected.
-      if (!getActiveSession()) void studentExamAuth.clear();
+      if (!getActiveSession()) { await attempts.close(); void studentExamAuth.clear(); }
       sessionStarting = false;
     }
   });
@@ -1441,12 +1478,15 @@ app.whenReady().then(async () => {
       const trustedExam = (await storage.getSnapshot()).exams.find(exam => exam.id === current.examId);
       if (!trustedExam) throw new Error("Active exam not found.");
       const activePackageIsLockdownOnly = activePackage?.externalDeliveryMode === "lockdown-only";
-      const result = await storage.recordSubmission(trustedExam, payload.session, {
+      if (!attempts.progress) throw new Error("The verified student attempt is missing.");
+      const session = { ...payload.session, candidate:attempts.progress.session.candidate, startedAt:attempts.progress.session.startedAt, endsAt:attempts.progress.session.endsAt };
+      const result = await storage.recordSubmission(trustedExam, session, {
         externalDeliveryMode: activePackage?.externalDeliveryMode,
         packageId: activePackage?.id,
         resultDestinations: activePackageIsLockdownOnly ? [] : undefined
       });
       activeSubmissionId = result.id;
+      await attempts.complete().catch(() => recordSecurityEvent("session","warning","Online completion confirmation is pending. The attempt remains reserved."));
       let snapshot = await storage.getSnapshot();
 
       if (!activePackageIsLockdownOnly && activePackage?.studentLmsBinding.enabled) {

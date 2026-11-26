@@ -61,7 +61,8 @@ test("shared passages and attachments survive teacher save, protected export and
     const opened = unprotectConfigPackage(file, "fixture");
     const student = createStorageService(join(dir, "student"));
     await student.importExamBundle(opened.exam, opened.configPackage);
-    const imported = (await createStorageService(join(dir, "student")).getSnapshot()).exams.find(item => item.id === exam.id);
+    const workspace = await createStorageService(join(dir, "student")).getSnapshot();
+    const imported = workspace.exams.find(item => item.id === workspace.configPackages.find(p=>p.id===config.id).examId);
     assert.deepEqual(imported.sharedMedia, sharedMedia);
     assert.deepEqual(imported.passages, passages);
     assert.deepEqual(imported.questions, exam.questions);

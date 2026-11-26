@@ -1114,8 +1114,11 @@ class JsonStorageService implements StorageService {
 
   async importExamBundle(exam: Exam, configPackage: ExamConfigPackage): Promise<AppStateSnapshot> {
     const snapshot = await this.read();
+    const prior = snapshot.configPackages.find(item=>item.id===configPackage.id);
+    const conflictingPackage = snapshot.configPackages.some(item=>item.examId===exam.id && item.id!==configPackage.id);
     const nextExam = {
       ...normalizeExam(exam),
+      id: prior?.examId ?? (conflictingPackage ? randomUUID() : exam.id),
       updatedAt: new Date().toISOString()
     };
     const examExisting = snapshot.exams.findIndex((candidate) => candidate.id === nextExam.id);

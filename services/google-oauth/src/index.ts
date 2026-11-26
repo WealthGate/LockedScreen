@@ -13,7 +13,7 @@ interface Flow {
   id: string; challenge: string; role: Role; status: string; browser_hash: string | null;
   encrypted_payload: string; expires_at: number;
 }
-interface FlowPayload { auth?: AuthorizationData; result?: unknown; error?: string; examSession?: boolean }
+interface FlowPayload { identityOnly?: boolean; auth?: AuthorizationData; result?: unknown; error?: string; examSession?: boolean }
 interface Session { encrypted_payload: string; expires_at: number }
 const FLOW_TTL = 10 * 60_000;
 const SESSION_TTL = 30 * 24 * 60 * 60_000;
@@ -100,12 +100,50 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
       requireConfig(env);
       if (url.pathname === "/health" && request.method === "GET") {
         await env.DB.prepare("SELECT id FROM oauth_flows LIMIT 1").first();
-        return json({ status: "ready", version: "0.6.64", studentExamSessions: true });
+        await env.DB.prepare("SELECT package_key FROM exam_attempts LIMIT 1").first();
+        return json({ status: "ready", version: "0.6.73", studentExamSessions: true, crossDeviceAttempts: true });
       }
       const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
       const ipKey = await hash(`${env.TOKEN_ENCRYPTION_KEY}:${ip}`);
       // A school class can share one public IP and poll concurrent sign-ins.
       await rateLimit(env, `request:${ipKey}`, 2000);
+
+      if (url.pathname === "/v1/attempt/complete" && request.method === "POST") {
+        const body = await readJson(request);
+        if (typeof body.lease !== "string" || !TOKEN.test(body.lease)) fail(400, "invalid_attempt", "Invalid attempt.");
+        const saved = await env.DB.prepare("UPDATE exam_attempts SET completed=1 WHERE lease_hash=? RETURNING completed")
+          .bind(await hash(body.lease)).first();
+        if (!saved) fail(403, "invalid_attempt", "Attempt not found.");
+        return json({ completed: true });
+      }
+      if (url.pathname === "/v1/attempt/claim" && request.method === "POST") {
+        const body = await readJson(request);
+        if (typeof body.packageId !== "string" || !body.packageId.length || body.packageId.length > 160 ||
+            typeof body.lease !== "string" || !TOKEN.test(body.lease) || !["google", "microsoft"].includes(String(body.provider))) {
+          fail(400, "invalid_attempt", "Invalid package or attempt.");
+        }
+        const bearer = request.headers.get("Authorization");
+        if (!bearer?.startsWith("Bearer ")) fail(401, "sign_in", "Sign in with your school account.");
+        const google = body.provider === "google";
+        const user = await fetch(google ? "https://openidconnect.googleapis.com/v1/userinfo" : "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
+          { headers: { Authorization: bearer }, redirect: "error", signal: AbortSignal.timeout(15000) });
+        if (!user.ok) fail(401, "sign_in", "Your school account could not be verified. Sign in again.");
+        const profile = await user.json() as Record<string, unknown>;
+        const subject = google ? profile.sub : profile.id;
+        const email = google ? profile.email : profile.mail || profile.userPrincipalName;
+        if (typeof subject !== "string" || !subject || typeof email !== "string" || !email || (google && profile.email_verified !== true)) {
+          fail(403, "identity", "A verified school identity is required.");
+        }
+        const student = await hash(body.provider + ":" + subject);
+        const pkg = await hash(body.packageId);
+        const receipt = await hash(body.lease + ":" + student + ":" + pkg);
+        const lease = await hash(receipt);
+        const attempt = await env.DB.prepare(
+          "INSERT INTO exam_attempts(package_key,student_key,lease_hash,started_at) VALUES(?,?,?,?) ON CONFLICT(package_key,student_key) DO UPDATE SET claims=claims+1 WHERE lease_hash=excluded.lease_hash RETURNING started_at,completed,claims"
+        ).bind(pkg, student, lease, Date.now()).first<{started_at:number;completed:number;claims:number}>();
+        if (!attempt || attempt.completed) fail(409, "attempt_used", "This account already attempted this package. An interrupted attempt can be resumed with your invigilator on the original computer.");
+        return json({ receipt, repeated: attempt.claims > 1, startedAt: new Date(attempt.started_at).toISOString(), subject, email, name: profile.name || profile.displayName || email });
+      }
 
       if (url.pathname === "/v1/google/sign-in" && request.method === "POST") {
         const body = await readJson(request);
@@ -115,7 +153,7 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
         await rateLimit(env, `start:${body.role}:${ipKey}`, body.role === "student" ? 120 : 10);
         const id = randomToken();
         await env.DB.prepare("INSERT INTO oauth_flows(id, challenge, role, status, encrypted_payload, expires_at) VALUES (?, ?, ?, 'created', ?, ?)")
-          .bind(id, body.codeChallenge, body.role, await seal(env.TOKEN_ENCRYPTION_KEY, `flow:${id}`, { examSession: body.role === "student" && body.examSession === true }), Date.now() + FLOW_TTL).run();
+          .bind(id, body.codeChallenge, body.role, await seal(env.TOKEN_ENCRYPTION_KEY, `flow:${id}`, { identityOnly: body.role === "student" && body.identityOnly === true, examSession: body.role === "student" && body.examSession === true }), Date.now() + FLOW_TTL).run();
         return json({ flowId: id, authorizeUrl: `${ORIGIN}/oauth/google/start?flow=${id}`, pollIntervalSeconds: 5 });
       }
 
@@ -126,7 +164,7 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
           .bind(id, Date.now()).first<Flow>();
         if (!existing) fail(400, "expired_flow", "This sign-in link has expired or was already opened. Connect again from LockedScreen.");
         const initial = await unseal<FlowPayload>(env.TOKEN_ENCRYPTION_KEY, `flow:${id}`, existing.encrypted_payload);
-        const auth = { verifier: randomToken(), nonce: randomToken(), examSession: existing.role === "student" && initial.examSession === true };
+        const auth = { identityOnly: initial.identityOnly, verifier: randomToken(), nonce: randomToken(), examSession: existing.role === "student" && initial.examSession === true };
         const browser = randomToken();
         const row = await env.DB.prepare(
           "UPDATE oauth_flows SET status = 'started', browser_hash = ?, encrypted_payload = ? WHERE id = ? AND status = 'created' AND expires_at > ? RETURNING *"

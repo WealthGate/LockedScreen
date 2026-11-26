@@ -62,6 +62,7 @@ import type {
 } from "@lockedscreen/shared-types";
 import { Badge, Button, Card, CardDescription, CardTitle, Input, Textarea } from "@lockedscreen/ui";
 
+import schoolLogo from "../../build/icon-128.png";
 import desktopPackage from "../../package.json";
 import { RichContent } from "./components/rich-content";
 import { RichContentEditor } from "./components/rich-content-editor";
@@ -274,7 +275,7 @@ const themeClass = (theme: ThemePreference): string => {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "";
   }
 
-  return theme === "dark" ? "dark" : "";
+  return theme === "dark" ? "dark" : ["ocean","forest","plum"].includes(theme) ? "theme-" + theme : "";
 };
 
 const usesOfficialKiosk = (profile: SecurityProfile): boolean =>
@@ -731,9 +732,16 @@ const AppFrame = () => {
     return unsubscribe;
   }, []);
 
+  const themeKey = "lockedscreen-theme-" + (activeSession?.packageId ?? installedRole);
+  const [themeRevision, refreshTheme] = useState(0);
+  const preferredTheme = (localStorage.getItem(themeKey) as ThemePreference | null) ??
+    snapshot?.exams.find(exam => exam.id === activeSession?.examId)?.appearance.theme ?? snapshot?.settings.defaultTheme ?? "system";
   useEffect(() => {
-    document.documentElement.className = themeClass(snapshot?.settings.defaultTheme ?? "system");
-  }, [snapshot?.settings.defaultTheme]);
+    const apply = () => { document.documentElement.className = themeClass(preferredTheme); };
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    apply(); media.addEventListener("change",apply);
+    return () => media.removeEventListener("change",apply);
+  }, [preferredTheme, themeRevision]);
 
   if ((loading && !snapshot) || !launchContext) {
     return (
@@ -763,6 +771,10 @@ const AppFrame = () => {
 
   return (
     <div className={`min-h-screen min-w-0 max-w-full overflow-x-hidden text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-3 sm:p-6"}`}>
+      <label className="relative z-10 ml-auto mb-1 flex w-fit items-center gap-2 rounded-lg bg-white px-2 py-1 text-xs text-slate-900">Theme
+        <select aria-label="Workspace theme" value={preferredTheme} onChange={e => { localStorage.setItem(themeKey,e.target.value); refreshTheme(n=>n+1); }}>
+          {(["system","light","dark","ocean","forest","plum"] as const).map(t=><option key={t} value={t}>{t}</option>)}
+        </select></label>
       {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
         <Routes location={examRoute ?? location}>
@@ -820,7 +832,7 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
       <aside className="min-w-0 rounded-[28px] border border-white/60 bg-slate-950/90 p-4 text-white shadow-2xl shadow-slate-900/30 sm:p-6 xl:rounded-[32px]">
         <div className="mb-5 flex min-w-0 items-center gap-3 xl:mb-10">
           <div className="rounded-2xl bg-teal-500/20 p-3 text-teal-200">
-            <ShieldCheck className="size-6" />
+            <img className="size-10 rounded-lg" src={schoolLogo} alt="LockedScreen"/>
           </div>
           <div className="min-w-0">
             <div className="break-words text-sm uppercase tracking-[0.3em] text-slate-400">LOCKEDSCREEN</div>
@@ -885,6 +897,7 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
         <AnimatePresence mode="wait">
           <Routes>
             <Route index element={<DashboardPage />} />
+            <Route path="demonstrate/:examId" element={<DemonstrationPage />} />
             <Route path="builder/:examId" element={<BuilderPage />} />
             <Route path="import" element={<ImportPage />} />
             <Route path="package-import" element={<PackageImportPage launchContext={launchContext} />} />
@@ -908,7 +921,7 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
         <Card className="relative overflow-hidden bg-slate-950 p-5 text-white sm:p-8">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.35),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.25),transparent_30%)]" />
           <div className="relative space-y-6">
-            <Badge className="bg-white/10 text-white">LOCKEDSCREEN</Badge>
+            <img className="size-16 rounded-xl" src={schoolLogo} alt="LockedScreen"/>
             <div className="space-y-3">
               <h1 className="break-words text-3xl font-semibold tracking-tight sm:text-4xl">Choose how you are using the exam app.</h1>
               <p className="max-w-2xl text-sm leading-7 text-slate-300">
@@ -960,8 +973,12 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
   const { snapshot, launchAlternateDesktopSession, hideExamForStudent, importConfigPackage, error } = useLockedscreenStore();
   const [openingPackage, setOpeningPackage] = useState(false);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
-  const [candidateName, setCandidateName] = useState("");
-  const [candidateId, setCandidateId] = useState("");
+  const [account,setAccount] = useState<(Candidate & {subject:string;packageId:string}) | null>(null);
+  const [signingIn,setSigningIn] = useState(false);
+  const [extraMinutes,setExtraMinutes] = useState(0);
+  const [resumePin,setResumePin] = useState("");
+  const candidateName=account?.name ?? "";
+  const candidateId=account?.id ?? "";
   const [candidateClassName, setCandidateClassName] = useState("");
   const [examStartCodeAttempt, setExamStartCodeAttempt] = useState("");
   const [examStartCodeError, setExamStartCodeError] = useState<string | null>(null);
@@ -986,6 +1003,9 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
     setLaunchFeedback(null);
     navigate("/student", { replace: true });
   }, [location.search, navigate, snapshot]);
+
+  const packageId = selectedExam && getConfigPackageForExam(snapshot,selectedExam.id)?.id;
+  useEffect(() => { setAccount(null); setResumePin(""); setExtraMinutes(0); setExamStartCodeAttempt(""); setExamStartCodeError(null); setCandidateClassName(""); },[packageId]);
 
   if (!snapshot) {
     return null;
@@ -1034,12 +1054,12 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
     return true;
   };
 
-  const assignedExamCards = !snapshot || !identifiedCandidate
+  const assignedExamCards = !snapshot || !identifiedCandidate || account?.packageId !== packageId
     ? []
     : snapshot.exams
         .map((exam) => {
           const configPackage = getConfigPackageForExam(snapshot, exam.id);
-          if (!configPackage || configPackage.status === "archived") {
+          if (!configPackage || configPackage.id !== packageId || configPackage.status === "archived") {
             return null;
           }
 
@@ -1049,12 +1069,12 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
           const assignedToStudent =
             (assignedClasses.length === 0 && assignedCandidateIds.length === 0) ||
             assignedClasses.includes(normalizedCandidateClass) ||
-            assignedCandidateIds.includes(normalizedCandidateId.trim().toLowerCase());
+            (assignedCandidateIds.includes(normalizedCandidateId.trim().toLowerCase()) || assignedCandidateIds.includes(account?.subject.toLowerCase() ?? ""));
           const hiddenByStudent = snapshot.studentExamStates.some(
             (entry) => entry.examId === exam.id && entry.candidateId === normalizedCandidateId
           );
           const completedSubmission = snapshot.submissions.find(
-            (submission) => submission.examId === exam.id && submission.candidateId === normalizedCandidateId
+            (submission) => submission.examId === exam.id && (!submission.packageId || submission.packageId===configPackage.id) && submission.candidateId === normalizedCandidateId
           );
           const canStartNow = hasReachedAvailabilityStart(policy.availableFrom) && !isPastAvailabilityEnd(policy.availableUntil);
           const expiredByTeacher = isPastAvailabilityEnd(policy.availableUntil);
@@ -1127,33 +1147,25 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
         <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(launchFeedback.tone)}`}>{launchFeedback.text}</div>
       ) : null}
 
-      <Card className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <CardTitle>Student details</CardTitle>
-            <CardDescription>Use these details to load the exams assigned to this student or class.</CardDescription>
-          </div>
-          <Badge className={identifiedCandidate ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-900"}>
-            {identifiedCandidate ? `${assignedExamCards.length} assigned exam(s)` : "Enter details to continue"}
-          </Badge>
-        </div>
-        <div className="grid gap-4 md:grid-cols-3">
-          <LabelledField label="Student name">
-            <Input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} />
-          </LabelledField>
-          <LabelledField label="Candidate ID">
-            <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
-          </LabelledField>
-          <LabelledField label="Class">
-            <Input value={candidateClassName} onChange={(event) => setCandidateClassName(event.target.value)} />
-          </LabelledField>
-        </div>
+      <Card className="space-y-3"><CardTitle>Choose an exam package</CardTitle>
+        <select aria-label="Student exam package" className={selectClassName} disabled={signingIn} value={selectedExam?.id ?? ""} onChange={e=>setSelectedExam(snapshot.exams.find(x=>x.id===e.target.value) ?? null)}>
+          <option value="">Select an exam</option>
+          {snapshot.exams.filter(x=>getConfigPackageForExam(snapshot,x.id)?.status==="active").map(x=><option key={x.id} value={x.id}>{x.title}</option>)}
+        </select>
+        {packageId && <Button disabled={signingIn} onClick={async()=>{
+          setSigningIn(true); setAccount(null); setLaunchFeedback(null);
+          try { const who=await window.lockedscreenApi.identifyStudent(packageId); setAccount({...who,packageId}); }
+          catch(e){setLaunchFeedback({tone:"error",text:e instanceof Error?e.message:"Sign-in failed."});}
+          finally {setSigningIn(false);}
+        }}>{signingIn ? "Signing in…" : account ? "Switch account" : "Sign in to this package"}</Button>}
+        {account && <p>{account.name} · {account.id}</p>}
+        {account && <LabelledField label="Class"><Input value={candidateClassName} onChange={e=>setCandidateClassName(e.target.value)}/></LabelledField>}
       </Card>
 
       <section className="grid gap-4">
         {!identifiedCandidate ? (
           <Card className="space-y-3">
-            <CardTitle>Enter student details first</CardTitle>
+            <CardTitle>Sign in to your exam package</CardTitle>
             <CardDescription>The student portal only shows exams assigned to the current student or class.</CardDescription>
           </Card>
         ) : assignedExamCards.length === 0 ? (
@@ -1246,7 +1258,7 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
         )}
       </section>
 
-      {selectedExam && identifiedCandidate ? (
+      {selectedExam && identifiedCandidate && assignedExamCards.some(item=>item.exam.id===selectedExam.id && item.canStartNow && !item.completedSubmission) ? (
         <Card className="border-slate-200 bg-white text-slate-950 dark:border-slate-200 dark:bg-white dark:text-slate-950">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2">
@@ -1255,17 +1267,10 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
                 Confirm your details to begin <span className="font-semibold">{selectedExam.title || "this exam"}</span>.
               </CardDescription>
             </div>
-            <div className="grid w-full gap-4 md:max-w-3xl md:grid-cols-3">
-              <LabelledField label="Student name" labelClassName="text-slate-800 dark:text-slate-800">
-                <Input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} />
-              </LabelledField>
-              <LabelledField label="Candidate ID" labelClassName="text-slate-800 dark:text-slate-800">
-                <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
-              </LabelledField>
-              <LabelledField label="Class" labelClassName="text-slate-800 dark:text-slate-800">
-                <Input value={candidateClassName} onChange={(event) => setCandidateClassName(event.target.value)} />
-              </LabelledField>
-            </div>
+            <details key={packageId || ""}><summary>Invigilator resume authorization</summary>
+              <LabelledField label="Invigilator resume PIN"><Input type="password" value={resumePin} onChange={e=>setResumePin(e.target.value)}/></LabelledField>
+              <LabelledField label="Additional minutes"><Input type="number" min="0" max="1440" value={extraMinutes} onChange={e=>setExtraMinutes(Number(e.target.value))}/></LabelledField>
+            </details>
             {hasExamStartCode(getConfigPackageForExam(snapshot, selectedExam.id)?.studentAccessPolicy) ? (
               <div className="w-full max-w-md space-y-2">
                 <LabelledField label="Exam start code" labelClassName="text-slate-800 dark:text-slate-800">
@@ -1294,6 +1299,10 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
               <Button
                 onClick={async () => {
                   const candidate = normalizeCandidate(candidateName, candidateId, candidateClassName || selectedExam.className);
+                  if (resumePin && packageId) {
+                    try { await window.lockedscreenApi.authorizeResume(packageId,resumePin,extraMinutes); setResumePin(""); }
+                    catch (e) {setLaunchFeedback({tone:"error",text:e instanceof Error?e.message:"Authorization failed."});return;}
+                  }
                   const launched = await launchExam(selectedExam, candidate);
                   if (launched) {
                     setSelectedExam(null);
@@ -1314,68 +1323,12 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
 const DashboardPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { snapshot, deleteExam, launchAlternateDesktopSession } = useLockedscreenStore();
-  const [launchReviewExam, setLaunchReviewExam] = useState<Exam | null>(null);
-  const [launchCandidateExam, setLaunchCandidateExam] = useState<Exam | null>(null);
-  const [candidateName, setCandidateName] = useState("");
-  const [candidateId, setCandidateId] = useState("");
-  const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
-
-  if (!snapshot) {
-    return null;
-  }
-
-  const openCandidatePrompt = (exam: Exam) => {
-    setLaunchCandidateExam(exam);
-    setCandidateName("");
-    setCandidateId("");
-    setLaunchReviewExam(null);
-    setLaunchFeedback(null);
-  };
-
-  useEffect(() => {
-    const examId = new URLSearchParams(location.search).get("launchExamId");
-    if (!examId) {
-      return;
-    }
-
-    const exam = snapshot.exams.find((candidate) => candidate.id === examId);
-    if (exam) {
-      openCandidatePrompt(exam);
-    }
-
-    navigate("/teacher", { replace: true });
-  }, [location.search, navigate, snapshot]);
-
-  const launchExam = async (exam: Exam, candidate: Candidate) => {
-    setLaunchFeedback(null);
-
-    if (!isSecureSessionReady(snapshot) && !canUseTestingMode(snapshot)) {
-      setLaunchReviewExam(exam);
-      return;
-    }
-
-    if (isNativeFullKioskExam(snapshot, exam.id)) {
-      try {
-        const handedOff = await launchAlternateDesktopSession({ examId: exam.id, candidate });
-        if (handedOff) {
-          return;
-        }
-      } catch (error) {
-        setLaunchFeedback({
-          tone: "error",
-          text:
-            error instanceof Error
-              ? `${error.message} This full-kiosk exam cannot start until native Windows lockdown is active.`
-              : "Native lockdown launch failed. This full-kiosk exam cannot start until the Windows lockdown companion is active."
-        });
-        return;
-      }
-    }
-
-    navigate(buildExamRoute(exam, candidate));
-  };
-
+  const {snapshot,deleteExam}=useLockedscreenStore();
+  useEffect(()=>{
+    const id=new URLSearchParams(location.search).get("launchExamId");
+    if (id) navigate(buildDashboardLaunchRoute(id),{replace:true});
+  },[location.search,navigate]);
+  if (!snapshot) return null;
   return (
     <motion.div key="dashboard" {...animation} className="space-y-6">
       <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
@@ -1422,10 +1375,6 @@ const DashboardPage = () => {
         </Card>
       </section>
 
-      {launchFeedback ? (
-        <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackTone(launchFeedback.tone)}`}>{launchFeedback.text}</div>
-      ) : null}
-
       <section className="grid gap-4">
         {snapshot.exams.map((exam) => (
           <Card key={exam.id} className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
@@ -1455,10 +1404,11 @@ const DashboardPage = () => {
             </div>
 
             <div className="flex flex-wrap gap-3">
+              {snapshot.settings.allowDemonstrations && <Button variant="secondary" onClick={()=>navigate("/teacher/demonstrate/"+exam.id)}>Demonstrate exam</Button>}
               <Button variant="secondary" onClick={() => navigate(`/teacher/builder/${exam.id}`)}>
                 Edit
               </Button>
-              <Button onClick={() => openCandidatePrompt(exam)}>
+              <Button onClick={() => navigate(buildDashboardLaunchRoute(exam.id))}>
                 {isSecureSessionReady(snapshot)
                   ? "Launch secure session"
                   : canUseTestingMode(snapshot)
@@ -1474,78 +1424,6 @@ const DashboardPage = () => {
         ))}
       </section>
 
-      {launchReviewExam ? (
-        <Card className="border-amber-200 bg-amber-50">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex min-w-0 gap-3">
-              <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
-                <AlertTriangle className="size-5" />
-              </div>
-              <div className="space-y-2">
-                <CardTitle>{canUseTestingMode(snapshot) ? "Non-kiosk launch warning" : "Secure launch blocked"}</CardTitle>
-                <CardDescription className="max-w-3xl text-amber-900">
-                  {launchReviewExam.title || "This exam"}{" "}
-                  {canUseTestingMode(snapshot)
-                    ? testingModeCopy(snapshot)
-                    : "cannot start until the device is configured with a verified native Windows lockdown companion or official Windows kiosk deployment. The app will not pretend to suppress the Windows key or system task switching on its own."}
-                </CardDescription>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {canUseTestingMode(snapshot) ? (
-                <Button
-                  onClick={() => openCandidatePrompt(launchReviewExam)}
-                >
-                  {snapshot.runtime?.canOnlyUseTestingMode ? "Launch Windows Home session" : "Launch testing session"}
-                </Button>
-              ) : null}
-              <Button variant="secondary" onClick={() => navigate("/teacher/settings")}>
-                Review settings
-              </Button>
-              <Button variant="ghost" className="text-amber-800 hover:bg-amber-100" onClick={() => setLaunchReviewExam(null)}>
-                Dismiss
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-
-      {launchCandidateExam ? (
-        <Card className="border-slate-200 bg-white text-slate-950 dark:border-slate-200 dark:bg-white dark:text-slate-950">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <CardTitle className="text-slate-950 dark:text-slate-950">Candidate details</CardTitle>
-              <CardDescription className="max-w-2xl text-slate-900 dark:text-slate-900">
-                Enter the student name and optional candidate ID before launching{" "}
-                {launchCandidateExam.title || "this exam"}.
-              </CardDescription>
-            </div>
-            <div className="grid w-full gap-4 md:max-w-xl md:grid-cols-2">
-              <LabelledField label="Student name" labelClassName="text-slate-800 dark:text-slate-800">
-                <Input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} />
-              </LabelledField>
-              <LabelledField label="Candidate ID" labelClassName="text-slate-800 dark:text-slate-800">
-                <Input value={candidateId} onChange={(event) => setCandidateId(event.target.value)} />
-              </LabelledField>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button variant="secondary" onClick={() => setLaunchCandidateExam(null)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  const candidate = normalizeCandidate(candidateName, candidateId, launchCandidateExam.className);
-                  void launchExam(launchCandidateExam, candidate);
-                  setLaunchCandidateExam(null);
-                }}
-                disabled={candidateName.trim().length === 0}
-              >
-                Continue
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ) : null}
     </motion.div>
   );
 };
@@ -1569,7 +1447,22 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
 
   const updateDraft = (patch: Partial<Exam>) => setDraft((current) => ({ ...current, ...patch }));
 
-  const saveCurrent = async () => {
+  const newQuestion = useRef<string | null>(null);
+  useEffect(() => {
+    if (!newQuestion.current) return;
+    const box = document.getElementById("question-" + newQuestion.current);
+    box?.scrollIntoView({block: "start"});
+    box?.querySelector("textarea")?.focus({preventScroll: true});
+    newQuestion.current = null;
+  }, [draft.questions]);
+  const appendQuestion = () => {
+    const question = blankQuestion();
+    newQuestion.current = question.id;
+    setDraft(current => ({...current, questions: [...current.questions, question]}));
+  };
+
+  const [savedAt,setSavedAt] = useState("");
+  const saveCurrent = async (keepEditing = false) => {
     if (activeRecording) {
       document.getElementById(`question-${promptMic.questionId}`)?.scrollIntoView({ block: "start" });
       document.getElementById(`question-${promptMic.questionId}`)?.querySelector<HTMLButtonElement>("[data-recording-control]")?.focus();
@@ -1583,7 +1476,12 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
         return src ? { ...question, listening: { plays: 2, speed: 1, ...question.listening, src } } : question;
       }) : draft.questions;
       const saved = await saveExam({ ...draft, questions, updatedAt: new Date().toISOString() });
-      if (saved) navigate("/teacher");
+      if (saved && keepEditing) {
+        const persisted = saved.exams.find(item=>item.id===draft.id);
+        if (persisted) setDraft(persisted);
+        recordedQuestions.forEach(q=>promptMic.discard(q.id));
+        setSavedAt(new Date().toLocaleTimeString());
+      } else if (saved) navigate("/teacher");
       else setSaveError(useLockedscreenStore.getState().error ?? "Save failed. Your draft is still open. Try again.");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Save failed. Your draft is still open. Try again.");
@@ -1602,12 +1500,9 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
           </p>
         </div>
         <div className="space-y-2 sm:max-w-sm">
-          <Button disabled={saving} onClick={() => void saveCurrent()}>
-            <Save className="size-4" /> {saving ? "Saving…" : "Save exam"}
-          </Button>
+
           {activeRecording ? <p role="status">Finish the microphone request or recording for question {draft.questions.findIndex(q => q.id === promptMic.questionId) + 1}. Select Save exam to go there.</p> :
             draft.mode === "app" && recordedQuestions.length > 0 && <p role="status">Save exam will include the recorded audio for question(s) {recordedQuestions.map(q => draft.questions.indexOf(q) + 1).join(", ")}. You can review or discard it in Language audio first.</p>}
-          {saveError && <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">{saveError}</p>}
         </div>
       </div>
 
@@ -1687,7 +1582,7 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
             </LabelledField>
             <LabelledField label="Theme">
               <div className="grid grid-cols-3 gap-2">
-                {(["light", "dark", "system"] as const).map((theme) => (
+                {(["light", "dark", "system", "ocean", "forest", "plum"] as const).map((theme) => (
                   <Button
                     key={theme}
                     variant={draft.appearance.theme === theme ? "primary" : "secondary"}
@@ -1773,6 +1668,16 @@ const ExamBuilder = ({ examId }: { examId?: string }) => {
           <ExamPreviewCard exam={draft} />
         </div>
       </fieldset>
+      <div className="h-20" aria-hidden="true" />
+      <div role="toolbar" aria-label="Exam editing tools" className="fixed inset-x-2 bottom-3 z-40 mx-auto flex w-fit max-w-[96vw] flex-wrap items-center justify-center gap-1 rounded-2xl border bg-white p-2 shadow-xl dark:bg-slate-900">
+        {draft.mode === "app" && <><span className="px-2 text-sm" aria-live="polite">{draft.questions.length} questions</span>
+          <Button variant="secondary" disabled={saving} onClick={appendQuestion}><Plus size={16}/> Add question</Button></>}
+        <Button disabled={saving} variant="secondary" onClick={() => void saveCurrent(true)}>Save here</Button>
+        <Button disabled={saving} onClick={() => void saveCurrent()}><Save size={16}/>{saving ? "Saving…" : "Save exam"}</Button>
+        {saveError ? <span role="alert" className="text-xs text-rose-700">{saveError}</span> : savedAt && <span role="status" className="text-xs">Last saved {savedAt}</span>}
+        <Button variant="ghost" aria-label="Go to top" onClick={() => window.scrollTo(0,0)}>↑</Button>
+        <Button variant="ghost" aria-label="Go to bottom" onClick={() => window.scrollTo(0,document.documentElement.scrollHeight)}>↓</Button>
+      </div>
     </motion.div>
   );
 };
@@ -1786,7 +1691,7 @@ const QuestionBuilder = ({
   setDraft: Dispatch<SetStateAction<Exam>>;
   promptMic: ReturnType<typeof useSpokenAnswers>;
 }) => {
-  const addQuestion = () => setDraft((current) => ({ ...current, questions: [...current.questions, blankQuestion()] }));
+
 
   return (
     <Card className="space-y-5">
@@ -1795,10 +1700,7 @@ const QuestionBuilder = ({
           <CardTitle>Question builder</CardTitle>
           <CardDescription>Use the editor toolbar for text styling, equations, fractions, powers, division, lists, and images.</CardDescription>
         </div>
-        <Button className="self-start" onClick={addQuestion}>
-          <Plus className="size-4" />
-          Add question
-        </Button>
+
       </div>
 
       <SharedMediaEditor exam={draft} onChange={sharedMedia => setDraft(current => ({ ...current, sharedMedia }))} />
@@ -1998,8 +1900,8 @@ const ImportPage = () => {
     );
   };
 
-  const handleExportTemplate = async () => {
-    const filePath = await exportQuestionTemplate();
+  const handleExportTemplate = async (kind: "standalone" | "reading") => {
+    const filePath = await exportQuestionTemplate(kind);
     if (filePath) {
       setTemplateSavedPath(filePath);
     }
@@ -2073,9 +1975,10 @@ const ImportPage = () => {
               its questions after [QUESTIONS], and [/PASSAGE] after the last answer.
             </CardDescription>
           </div>
-          <Button variant="secondary" onClick={() => void handleExportTemplate()}>
+          <Button variant="secondary" onClick={() => void handleExportTemplate("standalone")}>Download standalone exam template</Button>
+          <Button variant="secondary" onClick={() => void handleExportTemplate("reading")}>
             <Download className="size-4" />
-            Download sample template
+            Download comprehension exam template
           </Button>
         </div>
 
@@ -2752,6 +2655,7 @@ const SettingsPage = () => {
   const [bindingStudents, setBindingStudents] = useState<LmsStudent[]>([]);
   const [settingsUpdateState, setSettingsUpdateState] = useState<AppUpdateState | null>(initialUpdateState);
   const [adminAdvancedUnlocked, setAdminAdvancedUnlocked] = useState(false);
+  const codeEdit = useRef(0);
   const [adminPinAttempt, setAdminPinAttempt] = useState("");
   const [adminUnlockError, setAdminUnlockError] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("overview");
@@ -2958,6 +2862,7 @@ const SettingsPage = () => {
     );
   };
   const setPackageStartCode = async (value: string) => {
+    const edit = ++codeEdit.current;
     const code = normalizeStartCode(value);
     if (!code) {
       updatePackage((current) => ({
@@ -2973,6 +2878,7 @@ const SettingsPage = () => {
 
     const salt = createStartCodeSalt();
     const hash = await hashExamStartCode(code, salt);
+    if (edit !== codeEdit.current) return;
     updatePackage((current) => ({
       ...current,
       studentAccessPolicy: {
@@ -3028,6 +2934,8 @@ const SettingsPage = () => {
   };
 
   const selectPackage = (nextPackage: ExamConfigPackage | null) => {
+    codeEdit.current++;
+    setBindingCourseWork([]);
     setSelectedPackageId(nextPackage?.id ?? "");
     syncStructuredEditors(nextPackage);
     setPackageDirty(false);
@@ -5445,6 +5353,7 @@ const SettingsPage = () => {
               <LabelledField label="Set or replace start code">
                 <Input
                   type="password"
+                  key={packageDraft.id}
                   placeholder={hasExamStartCode(packageDraft.studentAccessPolicy) ? "Enter a new code to replace" : "Enter code students will use"}
                   onChange={(event) => void setPackageStartCode(event.target.value)}
                 />
@@ -5897,6 +5806,10 @@ const SettingsPage = () => {
 
         <Card className="space-y-5">
           <CardTitle>Kiosk / Lockdown</CardTitle>
+          <label className="flex items-center gap-3"><input type="checkbox" checked={settings.allowDemonstrations===true}
+            onChange={e=>updateSettings(current=>({...current,allowDemonstrations:e.target.checked}))}/>
+            Enable teacher demonstrations with projectors and screen recording</label>
+          <p className="text-sm">Save settings and select Demonstrate exam on the teacher dashboard. Demonstrations use practice answers.</p>
           <LabelledField label="Invigilator unlock PIN">
             <Input
               type="password"
@@ -5938,7 +5851,7 @@ const SettingsPage = () => {
             >
               <option value="light">Light</option>
               <option value="dark">Dark</option>
-              <option value="system">System</option>
+              <option value="system">System</option><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="plum">Plum</option>
             </select>
           </LabelledField>
           <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
@@ -6288,6 +6201,7 @@ const UpdateBanner = ({ state }: { state: AppUpdateState }) => {
 };
 
 const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
+  const editing=useLocation().pathname.startsWith("/teacher/builder");
   const label = state?.currentVersion ? `Lockedscreen v${state.currentVersion}` : `Lockedscreen v${desktopPackage.version}`;
   const status =
     state?.channel === "microsoft-store"
@@ -6354,7 +6268,7 @@ const AppVersionStatus = ({ state }: { state: AppUpdateState | null }) => {
                 };
 
   return (
-    <div className="fixed bottom-3 right-3 z-40 max-w-[calc(100vw-1.5rem)]">
+    <div className={editing ? "mx-auto mb-24 w-fit max-w-full" : "fixed bottom-3 right-3 z-40 max-w-[calc(100vw-1.5rem)]"}>
       <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-800 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 dark:text-slate-100 sm:flex-row sm:items-center">
         <div className="min-w-0">
           <span>{label}</span>
@@ -6490,6 +6404,9 @@ const StudentExamPage = () => {
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const mic = useSpokenAnswers();
+  const [ready, setReady] = useState(false);
+  const [checkpointError,setCheckpointError] = useState("");
+  const [retrySave,retryCheckpoint] = useState(0);
   const [expired, setExpired] = useState(false);
   const busy = useRef(false);
   const [submitted, setSubmitted] = useState(false);
@@ -6545,23 +6462,26 @@ const StudentExamPage = () => {
     }
 
     sessionEndedRef.current = false;
-    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app" }).then(started => {
-      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate, new Date(started.activeSession.startedAt)));
+    let mounted = true;
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "app", candidate:launchCandidate }).then(started => {
+      if (!mounted || !started?.activeSession || !exam) return;
+      const restored=started.attemptProgress;
+      setSession(restored?.session ?? createSession(exam,launchCandidate,new Date(started.activeSession.startedAt)));
+      setCurrentIndex(Math.min(restored?.questionIndex ?? 0,Math.max(0,exam.questions.length-1)));
+      mic.answers.current={...restored?.session.spokenAnswers};
+      if (started.activeSubmission) { setSubmissionResult(started.activeSubmission); setSubmitted(true); }
+      setReady(true);
     });
-  }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
+    return () => { mounted=false; };
+  }, [beginSession, sessionExamId, sessionPackageId]);
 
   useEffect(() => {
-    if (!exam) {
-      return;
-    }
-
-    setSession(createSession(exam, launchCandidate));
-    setCurrentIndex(0);
-    setSubmitted(false);
-    setSubmitting(false);
-    setTurningIn(false);
-    setSubmissionResult(null);
-  }, [sessionExamId, location.search]);
+    if (!ready || !locked || !session || submitted || submitting) return;
+    let latest=true;
+    void window.lockedscreenApi.saveProgress({session:{...session,spokenAnswers:{...mic.answers.current}},questionIndex:currentIndex})
+      .then(()=>{if(latest) setCheckpointError("");},()=>{if(latest) setCheckpointError("Your latest changes could not be saved on this device.");});
+    return ()=>{latest=false;};
+  },[ready,locked,session,currentIndex,mic.revision,submitted,submitting,retrySave]);
 
   const finalize = async () => {
     if (submitted || busy.current || !session || !exam) {
@@ -6603,7 +6523,7 @@ const StudentExamPage = () => {
   }
 
   const question = exam.questions[currentIndex];
-  if (!locked && !submitted && !sessionEndedRef.current) {
+  if ((!locked || !ready) && !submitted && !sessionEndedRef.current) {
     return <ExamStartupStatus error={error} onBack={() => navigate("/student", { replace: true })} />;
   }
   const response = session.responses.find((entry) => entry.questionId === question?.id);
@@ -6620,6 +6540,7 @@ const StudentExamPage = () => {
       verifyPinInMain
       onUnlock={releaseToStudentPortal}
     >
+      {checkpointError && <p role="alert">{checkpointError} <Button onClick={()=>retryCheckpoint(n=>n+1)}>Retry save</Button></p>}
       {submitted ? (
         <div className="space-y-4">
           <Card className="space-y-4 border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-50">
@@ -6692,7 +6613,7 @@ const StudentExamPage = () => {
               <Badge className="bg-slate-900 text-white">{question.points} pt</Badge>
             </div>
             {question.listening && <ListeningPlayer key={question.id} clip={question.listening}
-              attemptKey={JSON.stringify([sessionExamId, snapshot?.activeSession?.startedAt, question.id])}/>}
+              attemptKey={JSON.stringify([sessionPackageId, session.startedAt, session.candidate.id, question.id])}/>}
             {question.spokenAnswer && <SpeakingControl id={question.id} mic={mic}/>}
 
             <QuestionMedia exam={exam} questionId={question.id} />
@@ -6862,10 +6783,13 @@ const LinkExamPage = () => {
     }
 
     sessionEndedRef.current = false;
-    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link" }).then(started => {
-      if (started?.activeSession && exam) setSession(createSession(exam, launchCandidate, new Date(started.activeSession.startedAt)));
+    let mounted=true;
+    void beginSession({ examId: sessionExamId, packageId: sessionPackageId, mode: "link", candidate:launchCandidate }).then(started => {
+      if (!mounted || !started?.activeSession || !exam) return;
+      setSession(started.attemptProgress?.session ?? createSession(exam, launchCandidate, new Date(started.activeSession.startedAt)));
+      if (started.activeSubmission) { setSubmissionResult(started.activeSubmission); setSubmitted(true); }
     });
-
+    return ()=>{mounted=false;};
   }, [beginSession, endCurrentSession, sessionExamId, sessionPackageId]);
 
 
@@ -6875,24 +6799,6 @@ const LinkExamPage = () => {
       setBlockedStep(state === "blocked" ? step : undefined);
     });
   }, []);
-
-  useEffect(() => {
-    if (!exam) {
-      return;
-    }
-
-    setSession(createSession(exam, launchCandidate));
-    setExpired(false);
-    setSubmitted(false);
-    setSubmitting(false);
-    setTurningIn(false);
-    setSubmissionResult(null);
-    setHostedSubmitDetected(false);
-    setWebsiteAuthState("exam");
-    setConfirmation(null);
-    setHostedError(null);
-    submissionBusyRef.current = false;
-  }, [sessionExamId, location.search]);
 
   useEffect(() => {
     const view = webviewRef.current;
@@ -7542,6 +7448,27 @@ const StudentShell = ({
     </motion.div>
   );
 };
+
+function DemonstrationPage() {
+  const {examId}=useParams();
+  const {snapshot}=useLockedscreenStore();
+  const exam=snapshot?.exams.find(e=>e.id===examId);
+  const [index,setIndex]=useState(0);
+  const [answers,setAnswers]=useState<Record<string,string>>({});
+  const navigate=useNavigate();
+  if (!exam || !snapshot?.settings.allowDemonstrations || snapshot.activeSession) return <p>Enable demonstrations in teacher settings.</p>;
+  const q=exam.questions[index];
+  return <Card className="space-y-4"><Badge>Teacher demonstration</Badge><CardTitle>{exam.title}</CardTitle>
+    <p>{exam.instructions}</p>
+    {q && exam.mode==="app" ? <><h2>Question {index+1} of {exam.questions.length}</h2>
+      <QuestionPassages exam={exam} questionId={q.id}/><RichContent content={q.prompt}/><QuestionMedia exam={exam} questionId={q.id}/>
+      {q.listening && <audio controls src={q.listening.src}/>}
+      {q.options.map(option=><label className="flex items-center gap-2" key={option.id}><input type="radio" name={q.id} checked={answers[q.id]===option.id}
+        onChange={()=>setAnswers(previous=>({...previous,[q.id]:option.id}))}/><RichContent content={option.content}/></label>)}
+      <Button disabled={!index} onClick={()=>setIndex(i=>i-1)}>Previous</Button> <Button disabled={index+1>=exam.questions.length} onClick={()=>setIndex(i=>i+1)}>Next</Button></> :
+      <ExamPreviewCard exam={exam}/>}
+    <Button variant="secondary" onClick={()=>navigate("/teacher")}>End demonstration</Button></Card>;
+}
 
 const ExamPreviewCard = ({ exam }: { exam: Exam }) => {
   const [selectedId, setSelectedId] = useState("");

@@ -33,6 +33,7 @@ test('actual main submission handler serializes saves and recovers the existing 
     const isSession = value => value?.examId === 'practice';
     const getActivePackage = () => ({ id: 'package', externalDeliveryMode: 'lockdown-only' });
     const getActiveSession = () => ({ examId: 'practice' });
+    const attempts = {progress:{session:{}}, complete:async()=>{}};
     const withRuntime = value => value;
     const syncSubmissionResultsInternal = async () => {};
     const handleIpc = (_channel, callback) => { listener = callback; };

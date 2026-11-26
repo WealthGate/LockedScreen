@@ -18,6 +18,7 @@ await build({ entryPoints: [new URL("../src/google.ts", import.meta.url).pathnam
 const { googleProvider, scopesFor } = await import(pathToFileURL(googleFile).href);
 const SQL = await initSqlJs();
 const schema = await readFile(new URL("../migrations/0001_oauth.sql", import.meta.url), "utf8");
+const attemptSchema = await readFile(new URL("../migrations/0002_exam_attempts.sql", import.meta.url),"utf8");
 const origin = "https://auth.whsdominica.com";
 const secret = Buffer.alloc(32, 7).toString("base64");
 const verifier = "a".repeat(43);
@@ -25,7 +26,7 @@ const sha = async (value) => Buffer.from(await crypto.subtle.digest("SHA-256", n
 
 function fixture() {
   const sqlite = new SQL.Database();
-  sqlite.run(schema);
+  sqlite.run(schema); sqlite.run(attemptSchema);
   const DB = { prepare(sql) {
     let values = [];
     const run = () => {
@@ -210,3 +211,22 @@ test("OAuth library verifies Google signature, nonce, audience and required perm
   } finally { globalThis.fetch = originalFetch; }
 });
 test.after(async () => { await rm(directory, { recursive: true, force: true }); });
+
+test("one online attempt per signed-in account and package across devices",async()=>{
+  const service=fixture();
+  const original=globalThis.fetch;
+  globalThis.fetch=async()=>Response.json({sub:"verified-user",name:"Test Student",email:"test@example.com",email_verified:true});
+  const request=(path,body)=>service.fetch(path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer synthetic"},body:JSON.stringify(body)});
+  const claim=(lease,packageId="package")=>request("/v1/attempt/claim",{provider:"google",packageId,lease});
+  try {
+    const [a,b]=await Promise.all([claim("a".repeat(43)),claim("b".repeat(43))]);
+    assert.deepEqual([a.status,b.status].sort(),[200,409]);
+    const winner=a.ok?"a":"b";
+    const first=await (a.ok?a:b).json();
+    assert.equal(first.repeated,false);
+    assert.equal((await (await claim(winner.repeat(43))).json()).repeated,true);
+    assert.equal((await request("/v1/attempt/complete",{lease:first.receipt})).status,200);
+    assert.equal((await claim(winner.repeat(43))).status,409);
+    assert.equal((await claim(winner.repeat(43),"different-package")).status,200);
+  } finally { globalThis.fetch=original; }
+});
