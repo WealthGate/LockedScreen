@@ -769,31 +769,41 @@ const AppFrame = () => {
     );
   }
 
+  const themeControl = (
+    <label className="inline-flex w-fit max-w-full items-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-3 text-sm font-medium text-white focus-within:ring-2 focus-within:ring-teal-300">
+      <Sun aria-hidden="true" className="size-4 shrink-0 text-teal-300" />
+      <span>Theme</span>
+      <select aria-label="Workspace theme" className="h-10 cursor-pointer rounded bg-slate-800 pl-1 text-white" value={preferredTheme}
+        onChange={event => { localStorage.setItem(themeKey, event.target.value); refreshTheme(value => value + 1); }}>
+        {["system", "light", "dark", "ocean", "forest", "plum"].map(theme =>
+          <option key={theme} value={theme}>{theme.charAt(0).toUpperCase() + theme.slice(1)}</option>
+        )}
+      </select>
+    </label>
+  );
+
   return (
     <div className={`min-h-screen min-w-0 max-w-full overflow-x-hidden text-slate-900 dark:text-slate-100 ${isStudentRoute ? "p-2 sm:p-3" : "p-3 sm:p-6"}`}>
-      <label className="relative z-10 ml-auto mb-1 flex w-fit items-center gap-2 rounded-lg bg-white px-2 py-1 text-xs text-slate-900">Theme
-        <select aria-label="Workspace theme" value={preferredTheme} onChange={e => { localStorage.setItem(themeKey,e.target.value); refreshTheme(n=>n+1); }}>
-          {(["system","light","dark","ocean","forest","plum"] as const).map(t=><option key={t} value={t}>{t}</option>)}
-        </select></label>
+
       {canShowUpdates && updateState ? <UpdateBanner state={updateState} /> : null}
       {installedRole === "student" ? (
         <Routes location={examRoute ?? location}>
-          <Route path="/" element={<StudentPortalPage studentOnly />} />
-          <Route path="/student" element={<StudentPortalPage studentOnly />} />
+          <Route path="/" element={<StudentPortalPage themeControl={themeControl} studentOnly />} />
+          <Route path="/student" element={<StudentPortalPage themeControl={themeControl} studentOnly />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
           <Route path="/link/:examId" element={<LinkExamPage />} />
           <Route path="/package-import" element={<PackageImportPage launchContext={launchContext} />} />
-          <Route path="*" element={<StudentPortalPage studentOnly />} />
+          <Route path="*" element={<StudentPortalPage themeControl={themeControl} studentOnly />} />
         </Routes>
       ) : (
         <Routes location={examRoute ?? location}>
-          <Route path="/" element={<ProfileSelectPage launchContext={launchContext} />} />
-          <Route path="/student" element={<StudentPortalPage />} />
+          <Route path="/" element={<ProfileSelectPage themeControl={themeControl} launchContext={launchContext} />} />
+          <Route path="/student" element={<StudentPortalPage themeControl={themeControl} />} />
           <Route path="/session/:examId" element={<StudentExamPage />} />
           <Route path="/link/:examId" element={<LinkExamPage />} />
           <Route path="/package-import" element={<PackageImportPage launchContext={launchContext} />} />
-          <Route path="/teacher/*" element={<TeacherShell launchContext={launchContext} />} />
-          <Route path="*" element={<ProfileSelectPage launchContext={launchContext} />} />
+          <Route path="/teacher/*" element={<TeacherShell themeControl={themeControl} launchContext={launchContext} />} />
+          <Route path="*" element={<ProfileSelectPage themeControl={themeControl} launchContext={launchContext} />} />
         </Routes>
       )}
       {!activeSession && launchContext?.route ? (
@@ -823,7 +833,7 @@ const LaunchContextNavigator = ({ route, navigationKey }: { route: string; navig
   return null;
 };
 
-const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }) => {
+const TeacherShell = ({ launchContext, themeControl }: { launchContext: LaunchContext | null; themeControl: ReactNode }) => {
   const { error } = useLockedscreenStore();
   const navigate = useNavigate();
 
@@ -831,11 +841,11 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
     <div className="grid min-w-0 gap-4 xl:min-h-[calc(100vh-2rem)] xl:grid-cols-[260px_minmax(0,1fr)] xl:gap-6">
       <aside className="min-w-0 rounded-[28px] border border-white/60 bg-slate-950/90 p-4 text-white shadow-2xl shadow-slate-900/30 sm:p-6 xl:rounded-[32px]">
         <div className="mb-5 flex min-w-0 items-center gap-3 xl:mb-10">
-          <div className="rounded-2xl bg-teal-500/20 p-3 text-teal-200">
+          <div className="shrink-0 rounded-2xl bg-teal-500/20 p-2 text-teal-200">
             <img className="size-10 rounded-lg" src={schoolLogo} alt="LockedScreen"/>
           </div>
           <div className="min-w-0">
-            <div className="break-words text-sm uppercase tracking-[0.3em] text-slate-400">LOCKEDSCREEN</div>
+            <div className="whitespace-nowrap text-xs font-semibold tracking-[0.1em] text-slate-300">LOCKEDSCREEN</div>
             <div className="text-xl font-semibold">Exam Control</div>
           </div>
         </div>
@@ -859,6 +869,7 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
             );
           })}
         </nav>
+        <div className="mt-4">{themeControl}</div>
 
         <Card className="mt-5 border-none bg-slate-900 p-4 text-white sm:p-5 xl:mt-10">
           <CardTitle className="text-white">Deployment note</CardTitle>
@@ -910,7 +921,7 @@ const TeacherShell = ({ launchContext }: { launchContext: LaunchContext | null }
   );
 };
 
-const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | null }) => {
+const ProfileSelectPage = ({ launchContext, themeControl }: { launchContext: LaunchContext | null; themeControl: ReactNode }) => {
   const navigate = useNavigate();
   const { snapshot } = useLockedscreenStore();
   const readyExams = snapshot?.exams ?? [];
@@ -921,7 +932,7 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
         <Card className="relative overflow-hidden bg-slate-950 p-5 text-white sm:p-8">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.35),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.25),transparent_30%)]" />
           <div className="relative space-y-6">
-            <img className="size-16 rounded-xl" src={schoolLogo} alt="LockedScreen"/>
+            <div className="flex flex-wrap items-center justify-between gap-3"><img className="size-16 rounded-xl" src={schoolLogo} alt="LockedScreen"/>{themeControl}</div>
             <div className="space-y-3">
               <h1 className="break-words text-3xl font-semibold tracking-tight sm:text-4xl">Choose how you are using the exam app.</h1>
               <p className="max-w-2xl text-sm leading-7 text-slate-300">
@@ -967,7 +978,7 @@ const ProfileSelectPage = ({ launchContext }: { launchContext: LaunchContext | n
   );
 };
 
-const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) => {
+const StudentPortalPage = ({ studentOnly = false, themeControl }: { studentOnly?: boolean; themeControl: ReactNode }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { snapshot, launchAlternateDesktopSession, hideExamForStudent, importConfigPackage, error } = useLockedscreenStore();
@@ -1098,7 +1109,7 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
         <Card className="relative overflow-hidden bg-slate-950 text-white">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(20,184,166,0.35),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(14,165,233,0.24),transparent_26%)]" />
           <div className="relative space-y-5">
-            <Badge className="bg-white/10 text-white">Student profile</Badge>
+            <div className="flex flex-wrap items-center justify-between gap-3"><Badge className="bg-white/10 text-white">Student profile</Badge>{themeControl}</div>
             <div>
               <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">Find the exams assigned to you, then begin.</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
