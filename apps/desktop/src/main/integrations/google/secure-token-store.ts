@@ -2,6 +2,7 @@ export interface OAuthTokenBundle {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string;
+  hostedSessionToken?: string;
 }
 
 /**

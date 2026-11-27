@@ -101,11 +101,11 @@ const buildQuestionReview = (exam: Exam, submission: SubmissionResult): StudentP
 };
 
 export const buildStudentPerformanceReport = (exam: Exam, submission: SubmissionResult): StudentPerformanceReport => {
-  const questions = buildQuestionReview(exam, submission);
+  const questions = exam.mode === "link" ? [] : buildQuestionReview(exam, submission);
   const title = `${exam.title || submission.examTitle || "Exam"} - Performance Report`;
   const studentClass = submission.candidateClassName || exam.className || exam.form || "Not provided";
-  const score = `${formatNumber(submission.score)} / ${formatNumber(submission.totalPoints)}`;
-  const percentage = `${formatNumber(submission.percentage)}%`;
+  const score = exam.mode === "link" ? "Managed by the form provider" : `${formatNumber(submission.score)} / ${formatNumber(submission.totalPoints)}`;
+  const percentage = exam.mode === "link" ? "Not available in this session record" : `${formatNumber(submission.percentage)}%`;
   const questionText =
     questions.length > 0
       ? questions
@@ -135,6 +135,7 @@ export const buildStudentPerformanceReport = (exam: Exam, submission: Submission
     "SCORE SUMMARY",
     `Score: ${score}`,
     `Percentage: ${percentage}`,
+    ...(exam.mode === "link" ? ["This local record does not verify that the form provider received a response."] : []),
     "",
     "QUESTION REVIEW",
     questionText,

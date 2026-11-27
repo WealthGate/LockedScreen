@@ -107,3 +107,12 @@ test("removes executable markup and safely handles invalid entities", () => {
   assert.equal(text, "Safe & clear");
   assert.doesNotMatch(text, /window\.evil|display:none/);
 });
+
+test('linked exam reports never present placeholder scores or legacy questions as form results', () => {
+  const report = buildStudentPerformanceReport({ ...exam, mode: 'link' }, { ...submission, score: 0, totalPoints: 0, percentage: 0 });
+  assert.deepEqual(report.questions, []);
+  assert.match(report.plainText, /Managed by the form provider/);
+  assert.match(report.plainText, /does not verify/);
+  assert.match(report.html, /Managed by the form provider/);
+  assert.doesNotMatch(report.plainText, /Score: 0|Percentage: 0%|Your answer:/);
+});

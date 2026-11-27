@@ -6,14 +6,14 @@ import type {
   SubmissionResult
 } from "@lockedscreen/shared-types";
 
+export * from "./shared-media";
+export * from "./reading-passages";
+
 const addMinutes = (input: Date, minutes: number): Date => {
-  const copy = new Date(input);
-  copy.setMinutes(copy.getMinutes() + minutes);
-  return copy;
+  return new Date(input.getTime() + minutes * 60000);
 };
 
-export const createSession = (exam: Exam, candidate: Candidate): ExamSession => {
-  const startedAt = new Date();
+export const createSession = (exam: Exam, candidate: Candidate, startedAt = new Date()): ExamSession => {
 
   return {
     examId: exam.id,
@@ -62,6 +62,15 @@ export const scoreSubmission = (
     return response?.selectedOptionId === question.correctOptionId ? sum + question.points : sum;
   }, 0);
   const percentage = totalPoints === 0 ? 0 : Number(((score / totalPoints) * 100).toFixed(2));
+  const recordings: Record<string, string> = Object.create(null);
+  let bytes = 0;
+  for (const q of exam.questions) {
+    const value = session.spokenAnswers?.[q.id];
+    if (exam.mode !== "app" || !q.spokenAnswer || value === undefined) continue;
+    if (typeof value !== "string" || value.length > 1000000 || (bytes += value.length) > 16000000 ||
+      !/^data:audio\/webm;base64,[a-zA-Z0-9+/]+=*$/.test(value)) throw new Error("Invalid or oversized spoken answer.");
+    recordings[q.id] = value;
+  }
 
   return {
     id: `${exam.id}-${session.candidate.id}-${submittedAt.getTime()}`,
@@ -75,6 +84,8 @@ export const scoreSubmission = (
     totalPoints,
     percentage,
     responses: session.responses,
+    ...(Object.keys(recordings).length ? { spokenAnswers: recordings } : {}),
+    ...(exam.mode === "link" && ["attempted", "not-attempted"].includes(session.linkedTimeout ?? "") ? { linkedTimeout: session.linkedTimeout } : {}),
     syncStates: []
   };
 };

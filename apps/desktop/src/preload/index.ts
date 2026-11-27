@@ -16,6 +16,7 @@ import type {
   LmsCourseWork,
   LmsStudent,
   NavigationGuard,
+  HostedWebsiteAuthState,
   ResultDestination,
   SecurityProfile,
   SessionStartRequest,
@@ -33,9 +34,12 @@ export interface LockedscreenApi {
   getLaunchContext: () => Promise<LaunchContext>;
   onLaunchContextChanged: (callback: (context: LaunchContext) => void) => () => void;
   onSessionExitBlocked: (callback: (payload: { reason?: string }) => void) => () => void;
+  onSessionSecurityHold: (callback: () => void) => () => void;
   onEmbeddedGoogleSignInBlocked: (callback: (payload: { url?: string }) => void) => () => void;
+  onHostedWebsiteAuthState: (callback: (state: HostedWebsiteAuthState, step?: string) => void) => () => void;
   refreshSecurityOverview: () => Promise<AppStateSnapshot>;
   saveExam: (exam: Exam) => Promise<AppStateSnapshot>;
+  preparePromptMic: () => Promise<void>;
   deleteExam: (examId: string) => Promise<AppStateSnapshot>;
   hideExamForStudent: (payload: { examId: string; candidateId: string }) => Promise<AppStateSnapshot>;
   saveSettings: (settings: AppSettings) => Promise<AppStateSnapshot>;
@@ -60,14 +64,18 @@ export interface LockedscreenApi {
   }>;
   importConfigPackage: (payload?: { filePath?: string; password?: string }) => Promise<AppStateSnapshot | null>;
   importQuestions: () => Promise<ImportPreview | null>;
-  exportQuestionTemplate: () => Promise<string | null>;
+  exportQuestionTemplate: (kind?: "standalone" | "reading") => Promise<string | null>;
   exportResultsCsv: (examId?: string) => Promise<string | null>;
   syncSubmissionResults: (submissionId: string) => Promise<AppStateSnapshot>;
   syncPendingResults: () => Promise<AppStateSnapshot>;
   captureScreenshot: () => Promise<string | null>;
   openGoogleAppsScript: () => Promise<void>;
+  openClassroomSetupGuide: () => Promise<void>;
+  identifyStudent: (id:string) => Promise<Candidate & {subject:string}>;
+  authorizeResume: (id:string,pin:string,minutes?:number) => Promise<void>;
+  saveProgress: (progress: import("@lockedscreen/shared-types").AttemptProgress) => Promise<void>;
   beginSession: (request: SessionStartRequest) => Promise<AppStateSnapshot>;
-  endSession: (reason?: string) => Promise<AppStateSnapshot>;
+  endSession: (reason?: string, pin?: string) => Promise<AppStateSnapshot>;
   launchApprovedApplication: (payload: { packageId: string; appId: string }) => Promise<AppStateSnapshot>;
   submitExam: (payload: {
     exam: Exam;
@@ -76,6 +84,7 @@ export interface LockedscreenApi {
   turnInStudentLms: (payload: {
     submissionId: string;
     packageId: string;
+    pin?: string;
   }) => Promise<{ state: StudentLmsTurnInState; submission: SubmissionResult; snapshot: AppStateSnapshot }>;
   setAssistKiosk: (enabled: boolean) => Promise<void>;
   setNavigationGuard: (guard: NavigationGuard | null) => Promise<void>;
@@ -104,13 +113,24 @@ const api: LockedscreenApi = {
     ipcRenderer.on("session:exitBlocked", listener);
     return () => ipcRenderer.removeListener("session:exitBlocked", listener);
   },
+  onSessionSecurityHold: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("session:securityHold", listener);
+    return () => ipcRenderer.removeListener("session:securityHold", listener);
+  },
   onEmbeddedGoogleSignInBlocked: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { url?: string }) => callback(payload);
     ipcRenderer.on("session:embeddedGoogleSignInBlocked", listener);
     return () => ipcRenderer.removeListener("session:embeddedGoogleSignInBlocked", listener);
   },
+  onHostedWebsiteAuthState: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: HostedWebsiteAuthState, step?: string) => callback(state, step);
+    ipcRenderer.on("session:websiteAuthState", listener);
+    return () => ipcRenderer.removeListener("session:websiteAuthState", listener);
+  },
   refreshSecurityOverview: () => ipcRenderer.invoke("security:refreshOverview"),
   saveExam: (exam) => ipcRenderer.invoke("exam:save", exam),
+  preparePromptMic: () => ipcRenderer.invoke("exam:preparePromptMic"),
   deleteExam: (examId) => ipcRenderer.invoke("exam:delete", examId),
   hideExamForStudent: (payload) => ipcRenderer.invoke("exam:hideForStudent", payload),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
@@ -132,14 +152,18 @@ const api: LockedscreenApi = {
   publishConfigPackageToClassroom: (payload) => ipcRenderer.invoke("configPackage:publishToClassroom", payload),
   importConfigPackage: (payload) => ipcRenderer.invoke("configPackage:import", payload),
   importQuestions: () => ipcRenderer.invoke("import:questions"),
-  exportQuestionTemplate: () => ipcRenderer.invoke("import:exportQuestionTemplate"),
+  exportQuestionTemplate: kind => ipcRenderer.invoke("import:exportQuestionTemplate", kind),
   exportResultsCsv: (examId) => ipcRenderer.invoke("results:exportCsv", examId),
   syncSubmissionResults: (submissionId) => ipcRenderer.invoke("results:syncSubmission", submissionId),
   syncPendingResults: () => ipcRenderer.invoke("results:syncPending"),
   captureScreenshot: () => ipcRenderer.invoke("window:captureScreenshot"),
   openGoogleAppsScript: () => ipcRenderer.invoke("help:openGoogleAppsScript"),
+  openClassroomSetupGuide: () => ipcRenderer.invoke("classroom:openSetupGuide"),
+  identifyStudent: id => ipcRenderer.invoke("attempt:identify",id),
+  authorizeResume: (id,pin,minutes) => ipcRenderer.invoke("attempt:authorize",id,pin,minutes),
+  saveProgress: progress => ipcRenderer.invoke("attempt:save",progress),
   beginSession: (request) => ipcRenderer.invoke("session:begin", request),
-  endSession: (reason) => ipcRenderer.invoke("session:end", reason),
+  endSession: (reason, pin) => ipcRenderer.invoke("session:end", reason, pin),
   launchApprovedApplication: (payload) => ipcRenderer.invoke("applications:launch", payload),
   submitExam: (payload) => ipcRenderer.invoke("exam:submit", payload),
   turnInStudentLms: (payload) => ipcRenderer.invoke("studentLms:turnIn", payload),

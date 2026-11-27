@@ -2,7 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { URL, URLSearchParams } from "node:url";
 
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
+import { usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
+import { beginHostedGoogleSignIn, refreshHostedGoogleToken, disconnectHostedGoogle } from "./integrations/google/hosted-google-oauth";
 
 import type {
   Exam,
@@ -15,10 +17,11 @@ import type {
 
 import { buildStudentPerformanceReport } from "./student-performance-report";
 
-interface StudentOAuthTokens {
+export interface StudentOAuthTokens {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string;
+  sessionToken?: string;
 }
 
 interface SubmissionArtifact {
@@ -41,6 +44,9 @@ interface MicrosoftUploadedFile {
 
 interface TurnInOptions {
   teacherAccessToken?: string;
+  teacherAccessTokenError?: string;
+  studentAccessToken?: string;
+  allowInteractiveSignIn?: boolean;
 }
 
 const toBase64Url = (input: Buffer): string =>
@@ -167,7 +173,7 @@ const buildSubmissionArtifact = async (
 const createAuthorizationListener = async (
   provider: StudentLmsProviderType,
   expectedState: string
-): Promise<{ redirectUri: string; waitForCode: () => Promise<string> }> =>
+): Promise<{ redirectUri: string; waitForCode: () => Promise<string>; cancel: () => void }> =>
   new Promise((resolve, reject) => {
     const server = createServer((request, response) => {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -221,6 +227,11 @@ const createAuthorizationListener = async (
 
       resolve({
         redirectUri: `http://127.0.0.1:${address.port}/callback`,
+        cancel: () => {
+          if (timeout) clearTimeout(timeout);
+          server.close();
+          pendingReject?.(new Error("Student sign-in was cancelled."));
+        },
         waitForCode: () =>
           new Promise<string>((resolveCode, rejectCode) => {
             pendingResolve = resolveCode;
@@ -308,7 +319,10 @@ const exchangeAuthorizationCode = async (
   };
 };
 
-const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWindow | null): Promise<StudentOAuthTokens> => {
+export const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWindow | null, examSession = false): Promise<StudentOAuthTokens> => {
+  if (binding.provider === "google-classroom" && usesPublisherGoogleConnection(binding.googleAuthMode, binding.clientId)) {
+    return beginHostedGoogleSignIn("student", (url) => shell.openExternal(url), examSession);
+  }
   if (!binding.clientId.trim()) {
     throw new Error("This package is missing the LMS OAuth client ID.");
   }
@@ -333,6 +347,14 @@ const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWi
 
   const authUrl = new URL(providerAuthorizeUrl(binding));
   params.forEach((value, key) => authUrl.searchParams.set(key, value));
+  if (binding.provider === "google-classroom") {
+    const code = authorization.waitForCode();
+    void code.catch(() => {});
+    try {
+      await shell.openExternal(authUrl.toString());
+      return await exchangeAuthorizationCode(binding, await code, authorization.redirectUri, pkce.verifier);
+    } finally { authorization.cancel(); }
+  }
   const authWindow = await openOAuthWindow(parentWindow, authUrl.toString());
 
   try {
@@ -343,10 +365,30 @@ const signInStudent = async (binding: StudentLmsBinding, parentWindow: BrowserWi
     const code = await Promise.race([codePromise, closedPromise]);
     return exchangeAuthorizationCode(binding, code, authorization.redirectUri, pkce.verifier);
   } finally {
+    authorization.cancel();
     if (!authWindow.isDestroyed()) {
       authWindow.close();
     }
   }
+};
+
+export const refreshStudentSignIn = async (binding: StudentLmsBinding, tokens: StudentOAuthTokens): Promise<StudentOAuthTokens> => {
+  if (tokens.expiresAt && Date.parse(tokens.expiresAt) > Date.now() + 60_000) return tokens;
+  if (tokens.sessionToken) {
+    const refreshed = await refreshHostedGoogleToken(tokens.sessionToken);
+    return { ...tokens, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt };
+  }
+  if (!tokens.refreshToken) throw new Error("Student Google authorization expired. The result is saved; ask the invigilator to release the exam before reconnecting. Lockdown has not been released.");
+  const body = new URLSearchParams({ client_id: binding.clientId, grant_type: "refresh_token", refresh_token: tokens.refreshToken });
+  if (binding.clientSecret?.trim()) body.set("client_secret", binding.clientSecret.trim());
+  const response = await fetch(providerTokenUrl(binding), { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(20_000) });
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok || typeof payload.access_token !== "string") throw new Error("Student LMS authorization could not be refreshed. The result is saved. Ask the invigilator to release the exam before reconnecting.");
+  return { ...tokens, accessToken: payload.access_token, expiresAt: new Date(Date.now() + Number(payload.expires_in ?? 300) * 1000).toISOString() };
+};
+
+export const disconnectStudentSignIn = async (tokens: StudentOAuthTokens): Promise<void> => {
+  if (tokens.sessionToken) await disconnectHostedGoogle(tokens.sessionToken, false);
 };
 
 const fetchJson = async <T>(url: string, init: RequestInit, fallbackMessage: string): Promise<T> => {
@@ -391,7 +433,7 @@ const uploadGoogleArtifact = async (accessToken: string, artifact: SubmissionArt
   );
   const footer = Buffer.from(`\r\n${delimiter}--`, "utf-8");
 
-  const response = await fetch(
+  const payload = await fetchJson<Record<string, unknown>>(
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
     {
       method: "POST",
@@ -400,11 +442,10 @@ const uploadGoogleArtifact = async (accessToken: string, artifact: SubmissionArt
         "Content-Type": `multipart/related; boundary=${boundary}`
       },
       body: new Uint8Array(Buffer.concat([metadata, artifact.content, footer]))
-    }
+    },
+    "Unable to upload the submission file to Google Drive."
   );
-
-  const payload = (await response.json()) as Record<string, unknown>;
-  if (!response.ok || typeof payload.id !== "string") {
+  if (typeof payload.id !== "string") {
     throw new Error("Unable to upload the submission file to Google Drive.");
   }
 
@@ -418,20 +459,19 @@ const uploadGoogleArtifact = async (accessToken: string, artifact: SubmissionArt
 const readGoogleCourseWorkMaxPoints = async (
   binding: StudentLmsBinding,
   teacherAccessToken: string
-): Promise<number | null> => {
-  const response = await fetch(
+): Promise<number> => {
+  const payload = await fetchJson<Record<string, unknown>>(
     `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}`,
     {
       headers: { Authorization: `Bearer ${teacherAccessToken}` }
-    }
+    },
+    "Unable to read the Classroom assignment points. The grade was not changed; retry grade sync."
   );
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    return null;
-  }
-
   const maxPoints = Number(payload.maxPoints ?? Number.NaN);
-  return Number.isFinite(maxPoints) && maxPoints > 0 ? maxPoints : null;
+  if (!Number.isFinite(maxPoints) || maxPoints <= 0) {
+    throw new Error("This Classroom assignment is ungraded. Set its points in Classroom, then retry grade sync.");
+  }
+  return maxPoints;
 };
 
 const googleGradeValue = async (
@@ -443,23 +483,27 @@ const googleGradeValue = async (
   const totalPoints = Number(submission.totalPoints);
   const score = Number(submission.score);
 
-  if (maxPoints && Number.isFinite(totalPoints) && totalPoints > 0) {
-    return Math.round((score / totalPoints) * maxPoints * 100) / 100;
+  if (!Number.isFinite(totalPoints) || totalPoints <= 0 || !Number.isFinite(score) || score < 0) {
+    throw new Error("The saved submission has no valid scored total. No Classroom grade was changed.");
   }
-
-  return Math.round(score * 100) / 100;
+  return Math.round((score / totalPoints) * maxPoints * 100) / 100;
 };
 
 const syncGoogleClassroomGrade = async (
   binding: StudentLmsBinding,
   teacherAccessToken: string | undefined,
   studentSubmissionId: string,
-  submission: SubmissionResult
+  submission: SubmissionResult,
+  teacherAccessTokenError?: string,
+  gradeManagedExternally = false
 ): Promise<Pick<StudentLmsTurnInState, "gradeSyncStatus" | "gradeSyncedAt" | "gradeValue" | "gradeSyncError">> => {
+  if (gradeManagedExternally) {
+    return { gradeSyncStatus: "skipped", gradeSyncError: "The form provider manages this exam's answers and grade. No Classroom grade was changed by LockedScreen." };
+  }
   if (!teacherAccessToken) {
     return {
-      gradeSyncStatus: "skipped",
-      gradeSyncError:
+      gradeSyncStatus: teacherAccessTokenError ? "failed" : "skipped",
+      gradeSyncError: teacherAccessTokenError ??
         "Grade sync needs the teacher's Google Classroom connection on this device. Student sign-in can turn in work, but students cannot write grades."
     };
   }
@@ -503,7 +547,9 @@ const turnInGoogleClassroom = async (
   accessToken: string,
   artifact: SubmissionArtifact,
   submission: SubmissionResult,
-  options: TurnInOptions = {}
+  options: TurnInOptions = {},
+  gradeManagedExternally = false,
+  recordings: SubmissionArtifact[] = []
 ): Promise<StudentLmsTurnInState> => {
   const baseUrl = `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(binding.courseId)}/courseWork/${encodeURIComponent(binding.assignmentId)}`;
   const submissionList = await fetchJson<{ studentSubmissions?: Array<Record<string, unknown>> }>(
@@ -519,18 +565,21 @@ const turnInGoogleClassroom = async (
   }
 
   if (studentSubmission.state === "TURNED_IN" || studentSubmission.state === "RETURNED") {
-    const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission);
+    const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission, options.teacherAccessTokenError, gradeManagedExternally);
     return {
       provider: "google-classroom",
       status: "success",
       lastAttemptAt: new Date().toISOString(),
       submittedAt: new Date().toISOString(),
       externalReference: `${binding.courseId}/${binding.assignmentId}/${studentSubmission.id}`,
+      studentSubmissionId: studentSubmission.id,
       ...gradeSync
     };
   }
 
   const uploadedFile = await uploadGoogleArtifact(accessToken, artifact);
+  const attachmentIds = [uploadedFile.id];
+  for (const recording of recordings) attachmentIds.push((await uploadGoogleArtifact(accessToken, recording)).id);
   await fetchJson<Record<string, unknown>>(
     `${baseUrl}/studentSubmissions/${encodeURIComponent(studentSubmission.id)}:modifyAttachments`,
     {
@@ -540,13 +589,7 @@ const turnInGoogleClassroom = async (
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        addAttachments: [
-          {
-            driveFile: {
-              id: uploadedFile.id
-            }
-          }
-        ]
+        addAttachments: attachmentIds.map(id => ({ driveFile: { id } }))
       })
     },
     "Unable to attach the Lockedscreen submission to Google Classroom."
@@ -564,7 +607,7 @@ const turnInGoogleClassroom = async (
     "Unable to turn in the Google Classroom submission."
   );
 
-  const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission);
+  const gradeSync = await syncGoogleClassroomGrade(binding, options.teacherAccessToken, studentSubmission.id, submission, options.teacherAccessTokenError, gradeManagedExternally);
 
   return {
     provider: "google-classroom",
@@ -572,6 +615,7 @@ const turnInGoogleClassroom = async (
     lastAttemptAt: new Date().toISOString(),
     submittedAt: new Date().toISOString(),
     externalReference: uploadedFile.webViewLink ?? `${binding.courseId}/${binding.assignmentId}/${studentSubmission.id}`,
+    studentSubmissionId: studentSubmission.id,
     ...gradeSync
   };
 };
@@ -606,7 +650,8 @@ const uploadMicrosoftArtifact = async (
 const turnInMicrosoft365 = async (
   binding: StudentLmsBinding,
   accessToken: string,
-  artifact: SubmissionArtifact
+  artifact: SubmissionArtifact,
+  recordings: SubmissionArtifact[]
 ): Promise<StudentLmsTurnInState> => {
   const baseUrl = `https://graph.microsoft.com/v1.0/education/classes/${encodeURIComponent(binding.courseId)}/assignments/${encodeURIComponent(binding.assignmentId)}`;
   const submissionList = await fetchJson<{ value?: Array<Record<string, unknown>> }>(
@@ -643,7 +688,10 @@ const turnInMicrosoft365 = async (
     throw new Error("Microsoft 365 did not return a submission resources folder.");
   }
 
-  const uploadedFile = await uploadMicrosoftArtifact(accessToken, folder.resourcesFolderUrl, artifact);
+  let reportUrl: string | undefined;
+  for (const file of [artifact, ...recordings]) {
+  const uploadedFile = await uploadMicrosoftArtifact(accessToken, folder.resourcesFolderUrl, file);
+  if (file === artifact) reportUrl = uploadedFile.webUrl;
   await fetchJson<Record<string, unknown>>(
     `${baseUrl}/submissions/${encodeURIComponent(submission.id)}/resources`,
     {
@@ -655,13 +703,14 @@ const turnInMicrosoft365 = async (
       body: JSON.stringify({
         resource: {
           "@odata.type": "#microsoft.graph.educationFileResource",
-          displayName: artifact.fileName,
+          displayName: file.fileName,
           fileUrl: `https://graph.microsoft.com/v1.0/drives/${uploadedFile.driveId}/items/${uploadedFile.itemId}`
         }
       })
     },
     "Unable to attach the Lockedscreen submission to Microsoft 365."
   );
+  }
   await fetchJson<Record<string, unknown>>(
     `${baseUrl}/submissions/${encodeURIComponent(submission.id)}/submit`,
     {
@@ -676,7 +725,7 @@ const turnInMicrosoft365 = async (
     status: "success",
     lastAttemptAt: new Date().toISOString(),
     submittedAt: new Date().toISOString(),
-    externalReference: uploadedFile.webUrl ?? `${binding.courseId}/${binding.assignmentId}/${submission.id}`
+    externalReference: reportUrl ?? `${binding.courseId}/${binding.assignmentId}/${submission.id}`
   };
 };
 
@@ -696,12 +745,21 @@ export const turnInSubmissionToLms = async (
     throw new Error("This package is missing the LMS course or assignment reference.");
   }
 
-  const tokens = await signInStudent(binding, parentWindow);
+  const accessToken = options.studentAccessToken ?? (options.allowInteractiveSignIn === false
+    ? null : (await signInStudent(binding, parentWindow)).accessToken);
+  if (!accessToken) throw new Error("Student sign-in must finish before the exam starts. The result is saved; lockdown has not been released.");
   const artifact = await buildSubmissionArtifact(parentWindow, exam, submission);
+  const recordings: SubmissionArtifact[] = [];
+  if (exam.mode === "app") exam.questions.forEach((q,index) => {
+    const src = submission.spokenAnswers?.[q.id];
+    if (q.spokenAnswer && src?.startsWith("data:audio/webm;base64,")) recordings.push({
+      fileName: `spoken-answer-${index + 1}.webm`, mimeType: "audio/webm", content: Buffer.from(src.slice(src.indexOf(",")+1),"base64")
+    });
+  });
 
   if (binding.provider === "google-classroom") {
-    return turnInGoogleClassroom(binding, tokens.accessToken, artifact, submission, options);
+    return turnInGoogleClassroom(binding, accessToken, artifact, submission, options, exam.mode === "link", recordings);
   }
 
-  return turnInMicrosoft365(binding, tokens.accessToken, artifact);
+  return turnInMicrosoft365(binding, accessToken, artifact, recordings);
 };

@@ -1,4 +1,11 @@
-export type ThemePreference = "light" | "dark" | "system";
+export type ThemePreference = "light" | "dark" | "system" | "ocean" | "forest" | "plum";
+export type GoogleAuthMode = "publisher-hosted" | "school-desktop";
+export const publisherGoogleConnection = {
+  clientId: "129421335486-b53jphtc37g3583b6d7oid2i0jmlejr1.apps.googleusercontent.com",
+  origin: "https://auth.whsdominica.com"
+} as const;
+export const usesPublisherGoogleConnection = (mode: GoogleAuthMode | undefined, clientId: string): boolean =>
+  mode === "publisher-hosted" || (!mode && (!clientId.trim() || clientId === publisherGoogleConnection.clientId));
 export type ExamMode = "app" | "link";
 export type DensityMode = "comfortable" | "compact";
 export type SecurityMode = "restricted-app" | "full-kiosk";
@@ -83,9 +90,25 @@ export interface MultipleChoiceQuestion {
   options: MultipleChoiceOption[];
   correctOptionId: string;
   flagged?: boolean;
+  listening?: { src: string; plays: number; speed: number };
+  spokenAnswer?: boolean;
 }
 
 export type Question = MultipleChoiceQuestion;
+
+export interface SharedExamMedia {
+  id: string;
+  name: string;
+  dataUrl: string;
+  questionIds: string[];
+}
+
+export interface ReadingPassage {
+  id: string;
+  title: string;
+  text: string;
+  questionIds: string[];
+}
 
 export interface LinkExamConfig {
   url: string;
@@ -104,6 +127,8 @@ export interface Exam {
   branding: SchoolBranding;
   appearance: ExamAppearance;
   questions: Question[];
+  sharedMedia?: SharedExamMedia[];
+  passages?: ReadingPassage[];
   linkConfig?: LinkExamConfig;
   createdAt: string;
   updatedAt: string;
@@ -121,7 +146,11 @@ export interface ExamResponse {
   flagged: boolean;
 }
 
+export interface AttemptProgress { session: ExamSession; questionIndex: number; }
+
 export interface ExamSession {
+  spokenAnswers?: Record<string, string>;
+  linkedTimeout?: "attempted" | "not-attempted";
   examId: string;
   candidate: Candidate;
   startedAt: string;
@@ -131,6 +160,8 @@ export interface ExamSession {
 }
 
 export interface SubmissionResult {
+  spokenAnswers?: Record<string, string>;
+  linkedTimeout?: "attempted" | "not-attempted";
   id: string;
   examId: string;
   examTitle: string;
@@ -180,6 +211,7 @@ export interface LmsConnection {
   status: LmsConnectionStatus;
   clientId: string;
   clientSecret?: string;
+  googleAuthMode?: GoogleAuthMode;
   tenantId?: string;
   authorizeUrl?: string;
   tokenUrl?: string;
@@ -228,6 +260,7 @@ export interface StudentLmsBinding {
   connectionId?: string;
   clientId: string;
   clientSecret?: string;
+  googleAuthMode?: GoogleAuthMode;
   tenantId?: string;
   scope: string;
   courseId: string;
@@ -242,6 +275,7 @@ export interface StudentLmsTurnInState {
   lastAttemptAt?: string;
   submittedAt?: string;
   externalReference?: string;
+  studentSubmissionId?: string;
   lastError?: string;
   gradeSyncStatus?: StudentLmsGradeSyncStatus;
   gradeSyncedAt?: string;
@@ -250,6 +284,7 @@ export interface StudentLmsTurnInState {
 }
 
 export interface GoogleIntegrationSettings {
+  authMode?: GoogleAuthMode;
   enabled: boolean;
   clientId: string;
   clientSecret?: string;
@@ -365,6 +400,7 @@ export interface StudentAccessPolicy {
 }
 
 export interface QuitUnlockPolicy {
+  pinVerifier?: { salt: string; digest: string };
   requireInvigilatorPin: boolean;
   allowRestartSession: boolean;
   askBeforeQuit: boolean;
@@ -418,6 +454,7 @@ export interface ExamConfigPackage {
 }
 
 export interface AppSettings {
+  allowDemonstrations?: boolean;
   adminUnlockPin: string;
   invigilatorUnlockPin: string;
   defaultTheme: ThemePreference;
@@ -429,6 +466,7 @@ export interface AppSettings {
 }
 
 export interface AppUpdateState {
+  channel?: "github" | "microsoft-store";
   status: AppUpdateStatus;
   currentVersion: string;
   availableVersion?: string;
@@ -453,6 +491,8 @@ export interface NativeLockdownEnvironment {
   helperPath?: string;
   servicePresent: boolean;
   serviceRunning: boolean;
+  agentResponding?: boolean;
+  coordinatorResponding?: boolean;
   lockdownCapable: boolean;
   featureLevel: NativeLockdownFeatureLevel;
   detail: string;
@@ -530,6 +570,10 @@ export interface SecurityOverview {
 }
 
 export interface AppStateSnapshot {
+  attemptProgress?: AttemptProgress;
+  activeSubmission?: SubmissionResult;
+  activeSession?: SessionStartRequest & { startedAt: string; securityHold?: string };
+  installedRole?: InstalledAppRole;
   exams: Exam[];
   configPackages: ExamConfigPackage[];
   submissions: SubmissionResult[];
@@ -589,6 +633,7 @@ export interface ImportPreview {
   sourceFileName: string;
   metadata: ImportedExamMetadata;
   questions: ImportedQuestionDraft[];
+  passages?: ReadingPassage[];
   issues: ParseIssue[];
   sourceText: string;
   extraction?: ImportExtractionInfo;
@@ -601,9 +646,11 @@ export interface NavigationGuard {
   mode: ExamMode;
 }
 
+export type HostedWebsiteAuthState = "signing-in" | "exam" | "blocked" | "provider-rejected";
+
 export interface ProtectedConfigPackageFile {
   format: "lockedscreen-config-package";
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   packageId: string;
   label: string;
   examTitle?: string;
@@ -619,6 +666,7 @@ export interface ProtectedConfigPackageFile {
 }
 
 export interface SessionStartRequest {
+  candidate?: Candidate;
   examId: string;
   packageId: string;
   mode: ExamMode;

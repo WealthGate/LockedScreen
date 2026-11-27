@@ -11,17 +11,30 @@ const bundledWorkspacePackages = [
   "@lockedscreen/ui"
 ];
 
+const edition = process.env.LOCKEDSCREEN_EDITION ?? "selectable";
+if (process.env.LOCKEDSCREEN_GOOGLE_OAUTH_FILE) {
+  throw new Error("Do not bundle publisher Google OAuth credentials. Unset LOCKEDSCREEN_GOOGLE_OAUTH_FILE.");
+}
+if (!["student", "teacher", "selectable"].includes(edition)) {
+  throw new Error("Invalid LOCKEDSCREEN_EDITION.");
+}
 const alias = {
   "@lockedscreen/shared-types": resolve(__dirname, "../../packages/shared-types/src"),
   "@lockedscreen/storage": resolve(__dirname, "../../packages/storage/src"),
-  "@lockedscreen/parser": resolve(__dirname, "../../packages/parser/src"),
+  "@lockedscreen/parser": edition === "student"
+    ? resolve(__dirname, "src/main/student-parser.ts")
+    : resolve(__dirname, "../../packages/parser/src"),
   "@lockedscreen/exam-engine": resolve(__dirname, "../../packages/exam-engine/src"),
   "@lockedscreen/ui": resolve(__dirname, "../../packages/ui/src")
 };
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: bundledWorkspacePackages })],
+    define: {
+      __LOCKEDSCREEN_EDITION__: JSON.stringify(edition),
+      __LOCKEDSCREEN_STORE_PRODUCT_ID__: JSON.stringify(process.env.LOCKEDSCREEN_STORE_PRODUCT_ID ?? "9NRCCBKRLXBJ")
+    },
+    plugins: [externalizeDepsPlugin({ exclude: bundledWorkspacePackages, include: ["@napi-rs/canvas", "pdfjs-dist", "tesseract.js", "mammoth"] })],
     resolve: { alias }
   },
   preload: {

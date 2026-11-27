@@ -1,4 +1,5 @@
 import type { GoogleIntegrationSettings, LmsConnectionStatus } from "@lockedscreen/shared-types";
+import { publisherGoogleConnection, usesPublisherGoogleConnection } from "@lockedscreen/shared-types";
 
 export const googleClassroomDesktopOAuth = {
   authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -20,8 +21,9 @@ export const defaultGoogleClassroomScopes = [
 ] as const;
 
 export const createDefaultGoogleIntegrationSettings = (): GoogleIntegrationSettings => ({
-  enabled: false,
-  clientId: "",
+  enabled: true,
+  authMode: "publisher-hosted",
+  clientId: publisherGoogleConnection.clientId,
   clientSecret: "",
   requestedScopes: [...defaultGoogleClassroomScopes],
   connectionStatus: "disconnected",
@@ -41,9 +43,10 @@ export const normalizeGoogleIntegrationSettings = (
   return {
     ...createDefaultGoogleIntegrationSettings(),
     ...(settings ?? {}),
-    enabled: settings?.enabled === true,
-    clientId: settings?.clientId?.trim() ?? "",
-    clientSecret: settings?.clientSecret?.trim() ?? "",
+    enabled: settings?.enabled ?? true,
+    authMode: usesPublisherGoogleConnection(settings?.authMode, settings?.clientId ?? "") ? "publisher-hosted" : "school-desktop",
+    clientId: usesPublisherGoogleConnection(settings?.authMode, settings?.clientId ?? "") ? publisherGoogleConnection.clientId : settings?.clientId?.trim() ?? "",
+    clientSecret: usesPublisherGoogleConnection(settings?.authMode, settings?.clientId ?? "") ? "" : settings?.clientSecret?.trim() ?? "",
     requestedScopes: Array.from(new Set(requestedScopes)),
     connectionStatus: normalizeConnectionStatus(settings?.connectionStatus),
     accountEmail: settings?.accountEmail?.trim() ?? "",
@@ -68,7 +71,7 @@ export const validateGoogleIntegrationSettings = (settings: GoogleIntegrationSet
     return;
   }
 
-  if (!normalized.clientId) {
+  if (normalized.authMode !== "publisher-hosted" && !normalized.clientId) {
     throw new Error("Google Classroom is not configured yet. Ask an admin to add the Google desktop app client ID in the Admin Console.");
   }
 

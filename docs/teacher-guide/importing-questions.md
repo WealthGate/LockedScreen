@@ -22,6 +22,12 @@ Scanned PDFs and image files are read with OCR. OCR works best when the scan is 
 
 ## Supported Formats
 
+### Comprehension passages
+
+Download the sample template in **Teacher → Import** for a complete two-question reading exercise. Start a group with `[PASSAGE]` on its own line. Give the passage a title on the next line, then type or paste the paragraphs. Put `[QUESTIONS]` on its own line, add the questions in classic or tagged format, and finish with `[/PASSAGE]`. Repeat for another passage. Questions outside these groups remain independent. Check the passages, question numbers and answer keys in the import review.
+
+In **Create Exam → Comprehension passages**, teachers can also write a passage directly, create questions for it or assign existing questions by number. Each assigned question displays the passage above the prompt. Students can refer back to it while choosing an answer. Passages travel inside exported exam packages.
+
 ### 1. Tagged Format
 
 This is the most reliable format for bulk imports.

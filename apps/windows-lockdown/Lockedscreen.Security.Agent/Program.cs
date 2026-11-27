@@ -56,11 +56,14 @@ internal static class Program
         using var stopSignal = new EventWaitHandle(false, EventResetMode.ManualReset, "Local\\LockedscreenSecurityAgentStop");
         stopSignal.Reset();
 
-        AgentState.Write(policy);
         AgentLog.WriteLine($"agent-run session={policy.SessionId}");
-        using var context = new LockdownAgentContext(policy, stopSignal);
-        Application.Run(context);
-        AgentState.Clear();
+        try
+        {
+            using var context = new LockdownAgentContext(policy, stopSignal);
+            AgentState.Write(policy, context.KeyboardBlockingReady);
+            Application.Run(context);
+        }
+        finally { AgentState.Clear(); }
         AgentLog.WriteLine($"agent-exit session={policy.SessionId}");
         return 0;
     }

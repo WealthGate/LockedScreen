@@ -1,0 +1,20 @@
+{
+  "name": "@lockedscreen/google-oauth-service",
+  "version": "0.6.64",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build-oauth-service.mjs",
+    "test": "node --test test/*.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "marked": "18.2.1",
+    "oauth4webapi": "3.8.8"
+  },
+  "devDependencies": {
+    "@napi-rs/keyring": "^1.3.0",
+    "sql.js": "1.16.0",
+    "wrangler": "4.164.0"
+  }
+}

@@ -6,7 +6,8 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
   { className, ...props },
   ref
 ) {
-  return (
+  const [visible, setVisible] = React.useState(false);
+  const input = (
     <input
       ref={ref}
       className={cn(
@@ -14,6 +15,12 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
         className
       )}
       {...props}
+      type={props.type === "password" && visible ? "text" : props.type}
     />
   );
+  if (props.type !== "password") return input;
+  return <span className="flex items-center gap-1">{input}
+    <button type="button" className="rounded-lg border px-2 py-1 text-xs" aria-label={visible ? "Hide password" : "Show password"}
+      aria-pressed={visible} onClick={() => setVisible(value => !value)}>{visible ? "Hide" : "Show"}</button>
+  </span>;
 });

@@ -10,14 +10,19 @@ LOCKEDSCREEN is a local-first, Windows-first exam application for schools. It su
 
 ## What To Install
 
-Windows packaging currently produces two main deliverables:
+On [GitHub Releases](https://github.com/WealthGate/LockedScreen/releases), look for
+`LockedScreen-Setup-<version>-x64.exe` starting with 0.6.57. This small setup
+shows the download sizes before downloading anything:
 
-- `Lockedscreen-<version>-x64.exe`
-  Standard Windows installer for most users.
-- `Lockedscreen-Portable-<version>.exe`
-  Portable build that can be run without a traditional install.
+- **Student:** take exams from teacher-sent `.lscp` files. No authoring tools or OCR.
+- **Teacher / School:** create, administer, and take exams.
 
-For students and staff, prefer the standard installer unless you specifically need portable distribution.
+One setup downloads only the selected payload. After installation, updates
+keep the chosen role. Re-export old exam packages with an updated Teacher
+installation to include PIN-authorized Student exit.
+
+See the [Google Classroom quick start](docs/teacher-guide/classroom-quick-start.md)
+and [Windows release and Store instructions](docs/windows-setup-release.md).
 
 ## How To Use The App
 

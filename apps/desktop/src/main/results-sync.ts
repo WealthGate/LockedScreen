@@ -40,6 +40,14 @@ const buildHeaders = (destination: ResultDestination): Record<string, string> =>
  * service. That service owns its Google authorization storage and writes
  * draftGrade/assignedGrade to Classroom server-side.
  */
+const classroomSubmissionReference = (submission: SubmissionResult): string | undefined => {
+  const state = submission.studentLmsTurnIn;
+  if (state?.studentSubmissionId) return state.studentSubmissionId;
+  const reference = state?.externalReference;
+  const legacyParts = reference && !reference.includes("://") ? reference.split("/") : [];
+  return legacyParts.length === 3 ? legacyParts[2] : undefined;
+};
+
 const buildServerGradeSyncPayload = (destination: ResultDestination, exam: Exam, submission: SubmissionResult) => ({
   provider: destination.type,
   schema: "lockedscreen.google-classroom.grade-sync.v1",
@@ -60,7 +68,7 @@ const buildServerGradeSyncPayload = (destination: ResultDestination, exam: Exam,
     courseWorkId: destination.assignmentId || exam.id,
     lockedscreenExamId: exam.id,
     teacherConfiguredClassName: destination.className || exam.className,
-    studentSubmissionId: submission.studentLmsTurnIn?.externalReference
+    studentSubmissionId: classroomSubmissionReference(submission)
   },
   exam: {
     id: exam.id,
@@ -341,6 +349,10 @@ export const syncSubmissionToDestination = async (
 
   if (!destinationMatchesExam(destination, exam)) {
     return createDisabledSyncState(destination, "Destination does not match this exam or class.");
+  }
+
+  if (exam.mode === "link") {
+    return createDisabledSyncState(destination, "The form provider manages this exam's answers and grade. A local session record is not a scored result.");
   }
 
   if (!destination.endpointUrl.trim()) {

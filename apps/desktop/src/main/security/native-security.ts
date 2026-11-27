@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 import type { ExamConfigPackage, SecurityProfile, SessionStartRequest } from "@lockedscreen/shared-types";
 
@@ -18,6 +19,7 @@ interface NativeCompanionResponse {
 
 interface AgentStatusResponse {
   running: boolean;
+  keyboardBlockingReady?: boolean;
   sessionId?: string;
   startedAt?: string;
   processId?: number;
@@ -46,7 +48,7 @@ const candidateClientPaths = (): string[] => [
     "Lockedscreen.Security.Client",
     "bin",
     "Release",
-    "net8.0-windows",
+    "net10.0-windows",
     "Lockedscreen.Security.Client.exe"
   ),
   join(
@@ -54,7 +56,7 @@ const candidateClientPaths = (): string[] => [
     "Lockedscreen.Security.Client",
     "bin",
     "Debug",
-    "net8.0-windows",
+    "net10.0-windows",
     "Lockedscreen.Security.Client.exe"
   )
 ];
@@ -69,7 +71,7 @@ const candidateServicePaths = (): string[] => [
     "Lockedscreen.Security.Service",
     "bin",
     "Release",
-    "net8.0-windows",
+    "net10.0-windows",
     "Lockedscreen.Security.Service.exe"
   ),
   join(
@@ -77,7 +79,7 @@ const candidateServicePaths = (): string[] => [
     "Lockedscreen.Security.Service",
     "bin",
     "Debug",
-    "net8.0-windows",
+    "net10.0-windows",
     "Lockedscreen.Security.Service.exe"
   )
 ];
@@ -92,7 +94,7 @@ const candidateAgentPaths = (): string[] => [
     "Lockedscreen.Security.Agent",
     "bin",
     "Release",
-    "net8.0-windows",
+    "net10.0-windows",
     "Lockedscreen.Security.Agent.exe"
   ),
   join(
@@ -100,7 +102,7 @@ const candidateAgentPaths = (): string[] => [
     "Lockedscreen.Security.Agent",
     "bin",
     "Debug",
-    "net8.0-windows",
+    "net10.0-windows",
     "Lockedscreen.Security.Agent.exe"
   )
 ];
@@ -155,7 +157,7 @@ const runAgent = async (args: string[]): Promise<{ stdout: string; stderr: strin
       clearTimeout(timeout);
       reject(error);
     });
-    child.on("exit", (code) => {
+    child.on("close", (code) => {
       if (settled) {
         return;
       }
@@ -210,7 +212,7 @@ const runClient = async (args: string[]): Promise<NativeCompanionResponse> => {
       reject(error);
     });
 
-    child.on("exit", (code) => {
+    child.on("close", (code) => {
       if (settled) {
         return;
       }
@@ -243,7 +245,7 @@ const ensureCompanionDaemon = async (): Promise<void> => {
 
   const servicePath = locateExecutable(candidateServicePaths());
   if (!servicePath) {
-    return;
+    throw new Error("Native companion coordinator executable was not found.");
   }
 
   const child = spawn(servicePath, ["serve"], {
@@ -251,10 +253,13 @@ const ensureCompanionDaemon = async (): Promise<void> => {
     detached: true,
     stdio: "ignore"
   });
+  let launchError: Error | null = null;
+  child.on("error", (error) => { launchError = error; });
   child.unref();
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     await wait(300);
+    if (launchError) { throw launchError; }
     try {
       const status = await runClient(["status"]);
       if (status.ok) {
@@ -264,13 +269,57 @@ const ensureCompanionDaemon = async (): Promise<void> => {
       // Retry a few times before giving up.
     }
   }
+  throw new Error("Native companion coordinator did not respond after launch.");
 };
 
-const buildAgentPolicy = (request: SessionStartRequest, configPackage: ExamConfigPackage): string =>
+export interface NativeReadiness {
+  ready: boolean;
+  helperPath?: string;
+  agentPresent: boolean;
+  coordinatorPresent: boolean;
+  agentResponding: boolean;
+  coordinatorResponding: boolean;
+  agentRunning?: boolean;
+  detail: string;
+}
+
+// Status commands do not enable keyboard hooks, process restrictions or desktop switching.
+export const probeNativeReadiness = async (): Promise<NativeReadiness> => {
+  const helperPath = locateExecutable(candidateClientPaths()) ?? undefined;
+  const result: NativeReadiness = {
+    ready: false, helperPath,
+    agentPresent: Boolean(locateExecutable(candidateAgentPaths())),
+    coordinatorPresent: Boolean(locateExecutable(candidateServicePaths())),
+    agentResponding: false, coordinatorResponding: false,
+    detail: "Native helper files are incomplete."
+  };
+  if (!helperPath || !result.agentPresent || !result.coordinatorPresent) { return result; }
+  try {
+    const status = await runAgent(["status"]);
+    if (status.code !== 0) { throw new Error(status.stderr.trim() || "Agent status failed."); }
+    const agent = JSON.parse(status.stdout) as AgentStatusResponse;
+    if (typeof agent.running !== "boolean") { throw new Error("Agent status response is invalid."); }
+    result.agentResponding = true;
+    result.agentRunning = agent.running;
+    await ensureCompanionDaemon();
+    const companion = await runClient(["status"]);
+    if (!companion.ok || typeof companion.status?.sessionActive !== "boolean") {
+      throw new Error("Companion status response is invalid.");
+    }
+    result.coordinatorResponding = true;
+    result.ready = true;
+    result.detail = "Native agent and companion status checks passed. Live lockdown and invigilator exit still require a supervised test.";
+  } catch (error) {
+    result.detail = `Native helper check failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return result;
+};
+
+const buildAgentPolicy = (sessionId: string, configPackage: ExamConfigPackage): string =>
   Buffer.from(
     JSON.stringify({
-      sessionId: `${request.examId}:${request.packageId}:${Date.now()}`,
-      hideTaskbar: configPackage.securityMode === "full-kiosk",
+      sessionId,
+      hideTaskbar: true,
       blockSystemKeys: true,
       enforceProcesses: configPackage.processPolicy.enabled,
       disallowedProcessNames: configPackage.processPolicy.disallowedProcessNames,
@@ -279,10 +328,10 @@ const buildAgentPolicy = (request: SessionStartRequest, configPackage: ExamConfi
     "utf-8"
   ).toString("base64");
 
-const buildAlternateDesktopPolicy = (request: AlternateDesktopLaunchRequest, configPackage: ExamConfigPackage): string =>
+const buildAlternateDesktopPolicy = (sessionId: string, configPackage: ExamConfigPackage): string =>
   Buffer.from(
     JSON.stringify({
-      sessionId: `${request.examId}:${request.packageId}:${Date.now()}`,
+      sessionId,
       hideTaskbar: false,
       blockSystemKeys: true,
       enforceProcesses: configPackage.processPolicy.enabled,
@@ -295,7 +344,7 @@ const buildAlternateDesktopPolicy = (request: AlternateDesktopLaunchRequest, con
 const buildShellArgsPayload = (args: string[]): string =>
   Buffer.from(JSON.stringify(args), "utf-8").toString("base64");
 
-const waitForAgentRunning = async (attempts: number, delayMs: number): Promise<AgentStatusResponse> => {
+const waitForAgentRunning = async (attempts: number, delayMs: number, expectedSessionId: string): Promise<AgentStatusResponse> => {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -311,7 +360,7 @@ const waitForAgentRunning = async (attempts: number, delayMs: number): Promise<A
       }
 
       const parsed = JSON.parse(status.stdout) as AgentStatusResponse;
-      if (parsed.running) {
+      if (parsed.running && parsed.keyboardBlockingReady && parsed.sessionId === expectedSessionId) {
         return parsed;
       }
 
@@ -324,6 +373,22 @@ const waitForAgentRunning = async (attempts: number, delayMs: number): Promise<A
   throw lastError ?? new Error("Unable to verify the native lockdown agent state.");
 };
 
+const waitForAgentStopped = async (): Promise<void> => {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const status = await runAgent(["status"]);
+    if (status.code !== 0) throw new Error("Could not check the previous native lockdown agent.");
+    if (!(JSON.parse(status.stdout) as AgentStatusResponse).running) return;
+    await wait(250);
+  }
+  throw new Error("Previous native lockdown is still stopping. Wait before starting another exam.");
+};
+
+export const verifyHostedNativeSession = async (request: SessionStartRequest, sessionId: string | null): Promise<void> => {
+  if (!sessionId?.startsWith(`${request.examId}:${request.packageId}:`)) throw new Error("Native exam host identity is missing.");
+  await waitForAgentRunning(16, 250, sessionId);
+  activeAgentSessionId = sessionId;
+};
+
 const ensureLockdownAgent = async (
   request: SessionStartRequest,
   configPackage: ExamConfigPackage,
@@ -334,22 +399,27 @@ const ensureLockdownAgent = async (
     throw new Error(stopResult.stderr.trim());
   }
 
-  await wait(200);
+  await waitForAgentStopped();
 
   const agentPath = locateExecutable(candidateAgentPaths());
   if (!agentPath) {
     throw new Error("Native Windows lockdown agent executable was not found.");
   }
 
-  const policyBase64 = buildAgentPolicy(request, configPackage);
+  const sessionId = `${request.examId}:${request.packageId}:${randomUUID()}`;
+  const policyBase64 = buildAgentPolicy(sessionId, configPackage);
   const child = spawn(agentPath, ["run", policyBase64], {
     windowsHide: true,
     detached: true,
     stdio: "ignore"
   });
+  let launchError: Error | null = null;
+  child.on("error", (error) => { launchError = error; });
   child.unref();
 
-  const parsed = await waitForAgentRunning(8, 250);
+  const parsed = await waitForAgentRunning(16, 250, sessionId);
+  if (launchError) { throw launchError; }
+  activeAgentSessionId = sessionId;
 
   await recordSecurityEvent(
     "kiosk",
@@ -368,20 +438,31 @@ export const beginNativeLockdownSession = async (
   configPackage: ExamConfigPackage,
   recordSecurityEvent: SecurityEventRecorder
 ): Promise<void> => {
-  await ensureCompanionDaemon();
-  await ensureLockdownAgent(request, configPackage, recordSecurityEvent);
-  const response = await runClient(["begin-session", request.examId, request.packageId, request.mode]);
-  if (!response.ok) {
-    throw new Error(response.message ?? "Native lockdown companion rejected the session start request.");
+  try {
+    await ensureCompanionDaemon();
+    await ensureLockdownAgent(request, configPackage, recordSecurityEvent);
+    const response = await runClient(["begin-session", request.examId, request.packageId, request.mode]);
+    if (!response.ok) {
+      throw new Error(response.message ?? "Native lockdown companion rejected the session start request.");
+    }
+    await recordSecurityEvent("kiosk", "info", `Activated native Windows lockdown companion for "${configPackage.label}".`, response.status?.serviceMode ?? "active-session");
+  } catch (error) {
+    await endNativeLockdownSession(recordSecurityEvent);
+    throw error;
   }
-
-  await recordSecurityEvent(
-    "kiosk",
-    "info",
-    `Activated native Windows lockdown companion for "${configPackage.label}".`,
-    response.status?.serviceMode ?? "active-session"
-  );
 };
+
+let alternateDesktopHostCount = 0;
+let activeAgentSessionId: string | null = null;
+export const checkActiveNativeSession = async (): Promise<void> => {
+  if (!activeAgentSessionId) throw new Error("Native keyboard protection is not attached to this exam.");
+  const status = await runAgent(["status"]);
+  const parsed = JSON.parse(status.stdout) as AgentStatusResponse;
+  if (status.code !== 0 || !parsed.running || !parsed.keyboardBlockingReady || parsed.sessionId !== activeAgentSessionId) {
+    throw new Error("Native keyboard protection stopped responding. The exam is paused; ask the invigilator to release it.");
+  }
+};
+export const hasAlternateDesktopHost = (): boolean => alternateDesktopHostCount > 0;
 
 export const launchAlternateDesktopExamShell = async (
   request: AlternateDesktopLaunchRequest,
@@ -395,18 +476,26 @@ export const launchAlternateDesktopExamShell = async (
     throw new Error("Native Windows lockdown agent executable was not found.");
   }
 
-  const policyBase64 = buildAlternateDesktopPolicy(request, configPackage);
-  const shellArgsBase64 = buildShellArgsPayload(request.shellArgs);
+  await runAgent(["stop"]);
+  await waitForAgentStopped();
+  const sessionId = `${request.examId}:${request.packageId}:${randomUUID()}`;
+  const policyBase64 = buildAlternateDesktopPolicy(sessionId, configPackage);
+  const shellArgsBase64 = buildShellArgsPayload([...request.shellArgs, `--lockedscreen-native-session=${sessionId}`]);
 
   const host = spawn(agentPath, ["host-shell", policyBase64, request.shellExecutablePath, shellArgsBase64], {
     windowsHide: true,
     detached: true,
     stdio: "ignore"
   });
+  alternateDesktopHostCount++;
+  host.once("close", () => { alternateDesktopHostCount--; });
+  let launchError: Error | null = null;
+  host.on("error", (error) => { launchError = error; });
   host.unref();
 
   try {
-    await waitForAgentRunning(16, 250);
+    await waitForAgentRunning(16, 250, sessionId);
+    if (launchError) { throw launchError; }
 
     const response = await runClient(["begin-session", request.examId, request.packageId, request.examMode]);
     if (!response.ok) {
@@ -426,11 +515,15 @@ export const launchAlternateDesktopExamShell = async (
 };
 
 export const endNativeLockdownSession = async (recordSecurityEvent: SecurityEventRecorder): Promise<void> => {
+  activeAgentSessionId = null;
+  const record: SecurityEventRecorder = async (...args) => {
+    void Promise.resolve().then(() => recordSecurityEvent(...args)).catch((error) => console.warn("Native exit audit failed.", error));
+  };
   let released = false;
   try {
     const stopResult = await runAgent(["stop"]);
     if (stopResult.code !== 0) {
-      await recordSecurityEvent(
+      await record(
         "kiosk",
         "warning",
         "Native Windows lockdown agent stop returned a non-zero status.",
@@ -438,7 +531,7 @@ export const endNativeLockdownSession = async (recordSecurityEvent: SecurityEven
       );
     }
   } catch (error) {
-    await recordSecurityEvent(
+    await record(
       "kiosk",
       "warning",
       "Native Windows lockdown agent stop did not confirm before release continued.",
@@ -450,10 +543,10 @@ export const endNativeLockdownSession = async (recordSecurityEvent: SecurityEven
     const response = await runClient(["end-session", "Electron session ended"]);
     if (response.ok) {
       released = true;
-      await recordSecurityEvent("kiosk", "info", "Released native Windows lockdown companion.", response.message);
+      await record("kiosk", "info", "Released native Windows lockdown companion.", response.message);
     }
   } catch (error) {
-    await recordSecurityEvent(
+    await record(
       "kiosk",
       released ? "info" : "warning",
       "Native Windows lockdown companion release did not confirm before app cleanup continued.",

@@ -1,0 +1,23 @@
+Title: Everyday science
+Subject: Science
+Class: Grade 7
+Duration: 25 minutes
+Instructions: Choose one answer for each question.
+
+Q1. Which instrument measures temperature?
+A. Ruler
+B. Thermometer
+C. Balance
+ANS: B
+
+Q2. Which material dissolves in water?
+A. Sand
+B. Gravel
+C. Salt
+ANS: C
+
+Q3. What happens to liquid water when it freezes?
+A. It becomes a solid.
+B. It becomes a gas.
+C. It stays liquid.
+ANS: A
