@@ -215,7 +215,10 @@ test.after(async () => { await rm(directory, { recursive: true, force: true }); 
 test("one online attempt per signed-in account and package across devices",async()=>{
   const service=fixture();
   const original=globalThis.fetch;
-  globalThis.fetch=async()=>Response.json({sub:"verified-user",name:"Test Student",email:"test@example.com",email_verified:true});
+  globalThis.fetch=async(_url, options)=>{
+    assert.equal(options.redirect, "manual");
+    return Response.json({sub:"verified-user",name:"Test Student",email:"test@example.com",email_verified:true});
+  };
   const request=(path,body)=>service.fetch(path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer synthetic"},body:JSON.stringify(body)});
   const claim=(lease,packageId="package")=>request("/v1/attempt/claim",{provider:"google",packageId,lease});
   try {

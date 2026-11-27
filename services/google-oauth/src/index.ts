@@ -101,7 +101,7 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
       if (url.pathname === "/health" && request.method === "GET") {
         await env.DB.prepare("SELECT id FROM oauth_flows LIMIT 1").first();
         await env.DB.prepare("SELECT package_key FROM exam_attempts LIMIT 1").first();
-        return json({ status: "ready", version: "0.6.73", studentExamSessions: true, crossDeviceAttempts: true });
+        return json({ status: "ready", version: "0.6.74", studentExamSessions: true, crossDeviceAttempts: true });
       }
       const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
       const ipKey = await hash(`${env.TOKEN_ENCRYPTION_KEY}:${ip}`);
@@ -126,7 +126,7 @@ export const createOAuthWorker = (google: GoogleProvider = googleProvider) => ({
         if (!bearer?.startsWith("Bearer ")) fail(401, "sign_in", "Sign in with your school account.");
         const google = body.provider === "google";
         const user = await fetch(google ? "https://openidconnect.googleapis.com/v1/userinfo" : "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
-          { headers: { Authorization: bearer }, redirect: "error", signal: AbortSignal.timeout(15000) });
+          { headers: { Authorization: bearer }, redirect: "manual", signal: AbortSignal.timeout(15000) });
         if (!user.ok) fail(401, "sign_in", "Your school account could not be verified. Sign in again.");
         const profile = await user.json() as Record<string, unknown>;
         const subject = google ? profile.sub : profile.id;

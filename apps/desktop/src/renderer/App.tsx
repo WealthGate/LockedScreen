@@ -1126,7 +1126,7 @@ const StudentPortalPage = ({ studentOnly = false }: { studentOnly?: boolean }) =
         <Card className="space-y-4 bg-gradient-to-b from-white to-teal-50 text-slate-950 dark:text-slate-950">
           <CardTitle className="text-slate-950 dark:text-slate-950">Before you start</CardTitle>
           <div className="space-y-3 text-sm text-slate-950">
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">Enter your name, candidate ID, and class exactly as assigned by your teacher or school.</div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">Sign in with your school account. If your teacher assigned the exam to a class, enter that class name.</div>
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950">Only matching exams will appear. If you already completed one, it will be grayed out and locked.</div>
             {!isSecureSessionReady(snapshot) ? (
               <div className={`rounded-2xl border px-4 py-3 ${canUseTestingMode(snapshot) ? "border-amber-200 bg-amber-50 text-amber-950" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
