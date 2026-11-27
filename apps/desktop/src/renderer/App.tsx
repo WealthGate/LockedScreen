@@ -1065,6 +1065,13 @@ const StudentPortalPage = ({ studentOnly = false, themeControl }: { studentOnly?
     return true;
   };
 
+  const selectedPolicy = selectedExam && getConfigPackageForExam(snapshot, selectedExam.id)?.studentAccessPolicy;
+  const classOptions = [...new Set((selectedPolicy?.assignedClassNames ?? []).map(name => name.trim()).filter(Boolean))];
+  const accountAssigned = selectedPolicy?.assignedCandidateIds.some(id =>
+    [normalizedCandidateId, account?.subject].some(value => value?.trim().toLowerCase() === id.trim().toLowerCase())
+  );
+  const needsClass = classOptions.length > 0 && !accountAssigned && !candidateClassName;
+
   const assignedExamCards = !snapshot || !identifiedCandidate || account?.packageId !== packageId
     ? []
     : snapshot.exams
@@ -1170,7 +1177,14 @@ const StudentPortalPage = ({ studentOnly = false, themeControl }: { studentOnly?
           finally {setSigningIn(false);}
         }}>{signingIn ? "Signing in…" : account ? "Switch account" : "Sign in to this package"}</Button>}
         {account && <p>{account.name} · {account.id}</p>}
-        {account && <LabelledField label="Class"><Input value={candidateClassName} onChange={e=>setCandidateClassName(e.target.value)}/></LabelledField>}
+        {account && (classOptions.length ? (
+          <LabelledField label="Class">
+            <select aria-label="Class" className={selectClassName} value={candidateClassName} onChange={event => setCandidateClassName(event.target.value)}>
+              <option value="">Choose your class</option>
+              {classOptions.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </LabelledField>
+        ) : <LabelledField label="Class"><Input aria-label="Class" value={candidateClassName} onChange={e=>setCandidateClassName(e.target.value)}/></LabelledField>)}
       </Card>
 
       <section className="grid gap-4">
@@ -1181,8 +1195,8 @@ const StudentPortalPage = ({ studentOnly = false, themeControl }: { studentOnly?
           </Card>
         ) : assignedExamCards.length === 0 ? (
           <Card className="space-y-3">
-            <CardTitle>No assigned exams found</CardTitle>
-            <CardDescription>There are no active exams assigned to this student or class right now.</CardDescription>
+            <CardTitle>{needsClass ? "Choose your class to continue" : "No assigned exams found"}</CardTitle>
+            <CardDescription>{needsClass ? "Select your assigned class above to see the start requirements for this package." : "There are no active exams assigned to this student or class right now."}</CardDescription>
           </Card>
         ) : (
           assignedExamCards.map(({ exam, completedSubmission, policy, canStartNow }) => (
